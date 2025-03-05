@@ -1,0 +1,25 @@
+# This thing
+.DS_Store
+# This other thing
+MANIFEST
+
+# IDE rubbish
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea
+
+# Virtual environments and envvars
+.venv/
+.env
+
+# Node NPM
+node_modules/
+
+# Python rubbish
+__pycache__/
+
+data/*
+logs/
+
+database/
