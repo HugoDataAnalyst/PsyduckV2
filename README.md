@@ -20,3 +20,11 @@
 1. Run `docker compose up psyduckv2_db` to start the database container
 2. Run `docker compose up psyduckv2_pma` to start the phpmyadmin container
 3. Run `docker compose up psyduckv2_app` to start the app container
+
+## Development
+
+Database migrations are handled by Tortoise ORM.
+
+After making changes to the models, run the following command to apply the migrations:
+
+```tortoise-orm migrate```
