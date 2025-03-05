@@ -1,0 +1,65 @@
+services:
+  psyduckv2_db:
+    container_name: psyduckv2_db
+    image: mysql:8.0.35
+    restart: always
+    env_file:
+      - .env
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+    # Ports should be commented out in production.
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "-h", "127.0.0.1", "-u", "${DB_USER}", "-p${DB_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  psyduckv2_pma:
+    container_name: psyduckv2_pma
+    image: phpmyadmin/phpmyadmin
+    restart: always
+    env_file:
+      - .env
+    environment:
+      PMA_HOST: psyduckv2_db
+      PMA_PORT: 3306
+      #PMA_PORT: ${DB_PORT}
+      # PMA_USER: ${DB_USER} # Force PMA to ask for user and password
+      # PMA_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - 3306:80
+    # Only expose if PMA_WEB_PORT is set
+    #  - "${PMA_WEB_PORT}:80"
+    depends_on:
+      psyduckv2_db:
+        condition: service_healthy  # Depends on the database being healthy
+
+  psyduckv2_app:
+    container_name: psyduckv2_app
+    build: .
+    restart: always
+    depends_on:
+      psyduckv2_db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_HOST: psyduckv2_db
+    #ports:
+    #  - "${WEB_PORT}:${WEB_PORT}"
+    volumes:
+      - ./data:/app/data
+
+
+networks:
+  default:
+    external:
+      name: psyduckv2_network

@@ -1,0 +1,38 @@
+############################################################
+## Global Dockerignore. THIS IS AN EXAMPLE FOR USING AS BP #
+############################################################
+
+### Important!!
+#  A good trick for very slim images is to just set
+#  .* on top of the .dockerignore file and then specify
+#  explicit exclusions to it by using !, like below:
+#  .dockerignore:
+#    .*
+#    !build/
+#    !build/public/
+
+# Don't add the .git onto your image, please:
+.git
+
+# This thing
+.DS_Store
+# This other thing
+MANIFEST
+
+# IDE rubbish
+.vscode
+.idea
+
+# Virtual environments and envvars
+.venv/
+.env
+
+# Node NPM
+node_modules/
+
+# Python rubbish
+__pycache__/
+
+
+data/
+database/
