@@ -7,7 +7,7 @@ from utils.logger import setup_logging, logger
 from my_redis.connect_redis import init_redis
 
 # Initialize logging
-setup_logging(AppConfig.LOG_LEVEL, {"file": AppConfig.LOG_FILE, "function": True})
+setup_logging(AppConfig.log_level, {"file": AppConfig.log_file, "function": True})
 
 async def apply_migrations():
     """Apply pending database migrations using Aerich before starting the app."""
