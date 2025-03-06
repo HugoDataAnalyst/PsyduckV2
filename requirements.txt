@@ -1,3 +1,6 @@
 tortoise-orm==0.24.2
 loguru==0.7.3
 mysql-connector-python==9.2.0
+dotenv==0.9.9
+aiomysql==0.2.0
+cryptography==44.0.2
