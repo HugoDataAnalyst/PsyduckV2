@@ -60,3 +60,4 @@ redis_url = f"redis://:{redis_encoded_password}@{redis_host}:{redis_server_port}
 
 #Log Level
 LOG_LEVEL = get_env_var("LOG_LEVEL", "INFO").upper()
+LOG_FILE = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
