@@ -1,17 +1,22 @@
 import asyncio
 import os
+import subprocess
 from sql.connect_db import init_db, close_db
-from utils.logger import setup_logging
 from loguru import logger
 
-# Initialize logging
-setup_logging("DEBUG", {"file": True, "function": True})
-
 async def apply_migrations():
-    """Apply any pending database migrations before starting the app."""
+    """Apply pending database migrations using Aerich before starting the app."""
     logger.info("Checking for pending migrations...")
-    os.system("tortoise-orm upgrade")  # Runs pending migrations
-    logger.success("Migrations applied!")
+    try:
+        result = subprocess.run(
+            ["aerich", "upgrade"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        logger.success(f"Migrations applied successfully! Output:\n{result.stdout}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Migration failed: {e.stderr}")
 
 async def main():
     await init_db()  # Initialize DB (Automatically creates tables if needed)
