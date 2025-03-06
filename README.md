@@ -14,6 +14,8 @@
 5. `python3 psyduckv2.py`
 
 > This option requires you to have a MySQL database running on your local/external machine and manually set the DB_HOST environment variable to the correct IP address.
+>
+> Change DB_PORT to 3307 if you are using the docker-compose setup and didn't touch the docker-compose.yml file.
 
 ## Docker stand alone container options:
 
@@ -23,8 +25,11 @@
 
 ## Development
 
-Database migrations are handled by Tortoise ORM.
+Database migrations are handled by Tortoise ORM with Aerich.
 
 After making changes to the models, run the following command to apply the migrations:
 
-```tortoise-orm migrate```
+```aerich migrate --name "name_your_migration"```
+
+> This command will create a new migration file in the migrations/models directory.
+> Make sure to commit the migration file to the repository.
