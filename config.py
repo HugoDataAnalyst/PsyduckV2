@@ -3,10 +3,10 @@ from typing import List, Optional
 import dotenv
 import sys
 from loguru import logger
+import urllib.parse
 # Read environment variables from .env file
 env_file = os.path.join(os.getcwd(), ".env")
 dotenv.load_dotenv(env_file, override=True)
-
 
 def get_env_var(name: str, default = None) -> Optional[str]:
     value = os.getenv(name, default)
@@ -41,8 +41,9 @@ def get_env_int(name: str, default = None) -> Optional[int]:
 # Database Settings
 db_host = get_env_var('DB_HOST')
 db_port = get_env_int('DB_PORT', 3306)
-db_name = get_env_var('DB_NAME', "chronos")
+db_name = get_env_var('DB_NAME', "PsyduckV2")
 db_user = get_env_var('DB_USER', "root")
+# Url encode the password to handle special characters
 db_password = get_env_var('DB_PASSWORD', "root_password")
 db_retry_connection = 5
 db_rest_betwen_connection = 5

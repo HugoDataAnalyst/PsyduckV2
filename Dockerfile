@@ -6,11 +6,18 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies required for MySQL client
-RUN apt-get update && apt-get install -y \
-    pkg-config \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    apt-transport-https \
+    ca-certificates \
+    software-properties-common \
+    gnupg \
     gcc \
-    default-libmysqlclient-dev \
- && rm -rf /var/lib/apt/lists/*
+    libffi-dev \
+    libicu67 \
+    libssl-dev \
+    libc-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory inside the container
 WORKDIR /app

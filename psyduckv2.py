@@ -1,7 +1,11 @@
 import asyncio
 import os
 from sql.connect_db import init_db, close_db
+from utils.logger import setup_logging
 from loguru import logger
+
+# Initialize logging
+setup_logging("DEBUG", {"file": True, "function": True})
 
 async def apply_migrations():
     """Apply any pending database migrations before starting the app."""
