@@ -2,7 +2,7 @@ import os
 from typing import List, Optional
 import dotenv
 import sys
-from loguru import logger
+from utils.logger import logger
 import urllib.parse
 # Read environment variables from .env file
 env_file = os.path.join(os.getcwd(), ".env")
@@ -57,3 +57,6 @@ redis_gui_port = get_env_int("REDIS_GUI_PORT", 8001)
 redis_db = get_env_int("REDIS_DB", 1)
 # Build Redis url connection
 redis_url = f"redis://:{redis_encoded_password}@{redis_host}:{redis_server_port}/{redis_db}"
+
+#Log Level
+LOG_LEVEL = get_env_var("LOG_LEVEL", "INFO").upper()

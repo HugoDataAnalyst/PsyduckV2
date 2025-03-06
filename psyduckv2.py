@@ -1,8 +1,12 @@
 import asyncio
 import os
 import subprocess
+import config as AppConfig
 from sql.connect_db import init_db, close_db
-from loguru import logger
+from utils.logger import setup_logging, logger
+
+# Initialize logging
+setup_logging(AppConfig.LOG_LEVEL, {"file": True, "function": True})
 
 async def apply_migrations():
     """Apply pending database migrations using Aerich before starting the app."""

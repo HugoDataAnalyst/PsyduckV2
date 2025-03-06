@@ -1,7 +1,7 @@
 from tortoise import Tortoise
 import config as AppConfig
 import asyncio
-from loguru import logger
+from utils.logger import logger
 
 db_config = {
     'connections': {
