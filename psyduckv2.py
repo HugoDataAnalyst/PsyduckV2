@@ -4,6 +4,7 @@ import subprocess
 import config as AppConfig
 from sql.connect_db import init_db, close_db
 from utils.logger import setup_logging, logger
+from my_redis.connect_redis import init_redis
 
 # Initialize logging
 setup_logging(AppConfig.LOG_LEVEL, {"file": AppConfig.LOG_FILE, "function": True})
@@ -25,6 +26,7 @@ async def apply_migrations():
 async def main():
     await init_db()  # Initialize DB (Automatically creates tables if needed)
     await apply_migrations()  # Apply any new migrations
+    await init_redis()  # Initialize Redis connection
     logger.info("Psyduck is ready to process data!")
 
     try:
