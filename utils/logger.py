@@ -1,4 +1,5 @@
 from loguru import logger
+from datetime import datetime
 from typing import TypedDict, Optional
 
 class LoggingOptions(TypedDict, total=False):
@@ -40,3 +41,15 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
         ]
     )
 
+    # ✅ File Logging (If Enabled)
+    if file:
+        log_filename = f"logs/psyduck_{datetime.now().strftime('%Y-%m-%d')}.log"
+        logger.add(
+            log_filename,
+            rotation="10MB",  # Create a new log file every 10MB
+            retention=5,  # ✅ Keep only the last 5 log files
+            level=log_lvl,
+            format=log_fmt
+        )
+# ✅ Make logger globally available
+__all__ = ["logger", "setup_logging"]
