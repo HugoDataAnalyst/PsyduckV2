@@ -58,6 +58,13 @@ redis_db = get_env_int("REDIS_DB", 1)
 # Build Redis url connection
 redis_url = f"redis://:{redis_encoded_password}@{redis_host}:{redis_server_port}/{redis_db}"
 
-#Log Level
-LOG_LEVEL = get_env_var("LOG_LEVEL", "INFO").upper()
-LOG_FILE = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
+# Log Level
+log_level = get_env_var("LOG_LEVEL", "INFO").upper()
+log_file = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
+
+# Koji
+koji_bearer_token = get_env_var("KOJI_TOKEN")
+koji_ip = get_env_var("KOJI_IP", "127.0.0.1")
+koji_port = get_env_int("KOJI_PORT", 8080)
+koji_project_name = get_env_var("KOJI_PROJECT_NAME")
+koji_geofence_api_url = f"http://{koji_ip}:{koji_port}/api/v1/geofence/feature-collection/{koji_project_name}"
