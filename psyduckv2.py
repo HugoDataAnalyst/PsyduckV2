@@ -4,10 +4,13 @@ import subprocess
 import config as AppConfig
 from sql.connect_db import init_db, close_db
 from utils.logger import setup_logging, logger
-from my_redis.connect_redis import init_redis
+from my_redis.connect_redis import RedisManager
 
 # Initialize logging
 setup_logging(AppConfig.log_level, {"file": AppConfig.log_file, "function": True})
+
+# Initialize Redis connection
+redis_manager = RedisManager()
 
 async def apply_migrations():
     """Apply pending database migrations using Aerich before starting the app."""
@@ -26,7 +29,8 @@ async def apply_migrations():
 async def main():
     await init_db()  # Initialize DB (Automatically creates tables if needed)
     await apply_migrations()  # Apply any new migrations
-    await init_redis()  # Initialize Redis connection
+
+    await redis_manager.init_redis()  # Initialize Redis connection
     logger.info("Psyduck is ready to process data!")
 
     try:
@@ -36,6 +40,7 @@ async def main():
         logger.info("Shutting down...")
     finally:
         await close_db()
+        await redis_manager.close_redis()
 
 if __name__ == "__main__":
     asyncio.run(main())
