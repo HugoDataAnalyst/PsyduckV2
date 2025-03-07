@@ -11,7 +11,7 @@ dotenv.load_dotenv(env_file, override=True)
 def get_env_var(name: str, default = None) -> Optional[str]:
     value = os.getenv(name, default)
     if value is None or value == '':
-        logger.warning(f"Missing environment variable: {name}. Using default: {default}")
+        logger.warning(f"⚠️ Missing environment variable: {name}. Using default: {default}")
         return default
     return value
 
@@ -21,7 +21,7 @@ def get_env_list(env_var_name: str, default = None) -> List[str]:
         default = []
     value = os.getenv(env_var_name, '')
     if not value:
-        logger.warning(f"Missing environment variable: {env_var_name}. Using default: {default}")
+        logger.warning(f"⚠️ Missing environment variable: {env_var_name}. Using default: {default}")
         return default
     return [item.strip() for item in value.split(',') if item.strip()]
 
@@ -29,12 +29,12 @@ def get_env_list(env_var_name: str, default = None) -> List[str]:
 def get_env_int(name: str, default = None) -> Optional[int]:
     value = os.getenv(name)
     if value is None:
-        logger.warning(f"Missing environment variable: {name}. Using default: {default}")
+        logger.warning(f"⚠️ Missing environment variable: {name}. Using default: {default}")
         return default
     try:
         return int(value)
     except ValueError:
-        logger.error(f"Invalid value for environment variable {name}: {value}. Using default: {default}")
+        logger.error(f"❌ Invalid value for environment variable {name}: {value}. Using default: {default}")
         return default
 
 
