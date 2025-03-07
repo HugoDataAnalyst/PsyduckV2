@@ -6,14 +6,21 @@ class RedisManager:
     """Handles Redis connection, reconnection, and closure."""
     # Set class level attributes
     redis_url = AppConfig.redis_url
+    _instance = None # ✅ Singleton instance
 
-    def __init__(self):
-        """Initialiaze Redis client as None."""
-        self.redis_client = None
+    def __new__(cls):
+        """Ensures only one RedisManager instance is created (Singleton)."""
+        if cls._instance is None:
+            cls._instance = super(RedisManager, cls).__new__(cls)
+            cls._instance.redis_client = None  # Initialize connection as None
+        return cls._instance
 
     # Connect to Redis
     async def init_redis(self):
         """Initialize Redis connection and handle errors."""
+        if self.redis_client:  # ✅ Prevent reinitializing an active connection
+            return True
+
         try:
             logger.info("🔃 Connecting to Redis...")
             self.redis_client = await redis.from_url(self.redis_url, decode_responses=True)
@@ -27,7 +34,7 @@ class RedisManager:
         except Exception as e:
             logger.error(f"❌ Failed to connect to Redis: {e}")
             self.redis_client = None  # Prevent crashes if Redis is unavailable
-        return None
+        return False
 
     async def close_redis(self):
         """Close Redis connection."""
@@ -40,13 +47,20 @@ class RedisManager:
 
 
     async def check_redis_connection(self):
-        """Check if Redis connection is running. This is an utilitary function."""
-        if not self.redis_client:
-            logger.warning("⚠️ Redis connection lost. 🔃 Attempting to reconnect...")
-            result = await self.init_redis()
-            if result is None:
-                return False
+        """Check if Redis connection is running and attempt reconnection if necessary."""
+        try:
+            ping = await self.redis_client.ping()  # ✅ Await Redis ping check
+            if ping:
+                logger.debug("✅ Redis connection is active.")
+                return True
+        except Exception as e:
+            logger.warning(f"⚠️ Redis connection lost: {e}. 🔃 Attempting to reconnect...")
 
-        if self.redis_client is not None:
-            logger.debug("✅ Redis connection is active.")
+        # ❌ If ping fails, reconnect
+        result = await self.init_redis()
+        if result:
+            logger.success("✅ Redis connection restored.")
             return True
+        else:
+            return False
+
