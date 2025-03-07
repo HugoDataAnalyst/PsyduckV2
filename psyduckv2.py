@@ -14,7 +14,7 @@ redis_manager = RedisManager()
 
 async def apply_migrations():
     """Apply pending database migrations using Aerich before starting the app."""
-    logger.info("Checking for pending migrations...")
+    logger.info("🔃 Checking for pending migrations...")
     try:
         result = subprocess.run(
             ["aerich", "upgrade"],
@@ -22,22 +22,22 @@ async def apply_migrations():
             capture_output=True,
             text=True
         )
-        logger.success(f"Migrations applied successfully! Output:\n{result.stdout}")
+        logger.success(f"✅ Migrations applied successfully! Output:\n{result.stdout}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"Migration failed: {e.stderr}")
+        logger.error(f"❌ Migration failed: {e.stderr}")
 
 async def main():
     await init_db()  # Initialize DB (Automatically creates tables if needed)
     await apply_migrations()  # Apply any new migrations
 
     await redis_manager.init_redis()  # Initialize Redis connection
-    logger.info("Psyduck is ready to process data!")
+    logger.info("✅ Psyduck is ready to process data!")
 
     try:
         while True:
             await asyncio.sleep(1)
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        logger.info("🫣 Shutting down...")
     finally:
         await close_db()
         await redis_manager.close_redis()
