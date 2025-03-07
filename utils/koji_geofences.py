@@ -1,10 +1,11 @@
 import asyncio
 import json
 import httpx
+import redis
 import config as AppConfig
 from datetime import datetime, timedelta
 from utils.logger import logger
-from my_redis.connect_redis import redis_client
+from my_redis.connect_redis import RedisManager
 
 class KojiGeofences:
     """Koji Geofences class.
@@ -16,6 +17,7 @@ class KojiGeofences:
     expiry = 3600
     bearer_token = AppConfig.koji_bearer_token
     geofence_api_url = AppConfig.koji_geofence_api_url
+    redis_manager = RedisManager()
 
     def __init__(self, refresh_interval):
         """Instance-level refresh interval"""
@@ -29,44 +31,50 @@ class KojiGeofences:
             headers = {"Authorization": f"Bearer {cls.bearer_token}"}
             response = await client.get(cls.geofence_api_url, headers=headers)
             if response.status_code == 200:
-                return response.json().get("data", {}).get("features", [])
+                result = response.json().get("data", {}).get("features", [])
+                logger.debug(f"✅ Retrieved {len(result)} Koji Geofences.")
+                return result
             else:
                 # This needs to be improved to handle multi polygon error.
-                logger.error(f"Failed to fetch geofences. Status Code: {response.status_code}")
-                raise httpx.HTTPError(f"Failed to fetch geofences. Status Code: {response.status_code}")
+                logger.error(f"❌ Failed to fetch geofences. Status Code: {response.status_code}")
+                raise httpx.HTTPError(f"❌ Failed to fetch geofences. Status Code: {response.status_code}")
 
     @classmethod
     async def cache_koji_geofences(cls):
         """Fetch and cache Koji Geofences in Redis."""
-        geofences = await cls.get_koji_geofences()
-        if not redis_client:
-            logger.error("Redis is not connected.")
+        redis_status = await cls.redis_manager.check_redis_connection()
+        if not redis_status:
+            logger.error("❌ Redis is not connected. Cannot retrieve cached geofences.")
             return
+
+        geofences = await cls.get_koji_geofences()
         if geofences:
-            await redis_client.set(cls.geofence_key, json.dumps(geofences), cls.expiry)
-            logger.success(f"Cached {len(geofences)} Koji Geofences for {cls.expiry} seconds.")
+            await cls.redis_manager.redis_client.set(cls.geofence_key, json.dumps(geofences), cls.expiry)
+            logger.success(f"✅ Cached {len(geofences)} Koji Geofences for {cls.expiry} seconds.")
         else:
-            logger.warning("No geofences retrieved. Cache was not udpated")
+            logger.warning("❌ No geofences retrieved. Cache was not udpated")
             return
 
     @classmethod
     async def get_cached_geofences(cls):
         """Retrieve cached Koji Geofences from Redis"""
-        if not redis_client:
-            logger.error("Redis is not connected.")
-            return
-        cached_geofences = await redis_client.get(cls.geofence_key)
+        redis_status = await cls.redis_manager.check_redis_connection()
+        if not redis_status:
+            logger.error("❌ Redis is not connected. Cannot retrieve cached geofences.")
+            return None
+
+        cached_geofences = await cls.redis_manager.redis_client.get(cls.geofence_key)
         if cached_geofences:
             result = json.loads(cached_geofences)
-            logger.debug(f"Retrieved cached geofences: {result}")
+            logger.debug(f"✅ Retrieved cached geofences: {result}")
             return result
         elif cached_geofences is None:
-            logger.warning("No cached geofences found.")
+            logger.warning("⚠️ No cached geofences found.")
             re_cache_koji_geofences = await cls.cache_koji_geofences()
             if re_cache_koji_geofences:
-                cached_geofences = await redis_client.get(cls.geofence_key)
+                cached_geofences = await cls.redis_manager.redis_client.get(cls.geofence_key)
                 result = json.loads(cached_geofences)
-                logger.debug(f"Retrieved cached geofences: {result}")
+                logger.debug(f"✅ Retrieved cached geofences: {result}")
                 return result
         else:
             logger.error("Failed to retrieve cached geofences.")
@@ -74,12 +82,17 @@ class KojiGeofences:
 
     async def refresh_geofences(self):
         """Continuously refresh Koji Geofences every `self.refresh_interval` seconds."""
+        redis_status = await self.redis_manager.check_redis_connection()
+        if not redis_status:
+            logger.error("❌ Redis is not connected. Cannot retrieve cached geofences.")
+            return
+
         while True:
-            logger.info("Refreshing Koji Geofences...")
+            logger.info("🔃 Refreshing Koji Geofences...")
             await self.cache_koji_geofences()
             # ✅ Calculate next refresh timestamp
             next_refresh_time = datetime.now() + timedelta(seconds=self.refresh_interval)
             next_refresh_str = next_refresh_time.strftime("%Y-%m-%d %H:%M:%S")
 
-            logger.info(f"Next geofence refresh scheduled at: {next_refresh_str}")
+            logger.info(f"⏰ Next geofence refresh scheduled at: {next_refresh_str}")
             await asyncio.sleep(self.refresh_interval)
