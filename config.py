@@ -52,7 +52,7 @@ db_rest_betwen_connection = 5
 redis_password = get_env_var("REDIS_PASSWORD", "myveryredisstrongpassword")
 redis_encoded_password = urllib.parse.quote(redis_password)  # Ensures safe encoding
 redis_host = get_env_var("REDIS_HOST", "localhost")
-redis_server_port = get_env_int("REDIS_PORT", 6379)
+redis_server_port = get_env_int("REDIS_SERVER_PORT", 6379)
 redis_gui_port = get_env_int("REDIS_GUI_PORT", 8001)
 redis_db = get_env_int("REDIS_DB", 1)
 # Build Redis url connection

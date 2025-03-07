@@ -74,8 +74,10 @@ services:
     volumes:
       - ./redis-data:/data # Persistent storage
     environment:
-      REDIS_ARGS: "--requirepass \"${REDIS_PASSWORD}\" --appendonly yes --save 60 1"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_ARGS: "--requirepass ${REDIS_PASSWORD} --appendonly yes --save 60 1"
       REDISTIMESERIES_ARGS: "RETENTION_POLICY=315360000000"  # Keep data for 10 years
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
