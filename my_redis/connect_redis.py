@@ -19,12 +19,15 @@ class RedisManager:
             self.redis_client = await redis.from_url(self.redis_url, decode_responses=True)
             if await self.redis_client.ping(): # test connection
                 logger.success("✅ Connected to Redis!")
+                return True
             else:
                 logger.error("❌ Failed to connect to Redis!")
                 self.redis_client = None
+
         except Exception as e:
             logger.error(f"❌ Failed to connect to Redis: {e}")
             self.redis_client = None  # Prevent crashes if Redis is unavailable
+        return None
 
     async def close_redis(self):
         """Close Redis connection."""
@@ -40,7 +43,9 @@ class RedisManager:
         """Check if Redis connection is running. This is an utilitary function."""
         if not self.redis_client:
             logger.warning("⚠️ Redis connection lost. Attempting to reconnect...")
-            await self.init_redis()
+            result = await self.init_redis()
+            if result is None:
+                return False
 
         if self.redis_client is not None:
             logger.debug("✅ Redis connection is active.")
