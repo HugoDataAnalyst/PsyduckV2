@@ -15,7 +15,7 @@ class RedisManager:
     async def init_redis(self):
         """Initialize Redis connection and handle errors."""
         try:
-            logger.info("Connecting to Redis...")
+            logger.info("🔃 Connecting to Redis...")
             self.redis_client = await redis.from_url(self.redis_url, decode_responses=True)
             if await self.redis_client.ping(): # test connection
                 logger.success("✅ Connected to Redis!")
@@ -42,7 +42,7 @@ class RedisManager:
     async def check_redis_connection(self):
         """Check if Redis connection is running. This is an utilitary function."""
         if not self.redis_client:
-            logger.warning("⚠️ Redis connection lost. Attempting to reconnect...")
+            logger.warning("⚠️ Redis connection lost. 🔃 Attempting to reconnect...")
             result = await self.init_redis()
             if result is None:
                 return False
