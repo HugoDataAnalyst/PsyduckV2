@@ -2,31 +2,38 @@ from tortoise.models import Model
 from tortoise import fields
 import config as AppConfig
 
-class Spawnpoint(Model):
-    """Stores unique spawnpoint locations to reduce redundant lat/lon storage."""
-    id = fields.BigIntField(pk=True)  # Unique spawnpoint ID from the webhook
+class AreaNames(Model):
+    """Stores area names and their associated numeric IDs."""
+    id = fields.SmallIntField(pk=True)
+    name = fields.CharField(max_length=255, unique=True)
+
+    class Meta:
+        table = "area_names"
+
+class AggregatedPokemonIVMonthly(Model):
+    """Stores aggregated IV data per spawnpoint, monthly."""
+    spawnpoint_id = fields.BigIntField()
     latitude = fields.FloatField()
     longitude = fields.FloatField()
-    inserted_at = fields.IntField()  # Unix timestamp
+    pokemon_id = fields.SmallIntField()
+    form = fields.SmallIntField(default=0)
+    iv = fields.SmallIntField()
+    level = fields.SmallIntField()
+    gender = fields.SmallIntField()
+    size = fields.SmallIntField()
+    area = fields.ForeignKeyField("models.AreaNames", related_name="aggregated_stats")
+    month_year = fields.SmallIntField()  # Format: YYMM (2503 for March 2025)
+    shiny = fields.SmallIntField(default=0)  # 0 = Not Shiny, 1 = Shiny
+    total_count = fields.IntField(default=1)
+    pvp_little_rank = fields.BooleanField(null=True)
+    pvp_great_rank = fields.BooleanField(null=True)
+    pvp_ultra_rank = fields.BooleanField(null=True)
 
-
-class PokemonSighting(Model):
-    """Stores Pokémon sightings, referencing spawnpoints when available."""
-    id = fields.IntField(pk=True)
-    pokemon_id = fields.IntField()
-    form = fields.CharField(max_length=30, null=True)
-    latitude = fields.FloatField()  # Stored if spawnpoint_id is NULL
-    longitude = fields.FloatField()  # Stored if spawnpoint_id is NULL
-    iv = fields.IntField()
-    username = fields.CharField(max_length=50)
-    pvp = fields.TextField(null=True)  # Stores rankings for leagues
-    seen_at = fields.IntField()  # Unix timestamp
-    expire_timestamp = fields.IntField()  # Unix timestamp
-    spawnpoint = fields.ForeignKeyField(
-        "models.Spawnpoint",
-        null=True,
-        on_delete=fields.SET_NULL
-    )  # Optional foreign key to spawnpoints
+    class Meta:
+        table = "aggregated_pokemon_iv_monthly"
+        unique_together = (
+            "spawnpoint_id", "pokemon_id", "form", "iv", "level", "gender", "size", "shiny", "area", "month_year"
+        )
 
 
 class TotalPokemonStats(Model):
