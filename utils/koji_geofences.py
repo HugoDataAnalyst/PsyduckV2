@@ -11,17 +11,20 @@ class KojiGeofences:
     """Koji Geofences class.
     Handles fetching, caching and retrieving Koji Geofences from its API.
     """
-
     # Start the class static variables
     geofence_key = "koji_geofences"
     expiry = 3600
     bearer_token = AppConfig.koji_bearer_token
     geofence_api_url = AppConfig.koji_geofence_api_url
-    redis_manager = RedisManager()
+    redis_manager = RedisManager() # RedisManager is a Singleton
+    _instance = None # ✅ Singleton instance
 
-    def __init__(self, refresh_interval):
-        """Instance-level refresh interval"""
-        self.refresh_interval = refresh_interval
+    def __new__(cls, refresh_interval):
+        """Ensures only one KojiGeofences instance is created globally (Singleton)."""
+        if cls._instance is None:
+            cls._instance = super(KojiGeofences, cls).__new__(cls)
+            cls._instance.refresh_interval = refresh_interval
+        return cls._instance
 
 
     @classmethod
