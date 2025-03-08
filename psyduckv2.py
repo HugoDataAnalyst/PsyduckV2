@@ -1,9 +1,11 @@
+from ast import Await
 import asyncio
 import os
 import subprocess
 import config as AppConfig
 from sql.connect_db import init_db, close_db
 from utils.logger import setup_logging, logger
+from utils.koji_geofences import KojiGeofences
 from my_redis.connect_redis import RedisManager
 
 # Initialize logging
@@ -31,6 +33,7 @@ async def main():
     await apply_migrations()  # Apply any new migrations
 
     await redis_manager.init_redis()  # Initialize Redis connection
+    await KojiGeofences(3600).get_cached_geofences()
     logger.info("✅ Psyduck is ready to process data!")
 
     try:
@@ -43,4 +46,7 @@ async def main():
         await redis_manager.close_redis()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("🫣 Exiting due to keyboard interrupt.")
