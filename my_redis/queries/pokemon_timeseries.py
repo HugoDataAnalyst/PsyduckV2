@@ -77,19 +77,31 @@ async def add_timeseries_total_pokemon_event(data):
     if pvp_ultra:
         await ensure_timeseries_key(client, key_pvp_ultra, "pvp_ultra", area, pokemon_id, form, retention_ms)
 
-    # Use TS.ADD commands with DUPLICATE_POLICY SUM to add data points (aggregating if duplicate)
+    # Build TS.MADD arguments in a list; only add keys where the value is non-zero
+    madd_args = []
     if total:
-        await client.execute_command("TS.ADD", key_total, ts, total, "DUPLICATE_POLICY", "SUM")
+        madd_args.extend([key_total, ts, total])
     if iv100:
-        await client.execute_command("TS.ADD", key_iv100, ts, iv100, "DUPLICATE_POLICY", "SUM")
+        madd_args.extend([key_iv100, ts, iv100])
     if iv0:
-        await client.execute_command("TS.ADD", key_iv0, ts, iv0, "DUPLICATE_POLICY", "SUM")
+        madd_args.extend([key_iv0, ts, iv0])
     if pvp_little:
-        await client.execute_command("TS.ADD", key_pvp_little, ts, pvp_little, "DUPLICATE_POLICY", "SUM")
+        madd_args.extend([key_pvp_little, ts, pvp_little])
     if pvp_great:
-        await client.execute_command("TS.ADD", key_pvp_great, ts, pvp_great, "DUPLICATE_POLICY", "SUM")
+        madd_args.extend([key_pvp_great, ts, pvp_great])
     if pvp_ultra:
-        await client.execute_command("TS.ADD", key_pvp_ultra, ts, pvp_ultra, "DUPLICATE_POLICY", "SUM")
+        madd_args.extend([key_pvp_ultra, ts, pvp_ultra])
+
+    if len(madd_args) > 3:
+        # More than one metric, so use TS.MADD
+        await client.execute_command("TS.MADD", *madd_args)
+        logger.info(f"✅ Bulk 📤 added Pokémon event using TS.MADD for Pokémon ID {pokemon_id} in area {area}")
+    elif len(madd_args) == 3:
+        # Only one metric, use TS.ADD directly
+        await client.execute_command("TS.ADD", madd_args[0], ts, madd_args[2], "DUPLICATE_POLICY", "SUM")
+        logger.info(f"✅ Added ⬆️ single Pokémon metric using TS.ADD for Pokémon ID {pokemon_id} in area {area}")
+    else:
+        logger.warning("❌ No metrics to update for this pokémon.")
 
     logger.info(f"✅ Added Pokémon event to time series for Pokémon ID {pokemon_id} in area {area}")
     return {
