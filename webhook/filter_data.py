@@ -14,6 +14,38 @@ class WebhookFilter:
         self.allowed_types = allowed_types
         self.geofences = geofences  # ✅ Inject geofences dynamically
 
+    # Helper functions
+    @staticmethod
+    async def calculate_despawn_time(disappear_time, first_seen):
+        """Calculate the despawn time for a Pokémon based on its disappear time and first seen time."""
+        if disappear_time is None or first_seen is None:
+            return None
+
+        time_diff = disappear_time - first_seen
+        total_seconds = time_diff // 1
+        return total_seconds
+
+    @staticmethod
+    def calculate_iv(attack, defense, stamina):
+        """Calculate Pokémon IV percentage and round to 2 decimal places."""
+        iv = round(((attack + defense + stamina) / 45) * 100, 2)
+        return iv
+
+    @staticmethod
+    def extract_pvp_ranks(pvp_data):
+        """Extract top 5 PVP rankings for Great, Little, and Ultra leagues."""
+        ranks = {f'pvp_{category}_rank': None for category in ['great', 'little', 'ultra']}
+
+        if pvp_data:
+            for category in ranks.keys():
+                category_data = pvp_data.get(category, [])
+                top_ranks = sorted([entry.get('rank') for entry in category_data if entry.get('rank') is not None])
+
+                # ✅ Store only if in Top 5
+                ranks[f'pvp_{category}_rank'] = [rank for rank in top_ranks if rank <= 5] or None
+
+        return ranks
+
     async def is_inside_geofence(self, latitude, longitude):
         """Check if given coordinates are inside the latest cached geofences."""
         try:
@@ -75,22 +107,61 @@ class WebhookFilter:
 
     ## ✅ Type-Specific Handling Functions
 
-    def handle_pokemon_data(self, message, geofence_name):
-        """Process Pokémon webhook data."""
-        pokemon_id = message.get("pokemon_id")
-        form = message.get("form", None)
-        cp = message.get("cp")
-        iv = message.get("individual_attack"), message.get("individual_defense"), message.get("individual_stamina")
+    async def handle_pokemon_data(self, message, geofence_name):
+        """Process and filter Pokémon webhook data."""
+        required_fields = [
+            "pokemon_id",
+            "latitude",
+            "longitude",
+            "individual_attack",
+            "individual_defense",
+            "individual_stamina",
+            "disappear_time",
+            "first_seen",
+            "spawnpoint_id"
+        ]
 
-        logger.info(f"✅ Pokémon {pokemon_id} (Form {form}) in {geofence_name} - CP: {cp}, IV: {iv}")
-        return {
-            "type": "pokemon",
-            "pokemon_id": pokemon_id,
-            "form": form,
-            "cp": cp,
-            "iv": iv,
-            "geofence": geofence_name,
+        # ✅ Check if all required fields are present
+        if not all(field in message for field in required_fields):
+            logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
+            return None
+
+        # ✅ Calculate despawn timer
+        despawn_timer = await self.calculate_despawn_time(message["disappear_time"], message["first_seen"])
+
+        # ✅ Calculate IV percentage
+        iv_percentage = self.calculate_iv(
+            message["individual_attack"],
+            message["individual_defense"],
+            message["individual_stamina"]
+        )
+
+        # ✅ Extract PVP Ranks
+        pvp_ranks = self.extract_pvp_ranks(message.get("pvp", {}))
+
+        # ✅ Extract Pokémon Data
+        pokemon_data = {
+            "pokemon_id": message.get("pokemon_id"),
+            "form": message.get("form", 0),
+            "latitude": message.get("latitude"),
+            "longitude": message.get("longitude"),
+            **pvp_ranks,
+            "iv": iv_percentage,
+            "cp": message.get("cp"),
+            "level": message.get("pokemon_level"),
+            "gender": message.get("gender"),
+            "shiny": message.get("shiny"),
+            "size": message.get("size"),
+            "username": message.get("username"),
+            "first_seen": message.get("first_seen"),
+            "despawn_timer": despawn_timer,
+            "spawnpoint": message.get("spawnpoint_id"),
+            "area": geofence_name,
         }
+
+        logger.debug(f"✅ Pokémon {pokemon_data['pokemon_id']} (Form {pokemon_data['form']}) in {geofence_name} - IV: {pokemon_data['iv']}% - Despawns in {despawn_timer} sec")
+        return pokemon_data  # ✅ Return structured Pokémon data
+
 
     def handle_quest_data(self, message, geofence_name):
         """Process Quest webhook data."""
