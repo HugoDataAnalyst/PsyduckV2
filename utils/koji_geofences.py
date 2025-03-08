@@ -2,10 +2,12 @@ import asyncio
 import json
 import httpx
 import redis
+from shapely import area
 import config as AppConfig
 from datetime import datetime, timedelta
 from utils.logger import logger
 from my_redis.connect_redis import RedisManager
+from sql.models import AreaNames
 
 class KojiGeofences:
     """Koji Geofences class.
@@ -43,8 +45,19 @@ class KojiGeofences:
                     geometry = feature.get("geometry", {})
 
                     if geometry.get("type") == "Polygon":
+                        # Use the area name from the API response
+                        area_name = properties.get("name", "Unknown")
+                        # Check if the area exists; if not insert it
+                        area_obj, created = await AreaNames.get_or_create(name=area_name)
+                        # Append the area object to the list of geofences
+                        if created:
+                            logger.debug(f"✅ Created new area: {area_name}")
+                        else:
+                            logger.debug(f"Found existing area: '{area_name}' with id {area_obj.id}")
+
                         geofences.append({
-                            "name": properties.get("name", "Unknown"),
+                            "id": area_obj.id,
+                            "name": area_name,
                             "coordinates": geometry.get("coordinates", [])
                         })
 
