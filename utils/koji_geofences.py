@@ -26,22 +26,36 @@ class KojiGeofences:
 
     @classmethod
     async def get_koji_geofences(cls):
-        """Get Koji Geofences from the API."""
+        """Fetch Koji Geofences from the API and extract relevant details."""
         async with httpx.AsyncClient() as client:
             headers = {"Authorization": f"Bearer {cls.bearer_token}"}
             response = await client.get(cls.geofence_api_url, headers=headers)
+
             if response.status_code == 200:
-                result = response.json().get("data", {}).get("features", [])
-                logger.debug(f"✅ Retrieved {len(result)} Koji Geofences.")
-                return result
+                raw_data = response.json().get("data", {}).get("features", [])
+                geofences = []
+
+                for feature in raw_data:
+                    properties = feature.get("properties", {})
+                    geometry = feature.get("geometry", {})
+
+                    if geometry.get("type") == "Polygon":
+                        geofences.append({
+                            "name": properties.get("name", "Unknown"),
+                            "coordinates": geometry.get("coordinates", [])
+                        })
+
+                logger.debug(f"✅ Parsed {len(geofences)} Koji Geofences.")
+                return geofences
+
             else:
-                # This needs to be improved to handle multi polygon error.
                 logger.error(f"❌ Failed to fetch geofences. Status Code: {response.status_code}")
                 raise httpx.HTTPError(f"❌ Failed to fetch geofences. Status Code: {response.status_code}")
 
     @classmethod
     async def cache_koji_geofences(cls):
         """Fetch and cache Koji Geofences in Redis."""
+        logger.debug(f"🔃 Attempting to cache Koji geofences...")
         redis_status = await cls.redis_manager.check_redis_connection()
         if not redis_status:
             logger.error("❌ Redis is not connected. Cannot retrieve cached geofences.")
