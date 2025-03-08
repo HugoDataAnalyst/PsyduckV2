@@ -165,39 +165,39 @@ class WebhookFilter:
         return pokemon_data  # ✅ Return structured Pokémon data
 
 
-    def handle_quest_data(self, message, geofence_name):
+    def handle_quest_data(self, message, geofence_id):
         """Process Quest webhook data."""
         quest_title = message.get("quest_title")
         reward = message.get("quest_reward")
 
-        logger.info(f"✅ Quest '{quest_title}' in {geofence_name} - Reward: {reward}")
+        logger.info(f"✅ Quest '{quest_title}' in {geofence_id} - Reward: {reward}")
         return {
             "type": "quest",
             "quest_title": quest_title,
             "reward": reward,
-            "geofence": geofence_name,
+            "geofence": geofence_id,
         }
 
-    def handle_raid_data(self, message, geofence_name):
+    def handle_raid_data(self, message, geofence_id):
         """Process Raid webhook data."""
         boss_pokemon = message.get("raid_pokemon_id")
         level = message.get("raid_level")
 
-        logger.info(f"✅ Raid {level} - Boss {boss_pokemon} in {geofence_name}")
+        logger.info(f"✅ Raid {level} - Boss {boss_pokemon} in {geofence_id}")
         return {
             "type": "raid",
             "raid_pokemon": boss_pokemon,
             "level": level,
-            "geofence": geofence_name,
+            "geofence": geofence_id,
         }
 
-    def handle_invasion_data(self, message, geofence_name):
+    def handle_invasion_data(self, message, geofence_id):
         """Process Invasion (Rocket) webhook data."""
         grunt_type = message.get("grunt_type")
 
-        logger.info(f"✅ Rocket Grunt '{grunt_type}' in {geofence_name}")
+        logger.info(f"✅ Rocket Grunt '{grunt_type}' in {geofence_id}")
         return {
             "type": "invasion",
             "grunt_type": grunt_type,
-            "geofence": geofence_name,
+            "geofence": geofence_id,
         }
