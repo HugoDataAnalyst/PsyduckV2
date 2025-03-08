@@ -8,3 +8,4 @@ aerich==0.8.2
 tomlkit==0.13.2
 redis==5.2.1
 httpx==0.28.1
+shapely==2.0.7
