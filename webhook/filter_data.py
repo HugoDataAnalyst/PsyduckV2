@@ -92,7 +92,9 @@ class WebhookFilter:
 
             # ✅ Handle each webhook type separately
             if data_type == "pokemon":
-                return self.handle_pokemon_data(message, geofence_id)
+                pokemon_data = self.handle_pokemon_data(message, geofence_id)
+                if pokemon_data:
+                    return pokemon_data
             elif data_type == "quest":
                 return self.handle_quest_data(message, geofence_id)
             elif data_type == "raid":
