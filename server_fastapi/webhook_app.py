@@ -4,10 +4,6 @@ from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
 from server_fastapi.routes import webhook_router
 
-"""
-Actual API to retrieve data from the server.
-"""
-
 geofences = None
 
 @asynccontextmanager
