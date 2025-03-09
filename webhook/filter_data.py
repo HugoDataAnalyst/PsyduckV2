@@ -33,7 +33,7 @@ class WebhookFilter:
 
     @staticmethod
     def extract_pvp_ranks(pvp_data):
-        """Extract top 5 PVP rankings for Great, Little, and Ultra leagues."""
+        """Extract top 1 PVP rankings for Great, Little, and Ultra leagues."""
         ranks = {f'pvp_{category}_rank': None for category in ['great', 'little', 'ultra']}
 
         if pvp_data:
@@ -41,8 +41,8 @@ class WebhookFilter:
                 category_data = pvp_data.get(category, [])
                 top_ranks = sorted([entry.get('rank') for entry in category_data if entry.get('rank') is not None])
 
-                # ✅ Store only if in Top 5
-                ranks[f'pvp_{category}_rank'] = [rank for rank in top_ranks if rank <= 5] or None
+                # ✅ Store only if in Top 1
+                ranks[f'pvp_{category}_rank'] = [rank for rank in top_ranks if rank == 1] or None
 
         return ranks
 
