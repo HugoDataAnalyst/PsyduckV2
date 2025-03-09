@@ -29,12 +29,12 @@ async def update_total_pokemon_counter(data):
     form = data.get("form", 0)
 
     # Define keys for each metric
-    key_total      = f"counter:pokemon:total:{area}:{pokemon_id}:{form}:{date_str}"
-    key_iv100      = f"counter:pokemon:iv100:{area}:{pokemon_id}:{form}:{date_str}"
-    key_iv0        = f"counter:pokemon:iv0:{area}:{pokemon_id}:{form}:{date_str}"
-    key_pvp_little = f"counter:pokemon:pvp_little:{area}:{pokemon_id}:{form}:{date_str}"
-    key_pvp_great  = f"counter:pokemon:pvp_great:{area}:{pokemon_id}:{form}:{date_str}"
-    key_pvp_ultra  = f"counter:pokemon:pvp_ultra:{area}:{pokemon_id}:{form}:{date_str}"
+    key_total      = f"counter:pokemon_total:total:{area}:{pokemon_id}:{form}:{date_str}"
+    key_iv100      = f"counter:pokemon_total:iv100:{area}:{pokemon_id}:{form}:{date_str}"
+    key_iv0        = f"counter:pokemon_total:iv0:{area}:{pokemon_id}:{form}:{date_str}"
+    key_pvp_little = f"counter:pokemon_total:pvp_little:{area}:{pokemon_id}:{form}:{date_str}"
+    key_pvp_great  = f"counter:pokemon_total:pvp_great:{area}:{pokemon_id}:{form}:{date_str}"
+    key_pvp_ultra  = f"counter:pokemon_total:pvp_ultra:{area}:{pokemon_id}:{form}:{date_str}"
 
     logger.debug(f"🔑 Constructed counter keys: total={key_total}, iv100={key_iv100}, iv0={key_iv0}, "
                  f"pvp_little={key_pvp_little}, pvp_great={key_pvp_great}, pvp_ultra={key_pvp_ultra}")
@@ -52,20 +52,24 @@ async def update_total_pokemon_counter(data):
 
     client = redis_manager.redis_client
 
-    # Use atomic increments to update the counters.
-    await client.incrby(key_total, total)
+    # Create a pipeline to batch the INCRBY commands
+    pipe = client.pipeline()
+    if total:
+        pipe.incrby(key_total, total)
     if iv100:
-        await client.incrby(key_iv100, iv100)
+        pipe.incrby(key_iv100, iv100)
     if iv0:
-        await client.incrby(key_iv0, iv0)
+        pipe.incrby(key_iv0, iv0)
     if pvp_little:
-        await client.incrby(key_pvp_little, pvp_little)
+        pipe.incrby(key_pvp_little, pvp_little)
     if pvp_great:
-        await client.incrby(key_pvp_great, pvp_great)
+        pipe.incrby(key_pvp_great, pvp_great)
     if pvp_ultra:
-        await client.incrby(key_pvp_ultra, pvp_ultra)
+        pipe.incrby(key_pvp_ultra, pvp_ultra)
 
-    logger.info(f"✅ Updated Pokémon counters for Pokémon ID {pokemon_id} in area {area} on {date_str}")
+    # Execute all commands in the pipeline
+    results = await pipe.execute()
+    logger.debug(f"✅ Bulk updated Pokémon counters for Pokémon ID {pokemon_id} in area {area} on {date_str}")
     return {
         "total_key": key_total,
         "iv100_key": key_iv100,
@@ -73,5 +77,6 @@ async def update_total_pokemon_counter(data):
         "pvp_little_key": key_pvp_little,
         "pvp_great_key": key_pvp_great,
         "pvp_ultra_key": key_pvp_ultra,
-        "date": date_str
+        "date": date_str,
+        "results": results  # Optional: returns a list of INCRBY command results
     }
