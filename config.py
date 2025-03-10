@@ -1,9 +1,30 @@
 import os
-from typing import List, Optional
-import dotenv
 import sys
-from utils.logger import logger
+import json
+from click import File
+import dotenv
 import urllib.parse
+
+from flask import config
+from utils.logger import logger
+from typing import List, Optional, Dict
+
+# load config.json
+
+CONFIG_PATH = os.path.join(os.getcwd(), "config", "config.json")
+
+def load_config() -> Dict[str, any]:
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            config = json.load(f)
+        logger.info(f"✅ Loaded config from {CONFIG_PATH}")
+        return config
+    except FileNotFoundError:
+        logger.error(f"❌ Config file not found at {CONFIG_PATH}. Using default values.")
+        return {}
+
+config = load_config()
+
 # Read environment variables from .env file
 env_file = os.path.join(os.getcwd(), ".env")
 dotenv.load_dotenv(env_file, override=True)
@@ -37,6 +58,9 @@ def get_env_int(name: str, default = None) -> Optional[int]:
         logger.error(f"❌ Invalid value for environment variable {name}: {value}. Using default: {default}")
         return default
 
+# Calculate Extraction Intervals
+def retention_ms(hours: int) -> int:
+    return hours * 3600 * 1000
 
 # Database Settings
 db_host = get_env_var('DB_HOST')
@@ -57,6 +81,11 @@ redis_gui_port = get_env_int("REDIS_GUI_PORT", 8001)
 redis_db = get_env_int("REDIS_DB", 1)
 # Build Redis url connection
 redis_url = f"redis://:{redis_encoded_password}@{redis_host}:{redis_server_port}/{redis_db}"
+# Redis retention settings
+total_pokemon_retention_ms      = retention_ms(config.get("retention_hours", {}).get("total_pokemon", 720))
+timeseries_pokemon_retention_ms = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 720))
+tth_pokemon_retention_ms        = retention_ms(config.get("retention_hours", {}).get("tth_pokemon", 720))
+tth_timeseries_retention_ms     = retention_ms(config.get("retention_hours", {}).get("tth_timeseries_pokemon", 720))
 
 # Log Level
 log_level = get_env_var("LOG_LEVEL", "INFO").upper()
@@ -68,6 +97,9 @@ koji_ip = get_env_var("KOJI_IP", "127.0.0.1")
 koji_port = get_env_int("KOJI_PORT", 8080)
 koji_project_name = get_env_var("KOJI_PROJECT_NAME")
 koji_geofence_api_url = f"http://{koji_ip}:{koji_port}/api/v1/geofence/feature-collection/{koji_project_name}"
+# Extract geofence settings
+geofence_refresh_cache_seconds = config.get("geofences", {}).get("refresh_cache_seconds", 3500)
+
 
 # Golbat
 golbat_host = get_env_var("GOLBAT_HOST", "127.0.0.1")
