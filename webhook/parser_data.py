@@ -1,4 +1,5 @@
 import asyncio
+import json
 from my_redis.queries import pokemon_timeseries, pokemon_counterseries
 from utils.logger import logger
 
@@ -17,10 +18,10 @@ async def process_pokemon_data(filtered_data):
         # Run both concurrently
         ts_result, counter_result = await asyncio.gather(ts_task, counter_task)
 
-        combined_result = {
-            "timeseries": ts_result,
-            "counter": counter_result
-        }
+        combined_result = (
+            "Timeseries: " + json.dumps(ts_result, indent=2)
+            + "\nCounter: " + json.dumps(counter_result, indent=2)
+        )
         logger.info("✅ Successfully processed Pokémon event data in parser_data.")
         return combined_result
 
