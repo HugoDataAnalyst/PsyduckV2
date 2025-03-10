@@ -1,0 +1,11 @@
+{
+    "geofences": {
+        "refresh_cache_seconds": 3600
+    },
+    "retention_hours": {
+        "total_pokemon": 720,
+        "timeseries_pokemon": 720,
+        "tth_pokemon": 720,
+        "tth_timeseries_pokemon": 720
+    }
+}
