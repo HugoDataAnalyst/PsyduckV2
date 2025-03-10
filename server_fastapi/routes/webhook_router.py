@@ -29,7 +29,7 @@ async def process_single_event(event: dict):
         logger.info("✅ Processing Pokémon data.")
         result = await process_pokemon_data(filtered_data)
         if result:
-            logger.success(f"✅ Webhook processed successfully: {result}")
+            logger.success(f"✅ Webhook processed successfully:\n{result}")
             return {"status": "success", "processed_data": result}
     else:
         logger.warning(f"⚠️ Webhook type '{data_type}' not handled by parser yet.")
