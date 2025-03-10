@@ -71,9 +71,14 @@ koji_geofence_api_url = f"http://{koji_ip}:{koji_port}/api/v1/geofence/feature-c
 
 # Golbat
 golbat_host = get_env_var("GOLBAT_HOST", "127.0.0.1")
+golbat_webhook_ip = get_env_var("GOLBAT_WEBHOOK_IP", "127.0.0.1")
 golbat_webhook_port = get_env_int("GOLBAT_WEBHOOK_PORT", 8080)
 golbat_db_host = get_env_var("GOLBAT_DB_HOST", "127.0.0.1")
 golbat_db_port = get_env_int("GOLBAT_DB_PORT", 3306)
 golbat_db_name = get_env_var("GOLBAT_DB_NAME")
 golbat_db_user = get_env_var("GOLBAT_DB_USER")
 golbat_db_password = get_env_var("GOLBAT_DB_PASSWORD")
+
+# API
+api_host = get_env_var("API_HOST", "127.0.0.1")
+api_port = get_env_int("API_PORT", 8090)
