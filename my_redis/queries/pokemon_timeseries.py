@@ -1,3 +1,4 @@
+import config as AppConfig
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 from utils.redis_key_checker import ensure_timeseries_key
@@ -36,7 +37,7 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
     updated_fields = {}
 
     # Ensure keys exist
-    retention_ms = "2592000000"  # 30-day retention
+    retention_ms = AppConfig.timeseries_pokemon_retention_ms
     await ensure_timeseries_key(client, key_total, "total", area, pokemon_id, form, retention_ms, pipe)
     await ensure_timeseries_key(client, key_iv100, "iv100", area, pokemon_id, form, retention_ms, pipe)
     await ensure_timeseries_key(client, key_iv0, "iv0", area, pokemon_id, form, retention_ms, pipe)

@@ -1,3 +1,4 @@
+import config as AppConfig
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 from utils.redis_key_checker import ensure_timeseries_key
@@ -53,7 +54,7 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
     updated_fields = {}
 
     # Ensure the time series key exists
-    await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", "2592000000", pipe)  # 30-day retention
+    await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", AppConfig.tth_timeseries_retention_ms, pipe)
 
     if pipe:
         pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
