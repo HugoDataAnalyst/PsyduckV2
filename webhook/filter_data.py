@@ -52,7 +52,7 @@ class WebhookFilter:
         try:
             if not self.geofences:
                 logger.warning("⚠️ No geofences available. Accepting all data by default.")
-                return True, None  # ✅ Accept data if no geofences exist
+                return True, None, None  # ✅ Accept data if no geofences exist
 
             point = Point(longitude, latitude)  # ✅ Create a point with (lon, lat)
 
@@ -61,14 +61,14 @@ class WebhookFilter:
 
                 if point.within(polygon):  # ✅ Check if point is inside geofence
                     logger.debug(f"✅ Data is inside geofence: {geofence['name']} (ID: {geofence['id']})")
-                    return True, geofence["id"]  # ✅ Return True + Geofence Name
+                    return True, geofence["id"], geofence["name"]  # ✅ Return True + Geofence Name
 
             logger.debug("❌ Data is outside geofenced areas. Ignoring.")
-            return False, None  # ❌ Reject if outside geofences
+            return False, None, None  # ❌ Reject if outside geofences
 
         except Exception as e:
             logger.error(f"❌ Error checking geofence: {e}")
-            return False, None  # ❌ Reject data if an error occurs
+            return False, None, None  # ❌ Reject data if an error occurs
 
     async def filter_webhook_data(self, data):
         """Filter webhook data based on type and geofence validation."""
@@ -85,13 +85,13 @@ class WebhookFilter:
             logger.debug("⚠️ Webhook data missing coordinates. Ignoring.")
             return None
 
-        inside_geofence, geofence_id = await self.is_inside_geofence(latitude, longitude)
+        inside_geofence, geofence_id, geofence_name = await self.is_inside_geofence(latitude, longitude)
         if not inside_geofence:
             return None  # ❌ Reject if outside geofence
 
         # ✅ Handle each webhook type separately
         if data_type == "pokemon":
-            pokemon_data = await self.handle_pokemon_data(message, geofence_id)
+            pokemon_data = await self.handle_pokemon_data(message, geofence_id, geofence_name)
             if pokemon_data:
                 return pokemon_data
         #elif data_type == "quest":
@@ -110,7 +110,7 @@ class WebhookFilter:
 
     ## ✅ Type-Specific Handling Functions
 
-    async def handle_pokemon_data(self, message, geofence_id):
+    async def handle_pokemon_data(self, message, geofence_id, geofence_name):
         """Process and filter Pokémon webhook data."""
         required_fields = [
             "pokemon_id",
@@ -159,7 +159,8 @@ class WebhookFilter:
             "first_seen": message["first_seen"],
             "despawn_timer": despawn_timer,
             "spawnpoint": message["spawnpoint_id"],
-            "area": geofence_id,
+            "area_id": geofence_id,
+            "area_name": geofence_name,
         }
 
         logger.debug(f"✅ Pokémon {pokemon_data['pokemon_id']} (Form {pokemon_data['form']}) in {geofence_id} - IV: {pokemon_data['iv']}% - Despawns in {despawn_timer} sec")

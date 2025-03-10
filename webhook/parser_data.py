@@ -40,7 +40,7 @@ async def process_pokemon_data(filtered_data):
         structured_result = (
             f"Pokémon ID: {filtered_data['pokemon_id']}\n"
             f"Form: {filtered_data['form']}\n"
-            f"Area: {filtered_data['area']}\n"
+            f"Area: {filtered_data['area_name']}\n"
             "Updates:\n"
             f"  - Timeseries Total: {json.dumps(pokemon_timeseries_update, indent=2)}\n"
             f"  - Counter Total: {json.dumps(pokemon_counterseries_update, indent=2)}\n"
@@ -48,7 +48,7 @@ async def process_pokemon_data(filtered_data):
             f"  - TTH Counter: {json.dumps(pokemon_tth_counterseries_update, indent=2)}\n"
         )
 
-        logger.debug(f"✅ Processed Pokémon {filtered_data['pokemon_id']} in area {filtered_data['area']} - Updates: {structured_result}")
+        logger.debug(f"✅ Processed Pokémon {filtered_data['pokemon_id']} in area {filtered_data['area_name']} - Updates: {structured_result}")
         return structured_result
 
     except Exception as e:
