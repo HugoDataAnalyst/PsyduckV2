@@ -1,6 +1,6 @@
 {
     "geofences": {
-        "refresh_cache_seconds": 3600
+        "refresh_cache_seconds": 3500
     },
     "retention_hours": {
         "timeseries_pokemon": 720,
