@@ -45,7 +45,7 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
     first_seen = data["first_seen"]
     ts = int((first_seen // 60) * 60 * 1000)  # Convert to ms, rounding to minute
 
-    area = data["area"]
+    area = data["area_name"]
     key = f"ts:tth_pokemon:{area}:{tth_bucket}"
 
     logger.debug(f"🔑 Constructed TimeSeries Key: {key}")
@@ -55,7 +55,7 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
 
     # Ensure the time series key exists
     retention_ms = AppConfig.tth_timeseries_retention_ms
-    logger.info(f"🚨 Set PokémonTTH retention timer: {AppConfig.tth_timeseries_retention_ms}")
+    logger.debug(f"🚨 Set PokémonTTH retention timer: {AppConfig.tth_timeseries_retention_ms}")
     await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", retention_ms, pipe)
 
     if pipe:

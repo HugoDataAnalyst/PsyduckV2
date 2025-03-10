@@ -18,7 +18,7 @@ async def update_total_pokemon_counter(data, pipe=None):
     ts = data["first_seen"]
     date_str = datetime.fromtimestamp(ts).strftime("%Y%m%d")
 
-    area = data["area"]
+    area = data["area_name"]
     pokemon_id = data["pokemon_id"]
     form = data.get("form", 0)
 

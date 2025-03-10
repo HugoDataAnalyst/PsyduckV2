@@ -20,7 +20,7 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
     rounded_timestamp = (first_seen // 60) * 60
     ts = int(rounded_timestamp * 1000)  # Convert to milliseconds
 
-    area = data["area"]
+    area = data["area_name"]
     pokemon_id = data["pokemon_id"]
     form = data.get("form", 0)
 

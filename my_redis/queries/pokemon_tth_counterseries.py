@@ -34,7 +34,7 @@ async def update_tth_pokemon_counter(data, pipe=None):
     ts = data["first_seen"]
     date_str = datetime.fromtimestamp(ts).strftime("%Y%m%d")
 
-    area = data["area"]
+    area = data["area_name"]
     despawn_timer = data.get("despawn_timer", 0)
     if despawn_timer <= 0:
         logger.warning(f"⚠️ Ignoring Pokémon with invalid despawn timer: {despawn_timer}s")
