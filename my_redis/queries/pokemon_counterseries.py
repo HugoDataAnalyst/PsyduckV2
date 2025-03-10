@@ -48,9 +48,10 @@ async def update_total_pokemon_counter(data):
     field_pvp_little = f"{pokemon_id}:{form}:pvp_little"
     field_pvp_great  = f"{pokemon_id}:{form}:pvp_great"
     field_pvp_ultra  = f"{pokemon_id}:{form}:pvp_ultra"
+    field_shiny      = f"{pokemon_id}:{form}:shiny"
 
     logger.debug(f"🔑 Constructed fields: total={field_total}, iv100={field_iv100}, iv0={field_iv0}, "
-                 f"pvp_little={field_pvp_little}, pvp_great={field_pvp_great}, pvp_ultra={field_pvp_ultra}")
+                 f"pvp_little={field_pvp_little}, pvp_great={field_pvp_great}, pvp_ultra={field_pvp_ultra}, field_shiny={field_shiny}")
 
     # Determine metric increments for this event
     inc_total      = 1
@@ -59,6 +60,7 @@ async def update_total_pokemon_counter(data):
     inc_pvp_little = 1 if data.get("pvp_little_rank") and 1 in data.get("pvp_little_rank") else 0
     inc_pvp_great  = 1 if data.get("pvp_great_rank") and 1 in data.get("pvp_great_rank") else 0
     inc_pvp_ultra  = 1 if data.get("pvp_ultra_rank") and 1 in data.get("pvp_ultra_rank") else 0
+    inc_shiny      = 1 if data.get("shiny") else 0
 
     logger.debug(f"🎚️ Counter increments: total={inc_total}, iv100={inc_iv100}, iv0={inc_iv0}, "
                  f"pvp_little={inc_pvp_little}, pvp_great={inc_pvp_great}, pvp_ultra={inc_pvp_ultra}")
@@ -78,6 +80,8 @@ async def update_total_pokemon_counter(data):
         pipe.hincrby(hash_key, field_pvp_great, inc_pvp_great)
     if inc_pvp_ultra:
         pipe.hincrby(hash_key, field_pvp_ultra, inc_pvp_ultra)
+    if inc_shiny:
+        pipe.hincrby(hash_key, field_shiny, inc_shiny)
 
     results = await pipe.execute()
     logger.debug(f"✅ Bulk updated Pokémon counters in hash {hash_key} with results: {results}")
@@ -90,6 +94,7 @@ async def update_total_pokemon_counter(data):
             "pvp_little": field_pvp_little,
             "pvp_great": field_pvp_great,
             "pvp_ultra": field_pvp_ultra,
+            "shiny": field_shiny,
         },
         "date": date_str,
         "results": results

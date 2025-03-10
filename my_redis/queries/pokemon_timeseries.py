@@ -43,6 +43,7 @@ async def add_timeseries_total_pokemon_event(data):
     key_pvp_little = f"ts:pokemon_totals:pvp_little:{area}:{pokemon_id}:{form}"
     key_pvp_great  = f"ts:pokemon_totals:pvp_great:{area}:{pokemon_id}:{form}"
     key_pvp_ultra  = f"ts:pokemon_totals:pvp_ultra:{area}:{pokemon_id}:{form}"
+    key_shiny      = f"ts:pokemon_totals:shiny:{area}:{pokemon_id}:{form}"
 
     logger.debug(f"🔑 Constructed keys: total={key_total}, iv100={key_iv100}, iv0={key_iv0}, "
                  f"pvp_little={key_pvp_little}, pvp_great={key_pvp_great}, pvp_ultra={key_pvp_ultra}")
@@ -54,6 +55,7 @@ async def add_timeseries_total_pokemon_event(data):
     pvp_little = 1 if data.get("pvp_little_rank") and 1 in data.get("pvp_little_rank") else 0
     pvp_great  = 1 if data.get("pvp_great_rank") and 1 in data.get("pvp_great_rank") else 0
     pvp_ultra  = 1 if data.get("pvp_ultra_rank") and 1 in data.get("pvp_ultra_rank") else 0
+    shiny      = 1 if data.get("shiny") else 0
 
     logger.debug(f"🎚️ Metric values: total={total}, iv100={iv100}, iv0={iv0}, "
                  f"pvp_little={pvp_little}, pvp_great={pvp_great}, pvp_ultra={pvp_ultra}")
@@ -76,6 +78,8 @@ async def add_timeseries_total_pokemon_event(data):
         await ensure_timeseries_key(client, key_pvp_great, "pvp_great", area, pokemon_id, form, retention_ms)
     if pvp_ultra:
         await ensure_timeseries_key(client, key_pvp_ultra, "pvp_ultra", area, pokemon_id, form, retention_ms)
+    if shiny:
+        await ensure_timeseries_key(client, key_shiny, "shiny", area, pokemon_id, form, retention_ms)
 
     # Build TS.MADD arguments in a list; only add keys where the value is non-zero
     madd_args = []
@@ -91,6 +95,8 @@ async def add_timeseries_total_pokemon_event(data):
         madd_args.extend([key_pvp_great, ts, pvp_great])
     if pvp_ultra:
         madd_args.extend([key_pvp_ultra, ts, pvp_ultra])
+    if shiny:
+        madd_args.extend([key_shiny, ts, shiny])
 
     if len(madd_args) > 3:
         # More than one metric, so use TS.MADD
@@ -111,5 +117,6 @@ async def add_timeseries_total_pokemon_event(data):
         "pvp_little_key": key_pvp_little,
         "pvp_great_key": key_pvp_great,
         "pvp_ultra_key": key_pvp_ultra,
+        "shiny_key": key_shiny,
         "timestamp": ts
     }
