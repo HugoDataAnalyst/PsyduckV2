@@ -14,7 +14,8 @@ async def lifespan(app: FastAPI):
     koji_instance = KojiGeofences(3500)
     global_state.geofences = await koji_instance.get_cached_geofences()
     if not global_state.geofences:
-        logger.warning("⚠️ No geofences available at startup.")
+        logger.error("⚠️ No geofences available at startup. Exiting application.")
+        raise Exception("❌ No geofences available at startup, stopping application.")
 
     # Start periodic geofence refresh in the background
     asyncio.create_task(koji_instance.refresh_geofences())
