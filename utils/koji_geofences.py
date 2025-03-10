@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from utils.logger import logger
 from my_redis.connect_redis import RedisManager
 from sql.models import AreaNames
+from server_fastapi import global_state
 
 class KojiGeofences:
     """Koji Geofences class.
@@ -120,6 +121,11 @@ class KojiGeofences:
         while True:
             logger.info("🔃 Refreshing Koji Geofences...")
             await self.cache_koji_geofences()
+            # After caching, retrieve the updated geofences
+            new_geofences = await self.get_cached_geofences()
+            if new_geofences:
+                global_state.geofences = new_geofences
+                logger.info(f"✅ Updated Koji Geofences: {len(new_geofences)} cached geofences")
             # ✅ Calculate next refresh timestamp
             next_refresh_time = datetime.now() + timedelta(seconds=self.refresh_interval)
             next_refresh_str = next_refresh_time.strftime("%Y-%m-%d %H:%M:%S")
