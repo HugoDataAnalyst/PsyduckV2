@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from utils.logger import logger
@@ -9,9 +10,15 @@ from server_fastapi import global_state
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global_state.geofences = await KojiGeofences(3600).get_cached_geofences()
+    # Start Koji Instance
+    koji_instance = KojiGeofences(3500)
+    global_state.geofences = await koji_instance.get_cached_geofences()
     if not global_state.geofences:
         logger.warning("⚠️ No geofences available at startup.")
+
+    # Start periodic geofence refresh in the background
+    asyncio.create_task(koji_instance.refresh_geofences())
+
     yield
     logger.info("Shutting down FastAPI application.")
 
