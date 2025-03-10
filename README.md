@@ -1,5 +1,10 @@
 # Psyduck V2 - A Data Analyst's Pokemon Experimental Tool
 
+## Configuration
+1. Copy the [`.env.example`](./.env.example) file to `.env` and fill in the required environment variables.
+2. Copy [config/example.config.json](./config/example.config.json) to `config/config.json` and fill in the required configurations.
+
+
 ## Docker Setup
 1. Install Docker Desktop
 2. `docker network create psyduckv2_network`
