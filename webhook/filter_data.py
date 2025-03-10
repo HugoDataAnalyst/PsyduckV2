@@ -37,11 +37,10 @@ class WebhookFilter:
         ranks = {f'pvp_{category}_rank': None for category in ['great', 'little', 'ultra']}
 
         if pvp_data:
-            for category in ranks.keys():
+            for category in list(ranks.keys()):
                 category_data = pvp_data.get(category, [])
                 top_ranks = sorted([entry.get('rank') for entry in category_data if entry.get('rank') is not None])
-
-                # ✅ Store only if in Top 1
+                # Store only if in Top 1
                 ranks[f'pvp_{category}_rank'] = [rank for rank in top_ranks if rank == 1] or None
 
         return ranks
@@ -73,41 +72,41 @@ class WebhookFilter:
 
     async def filter_webhook_data(self, data):
         """Filter webhook data based on type and geofence validation."""
-        try:
-            data_type = data.get("type")
-            if data_type not in self.allowed_types:
-                logger.debug(f"❌ Ignoring webhook type: {data_type}")
-                return None
+        #try:
+        data_type = data.get("type")
+        if data_type not in self.allowed_types:
+            logger.debug(f"❌ Ignoring webhook type: {data_type}")
+            return None
 
-            message = data.get("message", {})
-            latitude, longitude = message.get("latitude"), message.get("longitude")
+        message = data.get("message", {})
+        latitude, longitude = message.get("latitude"), message.get("longitude")
 
-            if latitude is None or longitude is None:
-                logger.debug("⚠️ Webhook data missing coordinates. Ignoring.")
-                return None
+        if latitude is None or longitude is None:
+            logger.debug("⚠️ Webhook data missing coordinates. Ignoring.")
+            return None
 
-            inside_geofence, geofence_id = await self.is_inside_geofence(latitude, longitude)
-            if not inside_geofence:
-                return None  # ❌ Reject if outside geofence
+        inside_geofence, geofence_id = await self.is_inside_geofence(latitude, longitude)
+        if not inside_geofence:
+            return None  # ❌ Reject if outside geofence
 
-            # ✅ Handle each webhook type separately
-            if data_type == "pokemon":
-                pokemon_data = self.handle_pokemon_data(message, geofence_id)
-                if pokemon_data:
-                    return pokemon_data
-            elif data_type == "quest":
-                return self.handle_quest_data(message, geofence_id)
-            elif data_type == "raid":
-                return self.handle_raid_data(message, geofence_id)
-            elif data_type == "invasion":
-                return self.handle_invasion_data(message, geofence_id)
-
+        # ✅ Handle each webhook type separately
+        if data_type == "pokemon":
+            pokemon_data = await self.handle_pokemon_data(message, geofence_id)
+            if pokemon_data:
+                return pokemon_data
+        #elif data_type == "quest":
+        #    return self.handle_quest_data(message, geofence_id)
+        #elif data_type == "raid":
+        #    return self.handle_raid_data(message, geofence_id)
+        #elif data_type == "invasion":
+        #    return self.handle_invasion_data(message, geofence_id)
+        else:
             logger.warning(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
 
-        except Exception as e:
-            logger.error(f"❌ Error filtering webhook data: {e}")
-            return None
+        #except Exception as e:
+        #    logger.error(f"❌ Error filtering webhook data: {e}")
+        #    return None
 
     ## ✅ Type-Specific Handling Functions
 
@@ -126,7 +125,7 @@ class WebhookFilter:
         ]
 
         # ✅ Check if all required fields are present
-        if not all(field in message for field in required_fields):
+        if not all(field in message and message[field] is not None for field in required_fields):
             logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
             return None
 
@@ -145,21 +144,21 @@ class WebhookFilter:
 
         # ✅ Extract Pokémon Data
         pokemon_data = {
-            "pokemon_id": message.get("pokemon_id"),
-            "form": message.get("form", 0),
-            "latitude": message.get("latitude"),
-            "longitude": message.get("longitude"),
+            "pokemon_id": message["pokemon_id"],
+            "form": message["form"],
+            "latitude": message["latitude"],
+            "longitude": message["longitude"],
             **pvp_ranks,
             "iv": iv_percentage,
-            "cp": message.get("cp"),
-            "level": message.get("pokemon_level"),
-            "gender": message.get("gender"),
-            "shiny": message.get("shiny"),
-            "size": message.get("size"),
-            "username": message.get("username"),
-            "first_seen": message.get("first_seen"),
+            "cp": message["cp"],
+            "level": message["pokemon_level"],
+            "gender": message["gender"],
+            "shiny": message["shiny"],
+            "size": message["size"],
+            "username": message["username"],
+            "first_seen": message["first_seen"],
             "despawn_timer": despawn_timer,
-            "spawnpoint": message.get("spawnpoint_id"),
+            "spawnpoint": message["spawnpoint_id"],
             "area": geofence_id,
         }
 
