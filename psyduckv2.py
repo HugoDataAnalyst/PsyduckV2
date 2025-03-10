@@ -65,7 +65,6 @@ async def main():
     await apply_migrations()  # Apply any new migrations
 
     await redis_manager.init_redis()  # Initialize Redis connection
-    await KojiGeofences(3600).get_cached_geofences()
     logger.info("✅ Psyduck is ready to process data!")
 
     # Start both API servers concurrently
