@@ -93,6 +93,7 @@ koji_port = get_env_int("KOJI_PORT", 8080)
 koji_project_name = get_env_var("KOJI_PROJECT_NAME")
 koji_geofence_api_url = f"http://{koji_ip}:{koji_port}/api/v1/geofence/feature-collection/{koji_project_name}"
 # Extract geofence settings
+geofence_expire_cache_seconds = config.get("geofences", {}).get("expire_cache_seconds", 3600)
 geofence_refresh_cache_seconds = config.get("geofences", {}).get("refresh_cache_seconds", 3500)
 
 

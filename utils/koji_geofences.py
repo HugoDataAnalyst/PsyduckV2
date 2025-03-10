@@ -16,7 +16,7 @@ class KojiGeofences:
     """
     # Start the class static variables
     geofence_key = "koji_geofences"
-    expiry = 3600
+    expiry = AppConfig.geofence_expire_cache_seconds
     bearer_token = AppConfig.koji_bearer_token
     geofence_api_url = AppConfig.koji_geofence_api_url
     redis_manager = RedisManager() # RedisManager is a Singleton
