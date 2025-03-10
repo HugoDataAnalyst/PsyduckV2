@@ -8,16 +8,20 @@ TTH_BUCKETS = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25),
                (25, 30), (30, 35), (35, 40), (40, 45), (45, 50),
                (50, 55), (55, 60)]
 
-def get_tth_bucket(despawn_timer):
-    """Assigns a Pokémon to the correct TTH bucket."""
-    for min_tth, max_tth in TTH_BUCKETS:
-        if min_tth <= despawn_timer < max_tth:
-            return f"{min_tth}_{max_tth}"
-    return None
+def get_tth_bucket(despawn_timer_sec):
+    """Converts despawn time from seconds to minutes and assigns it to the correct TTH bucket."""
+    despawn_timer_min = despawn_timer_sec // 60  # Convert seconds to minutes
 
-async def add_tth_timeseries_pokemon_event(data):
+    for min_tth, max_tth in TTH_BUCKETS:
+        if min_tth <= despawn_timer_min < max_tth:
+            return f"{min_tth}_{max_tth}"
+
+    return None  # Out of range
+
+async def add_tth_timeseries_pokemon_event(data, pipe=None):
     """
     Add a Pokémon event into Redis TimeSeries for TTH-based tracking.
+    Supports an optional Redis pipeline for batch processing.
     """
     redis_status = await redis_manager.check_redis_connection()
     if not redis_status:
@@ -26,6 +30,11 @@ async def add_tth_timeseries_pokemon_event(data):
 
     # Retrieve despawn timer and determine bucket
     despawn_timer = data.get("despawn_timer", 0)
+
+    if despawn_timer <= 0:
+        logger.warning(f"⚠️ Ignoring Pokémon with invalid despawn timer: {despawn_timer}s")
+        return
+
     tth_bucket = get_tth_bucket(despawn_timer)
     if not tth_bucket:
         logger.warning(f"❌ Ignoring Pokémon with out-of-range despawn timer: {despawn_timer}s")
@@ -43,9 +52,13 @@ async def add_tth_timeseries_pokemon_event(data):
     client = redis_manager.redis_client
 
     # Ensure the time series key exists
-    await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", "2592000000")  # 30-day retention
+    await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", "2592000000", pipe)  # 30-day retention
 
-    # Add event to the time series
-    await client.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
+    if pipe:
+        pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
+    else:
+        async with client.pipeline() as pipe:
+            pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
+            await pipe.execute()  # Execute pipeline transaction
 
     logger.info(f"✅ Added Pokémon TTH event to TimeSeries: {key}")

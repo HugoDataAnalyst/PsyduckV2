@@ -9,17 +9,21 @@ TTH_BUCKETS = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25),
                (25, 30), (30, 35), (35, 40), (40, 45), (45, 50),
                (50, 55), (55, 60)]
 
-def get_tth_bucket(despawn_timer):
-    """Assigns a Pokémon to the correct TTH bucket."""
-    for min_tth, max_tth in TTH_BUCKETS:
-        if min_tth <= despawn_timer < max_tth:
-            return f"{min_tth}_{max_tth}"
-    return None
+def get_tth_bucket(despawn_timer_sec):
+    """Converts despawn time from seconds to minutes and assigns it to the correct TTH bucket."""
+    despawn_timer_min = despawn_timer_sec // 60  # Convert seconds to minutes
 
-async def update_tth_pokemon_counter(data):
+    for min_tth, max_tth in TTH_BUCKETS:
+        if min_tth <= despawn_timer_min < max_tth:
+            return f"{min_tth}_{max_tth}"
+
+    return None  # Out of range
+
+async def update_tth_pokemon_counter(data, pipe=None):
     """
-    Increment Pokémon TTH counters for the given area & time-to-hatch range.
+    Increment Pokémon TTH counters for the given area & time-to-hatch range using Redis pipelines.
     - Uses Redis hash to store per-day per-area TTH counters.
+    - Supports optional Redis pipeline for batch processing.
     """
     redis_status = await redis_manager.check_redis_connection()
     if not redis_status:
@@ -32,6 +36,9 @@ async def update_tth_pokemon_counter(data):
 
     area = data["area"]
     despawn_timer = data.get("despawn_timer", 0)
+    if despawn_timer <= 0:
+        logger.warning(f"⚠️ Ignoring Pokémon with invalid despawn timer: {despawn_timer}s")
+        return
 
     # Determine TTH bucket
     tth_bucket = get_tth_bucket(despawn_timer)
@@ -46,6 +53,12 @@ async def update_tth_pokemon_counter(data):
     logger.debug(f"🔑 Hash Key: {hash_key}, Field: {field_name}")
 
     client = redis_manager.redis_client
-    await client.hincrby(hash_key, field_name, 1)  # Increment counter
+
+    if pipe:
+        pipe.hincrby(hash_key, field_name, 1)  # Add command to pipeline
+    else:
+        async with client.pipeline() as pipe:
+            pipe.hincrby(hash_key, field_name, 1)
+            await pipe.execute()  # Execute pipeline transaction
 
     logger.debug(f"✅ Incremented TTH counter {field_name} for area {area}.")
