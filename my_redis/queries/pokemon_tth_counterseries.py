@@ -28,7 +28,7 @@ async def update_tth_pokemon_counter(data, pipe=None):
     redis_status = await redis_manager.check_redis_connection()
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot update Pokémon TTH counter.")
-        return
+        return "ERROR"
 
     # Convert first_seen timestamp to YYYYMMDD format
     ts = data["first_seen"]
@@ -38,13 +38,13 @@ async def update_tth_pokemon_counter(data, pipe=None):
     despawn_timer = data.get("despawn_timer", 0)
     if despawn_timer <= 0:
         logger.warning(f"⚠️ Ignoring Pokémon with invalid despawn timer: {despawn_timer}s")
-        return
+        return "IGNORED"
 
     # Determine TTH bucket
     tth_bucket = get_tth_bucket(despawn_timer)
     if not tth_bucket:
         logger.warning(f"❌ Ignoring Pokémon with out-of-range despawn timer: {despawn_timer}s")
-        return
+        return "IGNORED"
 
     # Construct Redis key for the area and date
     hash_key = f"counter:tth_pokemon:{area}:{date_str}"
@@ -53,12 +53,17 @@ async def update_tth_pokemon_counter(data, pipe=None):
     logger.debug(f"🔑 Hash Key: {hash_key}, Field: {field_name}")
 
     client = redis_manager.redis_client
+    updated_fields = {}
 
     if pipe:
         pipe.hincrby(hash_key, field_name, 1)  # Add command to pipeline
+        updated_fields[tth_bucket] = "OK"
     else:
         async with client.pipeline() as pipe:
             pipe.hincrby(hash_key, field_name, 1)
             await pipe.execute()  # Execute pipeline transaction
 
+        updated_fields[tth_bucket] = "OK"
+
     logger.debug(f"✅ Incremented TTH counter {field_name} for area {area}.")
+    return updated_fields

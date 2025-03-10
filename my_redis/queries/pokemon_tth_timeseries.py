@@ -26,19 +26,19 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
     redis_status = await redis_manager.check_redis_connection()
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot add Pokémon TTH event to time series.")
-        return
+        return "ERROR"
 
     # Retrieve despawn timer and determine bucket
     despawn_timer = data.get("despawn_timer", 0)
 
     if despawn_timer <= 0:
         logger.warning(f"⚠️ Ignoring Pokémon with invalid despawn timer: {despawn_timer}s")
-        return
+        return "IGNORED"
 
     tth_bucket = get_tth_bucket(despawn_timer)
     if not tth_bucket:
         logger.warning(f"❌ Ignoring Pokémon with out-of-range despawn timer: {despawn_timer}s")
-        return
+        return "IGNORED"
 
     # Retrieve timestamp (first_seen, rounded to minute)
     first_seen = data["first_seen"]
@@ -50,15 +50,20 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
     logger.debug(f"🔑 Constructed TimeSeries Key: {key}")
 
     client = redis_manager.redis_client
+    updated_fields = {}
 
     # Ensure the time series key exists
     await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", "2592000000", pipe)  # 30-day retention
 
     if pipe:
         pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
+        updated_fields[tth_bucket] = "OK"
     else:
         async with client.pipeline() as pipe:
             pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
             await pipe.execute()  # Execute pipeline transaction
 
+        updated_fields[tth_bucket] = "OK"
+
     logger.info(f"✅ Added Pokémon TTH event to TimeSeries: {key}")
+    return updated_fields
