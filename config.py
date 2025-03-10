@@ -1,11 +1,8 @@
 import os
 import sys
 import json
-from click import File
 import dotenv
 import urllib.parse
-
-from flask import config
 from utils.logger import logger
 from typing import List, Optional, Dict
 
