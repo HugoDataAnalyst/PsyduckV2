@@ -38,6 +38,7 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
 
     # Ensure keys exist
     retention_ms = AppConfig.timeseries_pokemon_retention_ms
+    logger.debug(f"🚨 Set PokémonTotal retention timer: {AppConfig.timeseries_pokemon_retention_ms}")
     await ensure_timeseries_key(client, key_total, "total", area, pokemon_id, form, retention_ms, pipe)
     await ensure_timeseries_key(client, key_iv100, "iv100", area, pokemon_id, form, retention_ms, pipe)
     await ensure_timeseries_key(client, key_iv0, "iv0", area, pokemon_id, form, retention_ms, pipe)
