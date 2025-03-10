@@ -1,4 +1,5 @@
 import asyncio
+import config as AppConfig
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from utils.logger import logger
@@ -38,7 +39,7 @@ async def retry_call(coro_func, *args, max_attempts=5, initial_delay=2, delay_in
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Start Koji Instance
-    koji_instance = KojiGeofences(3500)
+    koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
     global_state.geofences = await retry_call(koji_instance.get_cached_geofences)
     if not global_state.geofences:
         logger.error("⚠️ No geofences available at startup. Exiting application.")
