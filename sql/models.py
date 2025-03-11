@@ -1,3 +1,4 @@
+from calendar import month
 from tortoise.models import Model
 from tortoise import fields
 import config as AppConfig
@@ -26,6 +27,22 @@ class AggregatedPokemonIVMonthly(Model):
         table = "aggregated_pokemon_iv_monthly"
         unique_together = (
             "spawnpoint_id", "pokemon_id", "form", "iv", "area", "month_year"
+        )
+
+class ShinyUsernameRates(Model):
+    """Stores shiny username rates per area."""
+    username = fields.CharField(max_length=255, unique=True)
+    pokemon_id = fields.SmallIntField()
+    form = fields.SmallIntField(default=0)
+    shiny = fields.SmallIntField(default=0)  # 0 = Not Shiny, 1 = Shiny
+    area = fields.ForeignKeyField("models.AreaNames", related_name="shiny_username_rates")
+    month_year = fields.SmallIntField()  # Format: YYMM (2503 for March 2025)
+    total_count = fields.IntField(default=0)
+
+    class Meta:
+        table = "shiny_username_rates"
+        unique_together = (
+            "username", "pokemon_id", "form", "shiny", "area", "month_year"
         )
 
 # Optional: Register models for Tortoise
