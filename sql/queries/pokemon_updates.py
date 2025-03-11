@@ -2,7 +2,7 @@ from typing import Optional
 from datetime import datetime
 from utils.logger import logger
 from tortoise.exceptions import DoesNotExist
-from sql.models import AggregatedPokemonIVMonthly
+from sql.models import AggregatedPokemonIVMonthly, ShinyUsernameRates
 
 class PokemonUpdatesQueries:
     @staticmethod
@@ -100,4 +100,51 @@ class PokemonUpdatesQueries:
                 total_count=increment
             )
             logger.debug(f"✅ Created new AggregatedPokemonIVMonthly: {obj}")
+            return obj
+
+    @classmethod
+    async def upsert_shiny_username_rate(
+        cls,
+        username: str,
+        pokemon_id: int,
+        form: int,
+        shiny: int,
+        area_id: int,
+        first_seen_timestamp: int,
+        increment: int = 1
+    ):
+        """
+        Insert or update the ShinyUsernameRates record.
+
+        The record is uniquely identified by:
+          username, pokemon_id, form, shiny, area, and month_year.
+        The month_year is derived from the first_seen timestamp in YYMM format.
+        """
+        dt = datetime.fromtimestamp(first_seen_timestamp)
+        month_year = int(dt.strftime("%y%m"))
+
+        try:
+            obj = await ShinyUsernameRates.get(
+                username=username,
+                pokemon_id=pokemon_id,
+                form=form,
+                shiny=shiny,
+                area_id=area_id,
+                month_year=month_year
+            )
+            obj.total_count += increment
+            await obj.save()
+            logger.debug(f"⬆️ Updated ShinyUsernameRates: {obj}")
+            return obj
+        except DoesNotExist:
+            obj = await ShinyUsernameRates.create(
+                username=username,
+                pokemon_id=pokemon_id,
+                form=form,
+                shiny=shiny,
+                area_id=area_id,
+                month_year=month_year,
+                total_count=increment
+            )
+            logger.debug(f"✅ Created new ShinyUsernameRates: {obj}")
             return obj
