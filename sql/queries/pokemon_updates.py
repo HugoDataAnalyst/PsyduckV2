@@ -3,9 +3,32 @@ from datetime import datetime
 from utils.logger import logger
 from tortoise.exceptions import DoesNotExist
 from utils.calc_iv_bucket import get_iv_bucket
-from sql.models import AggregatedPokemonIVMonthly, ShinyUsernameRates
+from sql.models import AggregatedPokemonIVMonthly, ShinyUsernameRates, Spawnpoint
 
 class PokemonUpdatesQueries:
+    @staticmethod
+    async def upsert_spawnpoint(spawnpoint_id: int, latitude: float, longitude: float) -> Spawnpoint:
+        """
+        Insert the spawnpoint into the Spawnpoints table if it doesn't exist.
+        Returns the Spawnpoint object.
+        """
+        # Use get_or_create to avoid duplicates.
+        obj, created = await Spawnpoint.get_or_create(
+            spawnpoint=spawnpoint_id,
+            defaults={"latitude": latitude, "longitude": longitude}
+        )
+        if not created:
+            # Optionally, you can update the latitude/longitude if they've changed.
+            # For example:
+            if obj.latitude != latitude or obj.longitude != longitude:
+                obj.latitude = latitude
+                obj.longitude = longitude
+                await obj.save()
+            logger.debug(f"⏭️ Spawnpoint exists: {obj}")
+        else:
+            logger.debug(f"✅ Created new spawnpoint: {obj}")
+        return obj
+
     @classmethod
     async def upsert_aggregated_pokemon_iv_monthly(
         cls,
@@ -36,17 +59,20 @@ class PokemonUpdatesQueries:
         dt = datetime.fromtimestamp(first_seen_timestamp)
         month_year = int(dt.strftime("%y%m"))
 
+        # Upsert the spawnpoint (or retrieve existing).
+        spawnpoint_obj = await cls.upsert_spawnpoint(spawnpoint_id, latitude, longitude)
+        # Use the spawnpoint_obj's ID for the foreign key.
+        sp_obj_id = spawnpoint_obj.id
+
         # Use get_or_create to fetch an existing record or create a new one.
         obj, created = await AggregatedPokemonIVMonthly.get_or_create(
-            spawnpoint_id=spawnpoint_id,
+            spawnpoint_id=sp_obj_id,
             pokemon_id=pokemon_id,
             form=form,
             iv=bucket_iv,
             area_id=area_id,
             month_year=month_year,
             defaults={
-                "latitude": latitude,
-                "longitude": longitude,
                 "total_count": increment
             }
         )

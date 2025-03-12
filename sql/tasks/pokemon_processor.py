@@ -19,6 +19,7 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
         """
         try:
             spawnpoint_id = filtered_data.get('spawnpoint')
+            int_64_spawnpoint_id = int(spawnpoint_id, 16)
             latitude = filtered_data.get('latitude')
             longitude = filtered_data.get('longitude')
             pokemon_id = filtered_data.get('pokemon_id')
@@ -28,7 +29,7 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
             first_seen_timestamp = filtered_data.get('first_seen')
 
             result = await cls.upsert_aggregated_pokemon_iv_monthly(
-                spawnpoint_id=spawnpoint_id,
+                spawnpoint_id=int_64_spawnpoint_id,
                 latitude=latitude,
                 longitude=longitude,
                 pokemon_id=pokemon_id,

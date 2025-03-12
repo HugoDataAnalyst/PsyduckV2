@@ -11,12 +11,20 @@ class AreaNames(Model):
     class Meta:
         table = "area_names"
 
+class Spawnpoint(Model):
+    """Stores spawnpoint information."""
+    id = fields.BigIntField(pk=True)
+    spawnpoint = fields.BigIntField(unique=True)
+    latitude = fields.FloatField()
+    longitude = fields.FloatField()
+
+    class Meta:
+        table = "spawnpoints"
+
 class AggregatedPokemonIVMonthly(Model):
     """Stores aggregated IV data per spawnpoint, monthly."""
     id = fields.BigIntField(pk=True)
-    spawnpoint_id = fields.CharField(max_length=50)
-    latitude = fields.FloatField()
-    longitude = fields.FloatField()
+    spawnpoint = fields.ForeignKeyField("models.Spawnpoint", related_name="aggregated_stats")
     pokemon_id = fields.SmallIntField()
     form = fields.SmallIntField(default=0)
     iv = fields.SmallIntField()
@@ -27,7 +35,7 @@ class AggregatedPokemonIVMonthly(Model):
     class Meta:
         table = "aggregated_pokemon_iv_monthly"
         unique_together = (
-            "spawnpoint_id", "pokemon_id", "form", "iv", "area", "month_year"
+            "spawnpoint", "pokemon_id", "form", "iv", "area", "month_year"
         )
 
 class ShinyUsernameRates(Model):
