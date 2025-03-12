@@ -6,6 +6,7 @@ from my_redis.queries import (
     pokemon_counterseries,
     pokemon_tth_counterseries,
     pokemon_tth_timeseries,
+    pokemon_weather_iv_counterseries
 )
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
 from my_redis.connect_redis import RedisManager
@@ -35,6 +36,7 @@ async def process_pokemon_data(filtered_data):
             pokemon_counterseries_update = await pokemon_counterseries.update_total_pokemon_counter(filtered_data, pipe)
             pokemon_tth_timeseries_update = await pokemon_tth_timeseries.add_tth_timeseries_pokemon_event(filtered_data, pipe)
             pokemon_tth_counterseries_update = await pokemon_tth_counterseries.update_tth_pokemon_counter(filtered_data, pipe)
+            pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
 
             # Execute all Redis commands in a single batch
             await pipe.execute()
@@ -62,6 +64,7 @@ async def process_pokemon_data(filtered_data):
             f"  - Counter Total: {json.dumps(pokemon_counterseries_update, indent=2)}\n"
             f"  - TTH Timeseries: {json.dumps(pokemon_tth_timeseries_update, indent=2)}\n"
             f"  - TTH Counter: {json.dumps(pokemon_tth_counterseries_update, indent=2)}\n"
+            f"  - Counter Weather: {json.dumps(pokemon_weather_counterseries_update, indent=2)}\n"
         )
 
         logger.debug(f"✅ Processed Pokémon {filtered_data['pokemon_id']} in area {filtered_data['area_name']} - Updates: {structured_result}")
