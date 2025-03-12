@@ -54,7 +54,7 @@ async def start_servers():
     )
     webhook_api_server = uvicorn.Server(webhook_api_config)
 
-    logger.info("Starting both API servers concurrently...")
+    logger.info("⬆️ Starting both API servers concurrently...")
     await asyncio.gather(
         main_api_server.serve(),
         webhook_api_server.serve()

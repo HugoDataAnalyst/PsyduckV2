@@ -43,7 +43,7 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
             return result
 
         except Exception as e:
-            logger.error(f"Error in upsert_aggregated_from_filtered: {e}")
+            logger.error(f"❌ Error in upsert_aggregated_from_filtered: {e}")
             raise
 
     @classmethod
@@ -81,5 +81,5 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
             return result
 
         except Exception as e:
-            logger.error(f"Error in upsert_shiny_rate_from_filtered: {e}")
+            logger.error(f"❌ Error in upsert_shiny_rate_from_filtered: {e}")
             raise

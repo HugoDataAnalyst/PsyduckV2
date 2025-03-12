@@ -29,7 +29,7 @@ class PokemonUpdatesQueries:
         # Convert the raw IV to its bucket representation.
         bucket_iv = get_iv_bucket(raw_iv)
         if bucket_iv is None:
-            logger.warning("Bucket conversion returned None; skipping upsert.")
+            logger.warning("⚠️ Bucket conversion returned None; skipping upsert.")
             return None
 
         # Convert first_seen timestamp to a month-year value.

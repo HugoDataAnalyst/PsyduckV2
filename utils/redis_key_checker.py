@@ -47,7 +47,7 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
 
             logger.debug(f"✅ Time series key {key} created.")
         else:
-            logger.debug(f"✅ Time series key {key} already exists.")
+            logger.debug(f"🚨 Time series key {key} already exists.")
 
     except Exception as e:
         logger.error(f"❌ Error ensuring timeseries key {key}: {e}")

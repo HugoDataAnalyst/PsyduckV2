@@ -42,7 +42,7 @@ async def update_pokemon_weather_iv(data, pipe=None):
 
     iv_range = get_iv_bucket(raw_iv)
     if iv_range is None:
-        logger.warning("IV range conversion returned None; skipping update.")
+        logger.warning("⚠️ IV range conversion returned None; skipping update.")
         return "IGNORED"
 
     # Determine weather boost flag (0 or 1)

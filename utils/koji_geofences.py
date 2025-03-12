@@ -54,7 +54,7 @@ class KojiGeofences:
                         if created:
                             logger.debug(f"✅ Created new area: {area_name}")
                         else:
-                            logger.debug(f"Found existing area: '{area_name}' with id {area_obj.id}")
+                            logger.debug(f"🚨 Found existing area: '{area_name}' with id {area_obj.id}")
 
                         geofences.append({
                             "id": area_obj.id,
@@ -108,7 +108,7 @@ class KojiGeofences:
                 logger.debug(f"✅ Retrieved cached geofences: {result}")
                 return result
         else:
-            logger.error("Failed to retrieve cached geofences.")
+            logger.error("❌ Failed to retrieve cached geofences.")
             return
 
     async def refresh_geofences(self):

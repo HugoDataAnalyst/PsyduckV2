@@ -17,7 +17,7 @@ def get_iv_bucket(iv: int) -> Optional[int]:
     If the IV is out of the 0–100 range, returns None.
     """
     if iv < 0 or iv > 100:
-        logger.warning(f"IV value {iv} out of range (0-100); returning None.")
+        logger.warning(f"⚠️ IV value {iv} out of range (0-100); returning None.")
         return None
 
     bucket = None
@@ -36,5 +36,5 @@ def get_iv_bucket(iv: int) -> Optional[int]:
     elif iv < 100:
         bucket = 95
 
-    logger.debug(f"Raw IV {iv} mapped to bucket {bucket}.")
+    logger.debug(f"✅ Raw IV {iv} mapped to bucket {bucket}.")
     return bucket

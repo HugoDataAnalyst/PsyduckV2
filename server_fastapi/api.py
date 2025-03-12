@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     #if not geofences:
     #    logger.warning("⚠️ No geofences available at startup.")
     yield
-    logger.info("Shutting down DATA Retriever FastAPI application.")
+    logger.info("👋 Shutting down DATA Retriever FastAPI application.")
 
 app = FastAPI(lifespan=lifespan)
 

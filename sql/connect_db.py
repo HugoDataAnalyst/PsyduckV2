@@ -30,8 +30,6 @@ async def init_db():
         try:
             logger.info(f"⬆️ Initializing database connection (Attempt {attempt}/{retries})...")
             await Tortoise.init(config=db_config)
-            #logger.info("Attempting to generate schemas.")
-            #await Tortoise.generate_schemas()
             logger.success("✅ Database connection initialized.")
             break
         except Exception as e:

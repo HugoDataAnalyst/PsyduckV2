@@ -30,7 +30,7 @@ async def retry_call(coro_func, *args, max_attempts=5, initial_delay=2, delay_in
         except Exception as e:
             attempt += 1
             if attempt >= max_attempts:
-                logger.error(f"Maximum attempts reached for {coro_func.__name__}.")
+                logger.error(f"❌ Maximum attempts reached for {coro_func.__name__}.")
                 raise e
             logger.warning(f"⚠️ Attempt {attempt} for {coro_func.__name__} failed: {e}. Retrying in {delay} seconds...")
             await asyncio.sleep(delay)
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(safe_refresh())
 
     yield
-    logger.info("Shutting down FastAPI application.")
+    logger.info("👋 Shutting down Webhook Receiver application.")
 
 app = FastAPI(lifespan=lifespan)
 
