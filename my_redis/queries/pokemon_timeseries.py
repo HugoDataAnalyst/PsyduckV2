@@ -47,39 +47,60 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
     await ensure_timeseries_key(client, key_pvp_ultra, "pvp_ultra", area, pokemon_id, form, retention_ms, pipe)
     await ensure_timeseries_key(client, key_shiny, "shiny", area, pokemon_id, form, retention_ms, pipe)
 
+    # Determine metric increments
+    inc_total      = 1  # Always add 1 for total
+    inc_iv100      = 1 if data.get("iv") == 100 else 0
+    inc_iv0        = 1 if data.get("iv") == 0 else 0
+    inc_pvp_little = 1 if data.get("pvp_little_rank") and 1 in data.get("pvp_little_rank") else 0
+    inc_pvp_great  = 1 if data.get("pvp_great_rank") and 1 in data.get("pvp_great_rank") else 0
+    inc_pvp_ultra  = 1 if data.get("pvp_ultra_rank") and 1 in data.get("pvp_ultra_rank") else 0
+    inc_shiny      = 1 if data.get("shiny") else 0
+
     if pipe:
         # Add to Redis pipeline
-        pipe.execute_command("TS.ADD", key_total, ts, 1, "DUPLICATE_POLICY", "SUM")
+        pipe.execute_command("TS.ADD", key_total, ts, inc_total, "DUPLICATE_POLICY", "SUM")
         updated_fields["total"] = "OK"
-        pipe.execute_command("TS.ADD", key_iv100, ts, 1, "DUPLICATE_POLICY", "SUM")
-        updated_fields["iv100"] = "OK"
-        pipe.execute_command("TS.ADD", key_iv0, ts, 1, "DUPLICATE_POLICY", "SUM")
-        updated_fields["iv0"] = "OK"
-        pipe.execute_command("TS.ADD", key_pvp_little, ts, 1, "DUPLICATE_POLICY", "SUM")
-        updated_fields["pvp_little"] = "OK"
-        pipe.execute_command("TS.ADD", key_pvp_great, ts, 1, "DUPLICATE_POLICY", "SUM")
-        updated_fields["pvp_great"] = "OK"
-        pipe.execute_command("TS.ADD", key_pvp_ultra, ts, 1, "DUPLICATE_POLICY", "SUM")
-        updated_fields["pvp_ultra"] = "OK"
-        pipe.execute_command("TS.ADD", key_shiny, ts, 1, "DUPLICATE_POLICY", "SUM")
-        updated_fields["shiny"] = "OK"
+        if inc_iv100:
+            pipe.execute_command("TS.ADD", key_iv100, ts, inc_iv100, "DUPLICATE_POLICY", "SUM")
+            updated_fields["iv100"] = "OK"
+        if inc_iv0:
+            pipe.execute_command("TS.ADD", key_iv0, ts, inc_iv0, "DUPLICATE_POLICY", "SUM")
+            updated_fields["iv0"] = "OK"
+        if inc_pvp_little:
+            pipe.execute_command("TS.ADD", key_pvp_little, ts, inc_pvp_little, "DUPLICATE_POLICY", "SUM")
+            updated_fields["pvp_little"] = "OK"
+        if inc_pvp_great:
+            pipe.execute_command("TS.ADD", key_pvp_great, ts, inc_pvp_great, "DUPLICATE_POLICY", "SUM")
+            updated_fields["pvp_great"] = "OK"
+        if inc_pvp_ultra:
+            pipe.execute_command("TS.ADD", key_pvp_ultra, ts, inc_pvp_ultra, "DUPLICATE_POLICY", "SUM")
+            updated_fields["pvp_ultra"] = "OK"
+        if inc_shiny:
+            pipe.execute_command("TS.ADD", key_shiny, ts, inc_shiny, "DUPLICATE_POLICY", "SUM")
+            updated_fields["shiny"] = "OK"
     else:
         # Execute in a single Redis transaction
         async with client.pipeline() as pipe:
-            pipe.execute_command("TS.ADD", key_total, ts, 1, "DUPLICATE_POLICY", "SUM")
+            pipe.execute_command("TS.ADD", key_total, ts, inc_total, "DUPLICATE_POLICY", "SUM")
             updated_fields["total"] = "OK"
-            pipe.execute_command("TS.ADD", key_iv100, ts, 1, "DUPLICATE_POLICY", "SUM")
-            updated_fields["iv100"] = "OK"
-            pipe.execute_command("TS.ADD", key_iv0, ts, 1, "DUPLICATE_POLICY", "SUM")
-            updated_fields["iv0"] = "OK"
-            pipe.execute_command("TS.ADD", key_pvp_little, ts, 1, "DUPLICATE_POLICY", "SUM")
-            updated_fields["pvp_little"] = "OK"
-            pipe.execute_command("TS.ADD", key_pvp_great, ts, 1, "DUPLICATE_POLICY", "SUM")
-            updated_fields["pvp_great"] = "OK"
-            pipe.execute_command("TS.ADD", key_pvp_ultra, ts, 1, "DUPLICATE_POLICY", "SUM")
-            updated_fields["pvp_ultra"] = "OK"
-            pipe.execute_command("TS.ADD", key_shiny, ts, 1, "DUPLICATE_POLICY", "SUM")
-            updated_fields["shiny"] = "OK"
+            if inc_iv100:
+                pipe.execute_command("TS.ADD", key_iv100, ts, inc_iv100, "DUPLICATE_POLICY", "SUM")
+                updated_fields["iv100"] = "OK"
+            if inc_iv0:
+                pipe.execute_command("TS.ADD", key_iv0, ts, inc_iv0, "DUPLICATE_POLICY", "SUM")
+                updated_fields["iv0"] = "OK"
+            if inc_pvp_little:
+                pipe.execute_command("TS.ADD", key_pvp_little, ts, inc_pvp_little, "DUPLICATE_POLICY", "SUM")
+                updated_fields["pvp_little"] = "OK"
+            if inc_pvp_great:
+                pipe.execute_command("TS.ADD", key_pvp_great, ts, inc_pvp_great, "DUPLICATE_POLICY", "SUM")
+                updated_fields["pvp_great"] = "OK"
+            if inc_pvp_ultra:
+                pipe.execute_command("TS.ADD", key_pvp_ultra, ts, inc_pvp_ultra, "DUPLICATE_POLICY", "SUM")
+                updated_fields["pvp_ultra"] = "OK"
+            if inc_shiny:
+                pipe.execute_command("TS.ADD", key_shiny, ts, inc_shiny, "DUPLICATE_POLICY", "SUM")
+                updated_fields["shiny"] = "OK"
             await pipe.execute()
 
     logger.info(f"✅ Added Pokémon event to time series for Pokémon ID {pokemon_id} in area {area}")
