@@ -13,7 +13,7 @@ class AreaNames(Model):
 
 class AggregatedPokemonIVMonthly(Model):
     """Stores aggregated IV data per spawnpoint, monthly."""
-    spawnpoint_id = fields.BigIntField(pk=True)
+    spawnpoint_id = fields.CharField(max_length=50, pk=True)
     latitude = fields.FloatField()
     longitude = fields.FloatField()
     pokemon_id = fields.SmallIntField()

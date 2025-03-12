@@ -8,7 +8,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     `name` VARCHAR(255) NOT NULL UNIQUE
 ) CHARACTER SET utf8mb4 COMMENT='Stores area names and their associated numeric IDs.';
 CREATE TABLE IF NOT EXISTS `aggregated_pokemon_iv_monthly` (
-    `spawnpoint_id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    `spawnpoint_id` VARCHAR(50) NOT NULL PRIMARY KEY,
     `latitude` DOUBLE NOT NULL,
     `longitude` DOUBLE NOT NULL,
     `pokemon_id` SMALLINT NOT NULL,
