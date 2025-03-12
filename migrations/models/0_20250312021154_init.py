@@ -8,7 +8,8 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     `name` VARCHAR(255) NOT NULL UNIQUE
 ) CHARACTER SET utf8mb4 COMMENT='Stores area names and their associated numeric IDs.';
 CREATE TABLE IF NOT EXISTS `aggregated_pokemon_iv_monthly` (
-    `spawnpoint_id` VARCHAR(50) NOT NULL PRIMARY KEY,
+    `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    `spawnpoint_id` VARCHAR(50) NOT NULL,
     `latitude` DOUBLE NOT NULL,
     `longitude` DOUBLE NOT NULL,
     `pokemon_id` SMALLINT NOT NULL,
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS `aggregated_pokemon_iv_monthly` (
     CONSTRAINT `fk_aggregat_area_nam_33d0e133` FOREIGN KEY (`area_id`) REFERENCES `area_names` (`id`) ON DELETE CASCADE
 ) CHARACTER SET utf8mb4 COMMENT='Stores aggregated IV data per spawnpoint, monthly.';
 CREATE TABLE IF NOT EXISTS `shiny_username_rates` (
-    `username` VARCHAR(255) NOT NULL PRIMARY KEY,
+    `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    `username` VARCHAR(255) NOT NULL,
     `pokemon_id` SMALLINT NOT NULL,
     `form` SMALLINT NOT NULL DEFAULT 0,
     `shiny` SMALLINT NOT NULL DEFAULT 0,
