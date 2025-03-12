@@ -24,9 +24,9 @@ class PokemonUpdatesQueries:
                 obj.latitude = latitude
                 obj.longitude = longitude
                 await obj.save()
-            logger.debug(f"⏭️ Spawnpoint exists: {obj}")
+            logger.info(f"⏭️ Spawnpoint exists: id={obj.id}, spawnpoint={obj.spawnpoint}, lat={obj.latitude}, lon={obj.longitude}")
         else:
-            logger.debug(f"✅ Created new spawnpoint: {obj}")
+            logger.debug(f"✅ Created new spawnpoint: id={obj.id}, spawnpoint={obj.spawnpoint}, lat={obj.latitude}, lon={obj.longitude}")
         return obj
 
     @classmethod
@@ -80,9 +80,9 @@ class PokemonUpdatesQueries:
         if not created:
             obj.total_count += increment
             await obj.save()
-            logger.debug(f"⬆️ Updated AggregatedPokemonIVMonthly: {obj}")
+            logger.debug(f"⬆️ Updated AggregatedPokemonIVMonthly: Pokémon={obj.pokemon_id}, Form={obj.form}, IV={obj.iv}, Area={obj.area}")
         else:
-            logger.debug(f"✅ Created new AggregatedPokemonIVMonthly: {obj}")
+            logger.debug(f"✅ Created new AggregatedPokemonIVMonthly: Pokémon={obj.pokemon_id}, Form={obj.form}, IV={obj.iv}, Area={obj.area}")
 
         return obj
 
