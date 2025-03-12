@@ -13,7 +13,7 @@ class AreaNames(Model):
 
 class AggregatedPokemonIVMonthly(Model):
     """Stores aggregated IV data per spawnpoint, monthly."""
-    spawnpoint_id = fields.BigIntField()
+    spawnpoint_id = fields.BigIntField(pk=True)
     latitude = fields.FloatField()
     longitude = fields.FloatField()
     pokemon_id = fields.SmallIntField()
@@ -31,7 +31,7 @@ class AggregatedPokemonIVMonthly(Model):
 
 class ShinyUsernameRates(Model):
     """Stores shiny username rates per area."""
-    username = fields.CharField(max_length=255, unique=True)
+    username = fields.CharField(max_length=255, pk=True)
     pokemon_id = fields.SmallIntField()
     form = fields.SmallIntField(default=0)
     shiny = fields.SmallIntField(default=0)  # 0 = Not Shiny, 1 = Shiny
