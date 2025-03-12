@@ -68,8 +68,8 @@ db_user = get_env_var('DB_USER', "root")
 db_password = get_env_var('DB_PASSWORD', "root_password")
 db_retry_connection = 5
 db_rest_betwen_connection = 5
-store_sql_pokemon_aggregation = config.get('SQL', {}).get('use_sql_pokemon_aggregation', True)
-store_sql_pokemon_shiny = config.get('SQL', {}).get('use_sql_pokemon_shiny', True)
+store_sql_pokemon_aggregation = str(config.get('SQL', {}).get('store_sql_pokemon_aggregation', True)).upper() == "TRUE"
+store_sql_pokemon_shiny = str(config.get('SQL', {}).get('store_sql_pokemon_shiny', True)).upper() == "TRUE"
 
 # Redis
 redis_password = get_env_var("REDIS_PASSWORD", "myveryredisstrongpassword")

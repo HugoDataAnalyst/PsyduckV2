@@ -40,10 +40,17 @@ async def process_pokemon_data(filtered_data):
             await pipe.execute()
 
         # Execute SQL commands if Enabled
-        if AppConfig.use_sql_pokemon_aggregation:
+        if AppConfig.store_sql_pokemon_aggregation:
+            logger.info("🔃 Processing Pokémon Aggregation...")
             await pokemon_sql.upsert_aggregated_from_filtered(filtered_data)
-        if AppConfig.use_sql_pokemon_shiny:
+        else:
+            logger.info("⚠️ SQL Pokémon Aggregation is disabled.")
+
+        if AppConfig.store_sql_pokemon_shiny:
+            logger.info("🔃 Processing Pokémon Shiny Rates...")
             await pokemon_sql.upsert_shiny_rate_from_filtered(filtered_data)
+        else:
+            logger.info("⚠️ SQL Pokémon Shiny Rates is disabled.")
 
         # Map results to Meaningful Information.
         structured_result = (
