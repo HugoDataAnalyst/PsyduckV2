@@ -1,15 +1,18 @@
 import asyncio
 import json
+import config as AppConfig
 from my_redis.queries import (
     pokemon_timeseries,
     pokemon_counterseries,
     pokemon_tth_counterseries,
     pokemon_tth_timeseries,
 )
+from sql.tasks.pokemon_processor import PokemonSQLProcessor
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
 redis_manager = RedisManager()
+pokemon_sql = PokemonSQLProcessor()
 
 async def process_pokemon_data(filtered_data):
     """
@@ -35,6 +38,12 @@ async def process_pokemon_data(filtered_data):
 
             # Execute all Redis commands in a single batch
             await pipe.execute()
+
+        # Execute SQL commands if Enabled
+        if AppConfig.use_sql_pokemon_aggregation:
+            await pokemon_sql.upsert_aggregated_from_filtered(filtered_data)
+        if AppConfig.use_sql_pokemon_shiny:
+            await pokemon_sql.upsert_shiny_rate_from_filtered(filtered_data)
 
         # Map results to Meaningful Information.
         structured_result = (
