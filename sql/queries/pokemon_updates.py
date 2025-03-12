@@ -23,7 +23,7 @@ class PokemonUpdatesQueries:
         Insert or update the AggregatedPokemonIVMonthly record.
 
         The record is uniquely identified by:
-          spawnpoint_id, pokemon_id, form, iv (bucket), area, and month_year.
+        spawnpoint_id, pokemon_id, form, iv (bucket), area, and month_year.
         The month_year is derived from the first_seen timestamp in YYMM format.
         """
         # Convert the raw IV to its bucket representation.
@@ -36,33 +36,29 @@ class PokemonUpdatesQueries:
         dt = datetime.fromtimestamp(first_seen_timestamp)
         month_year = int(dt.strftime("%y%m"))
 
-        try:
-            obj = await AggregatedPokemonIVMonthly.get(
-                spawnpoint_id=spawnpoint_id,
-                pokemon_id=pokemon_id,
-                form=form,
-                iv=bucket_iv,
-                area_id=area_id,
-                month_year=month_year
-            )
+        # Use get_or_create to fetch an existing record or create a new one.
+        obj, created = await AggregatedPokemonIVMonthly.get_or_create(
+            spawnpoint_id=spawnpoint_id,
+            pokemon_id=pokemon_id,
+            form=form,
+            iv=bucket_iv,
+            area_id=area_id,
+            month_year=month_year,
+            defaults={
+                "latitude": latitude,
+                "longitude": longitude,
+                "total_count": increment
+            }
+        )
+
+        if not created:
             obj.total_count += increment
             await obj.save()
             logger.debug(f"⬆️ Updated AggregatedPokemonIVMonthly: {obj}")
-            return obj
-        except DoesNotExist:
-            obj = await AggregatedPokemonIVMonthly.create(
-                spawnpoint_id=spawnpoint_id,
-                latitude=latitude,
-                longitude=longitude,
-                pokemon_id=pokemon_id,
-                form=form,
-                iv=bucket_iv,
-                area_id=area_id,
-                month_year=month_year,
-                total_count=increment
-            )
+        else:
             logger.debug(f"✅ Created new AggregatedPokemonIVMonthly: {obj}")
-            return obj
+
+        return obj
 
     @classmethod
     async def upsert_shiny_username_rate(
@@ -79,34 +75,28 @@ class PokemonUpdatesQueries:
         Insert or update the ShinyUsernameRates record.
 
         The record is uniquely identified by:
-          username, pokemon_id, form, shiny, area, and month_year.
+        username, pokemon_id, form, shiny, area, and month_year.
         The month_year is derived from the first_seen timestamp in YYMM format.
         """
         dt = datetime.fromtimestamp(first_seen_timestamp)
         month_year = int(dt.strftime("%y%m"))
 
-        try:
-            obj = await ShinyUsernameRates.get(
-                username=username,
-                pokemon_id=pokemon_id,
-                form=form,
-                shiny=shiny,
-                area_id=area_id,
-                month_year=month_year
-            )
+        # Use get_or_create to fetch or create the record atomically.
+        obj, created = await ShinyUsernameRates.get_or_create(
+            username=username,
+            pokemon_id=pokemon_id,
+            form=form,
+            shiny=shiny,
+            area_id=area_id,
+            month_year=month_year,
+            defaults={'total_count': increment}
+        )
+
+        if not created:
             obj.total_count += increment
             await obj.save()
             logger.debug(f"⬆️ Updated ShinyUsernameRates: {obj}")
-            return obj
-        except DoesNotExist:
-            obj = await ShinyUsernameRates.create(
-                username=username,
-                pokemon_id=pokemon_id,
-                form=form,
-                shiny=shiny,
-                area_id=area_id,
-                month_year=month_year,
-                total_count=increment
-            )
+        else:
             logger.debug(f"✅ Created new ShinyUsernameRates: {obj}")
-            return obj
+
+        return obj
