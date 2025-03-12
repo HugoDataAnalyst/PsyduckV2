@@ -39,7 +39,7 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
                 increment=increment
             )
 
-            logger.debug(f"✅ Upserted Pokémon {pokemon_id} in area {area_id} - Updates: {result}")
+            logger.info(f"✅ Upserted Pokémon {pokemon_id} in area {area_id} - Updates: {result}")
             return result
 
         except Exception as e:
@@ -77,7 +77,7 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
                 increment=increment
             )
 
-            logger.debug(f"✅ Upserted Shiny Username Rate for {username} (Pokémon {pokemon_id}) in area {area_id} - Result: {result}")
+            logger.info(f"✅ Upserted Shiny Username Rate for {username} (Pokémon {pokemon_id}) in area {area_id} - Result: {result}")
             return result
 
         except Exception as e:
