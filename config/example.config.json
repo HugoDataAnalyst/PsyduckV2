@@ -1,7 +1,7 @@
 {
     "SQL": {
-        "use_sql_pokemon_aggregation": true,
-        "use_sql_pokemon_shiny": true
+        "store_sql_pokemon_aggregation": true,
+        "store_sql_pokemon_shiny": true
     },
     "geofences": {
         "expire_cache_seconds": 3600,
