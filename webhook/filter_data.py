@@ -1,5 +1,5 @@
-from shapely.geometry import Point, Polygon
 from utils.logger import logger
+from shapely.geometry import Point, Polygon
 
 class WebhookFilter:
     """Filters incoming webhook data based on type and geofence location."""
@@ -158,6 +158,7 @@ class WebhookFilter:
             "username": message["username"],
             "first_seen": message["first_seen"],
             "despawn_timer": despawn_timer,
+            "weather": message["weather"],
             "spawnpoint": message["spawnpoint_id"],
             "area_id": geofence_id,
             "area_name": geofence_name,
