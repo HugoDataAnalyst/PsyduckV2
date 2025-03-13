@@ -19,21 +19,21 @@ class WebhookFilter:
     def quest_filter_criteria(message: dict) -> bool:
         """
         Returns True if the message passes basic quest criteria:
-        - Contains mandatory fields: 'type', 'with_ar', 'latitude', and 'longitude'
+        - Contains mandatory fields: "type", "with_ar", "latitude", and "longitude"
         - Contains at least one reward with a valid structure.
         """
-        basic_checks = all(key in message for key in ['type', 'with_ar', 'latitude', 'longitude'])
+        basic_checks = all(key in message for key in ["type", "with_ar", "latitude", "longitude"])
         logger.debug(f"▶️ Quest filter basic checks: {basic_checks} for message: {message.get('type')}")
 
-        rewards = message.get('rewards', [])
+        rewards = message.get("rewards", [])
         rewards_check = False
         if isinstance(rewards, list) and rewards:
             logger.debug(f"🔍 Found {len(rewards)} rewards in message.")
             for reward in rewards:
-                if 'type' in reward and 'info' in reward:
-                    info = reward['info']
+                if "type" in reward and "info" in reward:
+                    info = reward["info"]
                     # Each reward info must have either (pokemon_id) or (item_id and amount) or (amount)
-                    if ('pokemon_id' in info) or (('item_id' in info) and ('amount' in info)) or ('amount' in info):
+                    if ("pokemon_id" in info) or (("item_id" in info) and ("amount" in info)) or ("amount" in info):
                         rewards_check = True
                         logger.debug(f"☑️ Reward passed criteria: {reward}")
                     else:
@@ -59,13 +59,13 @@ class WebhookFilter:
         extracted = []
         logger.debug(f"▶️ Extracting rewards from list with {len(quest_rewards)} items.")
         for reward in quest_rewards:
-            info = reward.get('info', {})
+            info = reward.get("info", {})
             reward_data = {
-                'reward_type': reward.get('type'),  # Always extract reward type
-                'pokemon_id': info.get('pokemon_id'),
-                'form_id': info.get('form_id'),
-                'item_id': info.get('item_id'),
-                'amount': info.get('amount')
+                "reward_type": reward.get("type"),  # Always extract reward type
+                "pokemon_id": info.get("pokemon_id"),
+                "form_id": info.get("form_id"),
+                "item_id": info.get("item_id"),
+                "amount": info.get("amount")
             }
             logger.debug(f"☑️ Extracted reward: {reward_data}")
             extracted.append(reward_data)
@@ -81,26 +81,26 @@ class WebhookFilter:
         processed = {}
         if rewards:
             reward = rewards[0]
-            reward_prefix = 'reward_ar_' if with_ar else 'reward_normal_'
+            reward_prefix = "reward_ar_" if with_ar else "reward_normal_"
             logger.debug(f"▶️ Processing first reward with prefix '{reward_prefix}': {reward}")
-            if reward.get('pokemon_id') is not None:
-                processed[f'{reward_prefix}poke_id'] = reward.get('pokemon_id')
-                processed[f'{reward_prefix}poke_form'] = reward.get('form_id')
+            if reward.get("pokemon_id") is not None:
+                processed[f"{reward_prefix}poke_id"] = reward.get("pokemon_id")
+                processed[f"{reward_prefix}poke_form"] = reward.get("form_id")
                 logger.debug(f"☑️ Set {reward_prefix}poke_id and {reward_prefix}poke_form.")
-            if reward.get('item_id') is not None:
-                processed[f'{reward_prefix}item_id'] = reward.get('item_id')
-                processed[f'{reward_prefix}item_amount'] = reward.get('amount')
+            if reward.get("item_id") is not None:
+                processed[f"{reward_prefix}item_id"] = reward.get("item_id")
+                processed[f"{reward_prefix}item_amount"] = reward.get("amount")
                 logger.debug(f"☑️ Set {reward_prefix}item_id and {reward_prefix}item_amount.")
-            elif reward.get('amount') is not None and reward.get('pokemon_id') is None and reward.get('item_id') is None:
-                processed[f'{reward_prefix}item_amount'] = reward.get('amount')
+            elif reward.get("amount") is not None and reward.get("pokemon_id") is None and reward.get("item_id") is None:
+                processed[f"{reward_prefix}item_amount"] = reward.get("amount")
                 logger.debug(f"☑️ Set {reward_prefix}item_amount from amount field.")
             # Set the reward type field
             if with_ar:
-                processed['reward_ar_type'] = reward.get('reward_type')
-                logger.debug(f"☑️ Set reward_ar_type: {processed['reward_ar_type']}.")
+                processed["reward_ar_type"] = reward.get("reward_type")
+                logger.debug(f"☑️ Set reward_ar_type: {processed["reward_ar_type"]}.")
             else:
                 processed['reward_normal_type'] = reward.get('reward_type')
-                logger.debug(f"☑️ Set reward_normal_type: {processed['reward_normal_type']}.")
+                logger.debug(f"☑️ Set reward_normal_type: {processed["reward_normal_type"]}.")
         else:
             logger.debug("❌ No rewards to process in process_first_reward.")
         return processed
@@ -270,22 +270,22 @@ class WebhookFilter:
 
         # Build initial quest data structure.
         quest_data = {
-            'pokestop_id': message.get('pokestop_id'),
-            'area_name': geofence_name,
-            'area_id': geofence_id,
+            "pokestop_id": message.get('pokestop_id'),
+            "area_name": geofence_name,
+            "area_id": geofence_id,
             # Initialize reward fields to None.
-            'ar_type': None,
-            'normal_type': None,
-            'reward_ar_type': None,
-            'reward_normal_type': None,
-            'reward_ar_item_id': None,
-            'reward_ar_item_amount': None,
-            'reward_normal_item_id': None,
-            'reward_normal_item_amount': None,
-            'reward_ar_poke_id': None,
-            'reward_ar_poke_form': None,
-            'reward_normal_poke_id': None,
-            'reward_normal_poke_form': None,
+            "ar_type": None,
+            "normal_type": None,
+            "reward_ar_type": None,
+            "reward_normal_type": None,
+            "reward_ar_item_id": None,
+            "reward_ar_item_amount": None,
+            "reward_normal_item_id": None,
+            "reward_normal_item_amount": None,
+            "reward_ar_poke_id": None,
+            "reward_ar_poke_form": None,
+            "reward_normal_poke_id": None,
+            "reward_normal_poke_form": None,
         }
         # Set quest type based on 'with_ar'
         quest_type_field = 'ar_type' if message.get('with_ar') else 'normal_type'
@@ -296,30 +296,76 @@ class WebhookFilter:
         processed_reward = self.process_first_reward(rewards_extracted, message.get('with_ar', False))
         quest_data.update(processed_reward)
 
-        logger.info(f"✅ Processed quest data: {quest_data}")
+        logger.debug(f"✅ Processed quest data: {quest_data}")
         return quest_data
 
 
-    def handle_raid_data(self, message, geofence_id):
+    async def handle_raid_data(self, message, geofence_id, geofence_name):
         """Process Raid webhook data."""
-        boss_pokemon = message.get("raid_pokemon_id")
-        level = message.get("raid_level")
+        required_raid_fields = [
+            "gym_id",
+            "ex_raid_eligible",
+            "is_exclusive",
+            "level",
+            "pokemon_id",
+            "form",
+            "costume",
+            "latitude",
+            "longitude"
+            ]
 
-        logger.info(f"✅ Raid {level} - Boss {boss_pokemon} in {geofence_id}")
-        return {
-            "type": "raid",
-            "raid_pokemon": boss_pokemon,
-            "level": level,
-            "geofence": geofence_id,
+        # ✅ Check if all required fields are present
+        if not all(field in message and message[field] is not None for field in required_raid_fields):
+            logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
+            return None
+
+        # ✅ Extract Raid Data
+        raid_data = {
+            "raid_pokemon": message["pokemon_id"],
+            "raid_level": message["level"],
+            "raid_form": message["form"],
+            "raid_costume": message["costume"],
+            "raid_latitude": message["latitude"],
+            "raid_longitude": message["longitude"],
+            "raid_gym_id": message["gym_id"],
+            "raid_ex_raid_eligible": message["ex_raid_eligible"],
+            "raid_is_exclusive": message["is_exclusive"],
+            "area_id": geofence_id,
+            "area_name": geofence_name,
+            "invasion_first_seen": message["spawn"],
         }
 
-    def handle_invasion_data(self, message, geofence_id):
+        logger.debug(f"✅ Raid {raid_data['raid_level']} - Boss {raid_data['raid_pokemon']} in Area: {raid_data['area_name']} with Spawn timer: {raid_data['first_seen']}")
+        return raid_data
+
+    async def handle_invasion_data(self, message, geofence_id, geofence_name):
         """Process Invasion (Rocket) webhook data."""
-        grunt_type = message.get("grunt_type")
+        required_invasion_fields = [
+            "display_type",
+            "character",
+            "confirmed",
+            "pokestop_id",
+            "updated",
+            "latitude",
+            "longitude"
+        ]
+        # ✅ Check if all required fields are present
+        if not all(field in message and message[field] is not None for field in required_invasion_fields):
+            logger.debug(f"⚠️ Skipping Invasion data due to missing fields: {message}")
+            return None
 
-        logger.info(f"✅ Rocket Grunt '{grunt_type}' in {geofence_id}")
-        return {
-            "type": "invasion",
-            "grunt_type": grunt_type,
-            "geofence": geofence_id,
+        # ✅ Extract Invasion Data
+        invasion_data = {
+            "invasion_type": message["display_type"],
+            "invasion_character": message["character"],
+            "invasion_confirmed": message["confirmed"],
+            "invasion_pokestop_id": message["pokestop_id"],
+            "invasion_first_seen": message["updated"],
+            "invasion_latitude": message["latitude"],
+            "invasion_longitude": message["longitude"],
+            "area_id": geofence_id,
+            "area_name": geofence_name,
         }
+
+        logger.debug(f"✅ Invasion Type: {invasion_data['invasion_type']}, Character: {invasion_data['character']} in Area {invasion_data['area_name']}. First seen at: {invasion_data['invasion_first_seen']}")
+        return invasion_data
