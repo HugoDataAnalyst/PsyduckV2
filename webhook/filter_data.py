@@ -16,6 +16,96 @@ class WebhookFilter:
 
     # Helper functions
     @staticmethod
+    def quest_filter_criteria(message: dict) -> bool:
+        """
+        Returns True if the message passes basic quest criteria:
+        - Contains mandatory fields: 'type', 'with_ar', 'latitude', and 'longitude'
+        - Contains at least one reward with a valid structure.
+        """
+        basic_checks = all(key in message for key in ['type', 'with_ar', 'latitude', 'longitude'])
+        logger.debug(f"▶️ Quest filter basic checks: {basic_checks} for message: {message.get('type')}")
+
+        rewards = message.get('rewards', [])
+        rewards_check = False
+        if isinstance(rewards, list) and rewards:
+            logger.debug(f"🔍 Found {len(rewards)} rewards in message.")
+            for reward in rewards:
+                if 'type' in reward and 'info' in reward:
+                    info = reward['info']
+                    # Each reward info must have either (pokemon_id) or (item_id and amount) or (amount)
+                    if ('pokemon_id' in info) or (('item_id' in info) and ('amount' in info)) or ('amount' in info):
+                        rewards_check = True
+                        logger.debug(f"☑️ Reward passed criteria: {reward}")
+                    else:
+                        logger.warning(f"⚠️ Reward failed criteria (missing required info): {reward}")
+                        rewards_check = False
+                        break
+                else:
+                    logger.warning(f"⚠️ Reward missing 'type' or 'info': {reward}")
+                    rewards_check = False
+                    break
+        else:
+            logger.debug("❌ No rewards found in message or rewards is not a list.")
+        result = basic_checks and rewards_check
+        logger.debug(f"✅ Quest filter criteria result: {result}")
+        return result
+
+    @staticmethod
+    def extract_quest_rewards(quest_rewards: list) -> list:
+        """
+        Extracts raw reward details from a list of quest rewards.
+        Returns a list of reward dictionaries.
+        """
+        extracted = []
+        logger.debug(f"▶️ Extracting rewards from list with {len(quest_rewards)} items.")
+        for reward in quest_rewards:
+            info = reward.get('info', {})
+            reward_data = {
+                'reward_type': reward.get('type'),  # Always extract reward type
+                'pokemon_id': info.get('pokemon_id'),
+                'form_id': info.get('form_id'),
+                'item_id': info.get('item_id'),
+                'amount': info.get('amount')
+            }
+            logger.debug(f"☑️ Extracted reward: {reward_data}")
+            extracted.append(reward_data)
+        logger.info(f"✅ Extracted {len(extracted)} rewards.")
+        return extracted
+
+    @staticmethod
+    def process_first_reward(rewards: list, with_ar: bool) -> dict:
+        """
+        Processes only the first reward in the list and formats the keys.
+        Returns a dictionary with processed reward fields.
+        """
+        processed = {}
+        if rewards:
+            reward = rewards[0]
+            reward_prefix = 'reward_ar_' if with_ar else 'reward_normal_'
+            logger.debug(f"▶️ Processing first reward with prefix '{reward_prefix}': {reward}")
+            if reward.get('pokemon_id') is not None:
+                processed[f'{reward_prefix}poke_id'] = reward.get('pokemon_id')
+                processed[f'{reward_prefix}poke_form'] = reward.get('form_id')
+                logger.debug(f"☑️ Set {reward_prefix}poke_id and {reward_prefix}poke_form.")
+            if reward.get('item_id') is not None:
+                processed[f'{reward_prefix}item_id'] = reward.get('item_id')
+                processed[f'{reward_prefix}item_amount'] = reward.get('amount')
+                logger.debug(f"☑️ Set {reward_prefix}item_id and {reward_prefix}item_amount.")
+            elif reward.get('amount') is not None and reward.get('pokemon_id') is None and reward.get('item_id') is None:
+                processed[f'{reward_prefix}item_amount'] = reward.get('amount')
+                logger.debug(f"☑️ Set {reward_prefix}item_amount from amount field.")
+            # Set the reward type field
+            if with_ar:
+                processed['reward_ar_type'] = reward.get('reward_type')
+                logger.debug(f"☑️ Set reward_ar_type: {processed['reward_ar_type']}.")
+            else:
+                processed['reward_normal_type'] = reward.get('reward_type')
+                logger.debug(f"☑️ Set reward_normal_type: {processed['reward_normal_type']}.")
+        else:
+            logger.debug("❌ No rewards to process in process_first_reward.")
+        return processed
+
+    @staticmethod
     async def calculate_despawn_time(disappear_time, first_seen):
         """Calculate the despawn time for a Pokémon based on its disappear time and first seen time."""
         if disappear_time is None or first_seen is None:
@@ -94,8 +184,8 @@ class WebhookFilter:
             pokemon_data = await self.handle_pokemon_data(message, geofence_id, geofence_name)
             if pokemon_data:
                 return pokemon_data
-        #elif data_type == "quest":
-        #    return self.handle_quest_data(message, geofence_id)
+        elif data_type == "quest":
+            return self.handle_quest_data(message, geofence_id, geofence_name)
         #elif data_type == "raid":
         #    return self.handle_raid_data(message, geofence_id)
         #elif data_type == "invasion":
@@ -168,18 +258,47 @@ class WebhookFilter:
         return pokemon_data  # ✅ Return structured Pokémon data
 
 
-    def handle_quest_data(self, message, geofence_id):
-        """Process Quest webhook data."""
-        quest_title = message.get("quest_title")
-        reward = message.get("quest_reward")
+    async def handle_quest_data(self, message, geofence_id, geofence_name):
+        """
+        Process Quest webhook data.
+        Returns a dictionary with processed quest data, or None if criteria are not met.
+        """
+        # Check mandatory fields for quests.
+        if not self.quest_filter_criteria(message):
+            logger.debug(f"⚠️ Skipping Quest data due to failing criteria: {message}")
+            return None
 
-        logger.info(f"✅ Quest '{quest_title}' in {geofence_id} - Reward: {reward}")
-        return {
-            "type": "quest",
-            "quest_title": quest_title,
-            "reward": reward,
-            "geofence": geofence_id,
+        # Build initial quest data structure.
+        quest_data = {
+            'pokestop_id': message.get('pokestop_id'),
+            'area_name': geofence_name,
+            'area_id': geofence_id,
+            # Initialize reward fields to None.
+            'ar_type': None,
+            'normal_type': None,
+            'reward_ar_type': None,
+            'reward_normal_type': None,
+            'reward_ar_item_id': None,
+            'reward_ar_item_amount': None,
+            'reward_normal_item_id': None,
+            'reward_normal_item_amount': None,
+            'reward_ar_poke_id': None,
+            'reward_ar_poke_form': None,
+            'reward_normal_poke_id': None,
+            'reward_normal_poke_form': None,
         }
+        # Set quest type based on 'with_ar'
+        quest_type_field = 'ar_type' if message.get('with_ar') else 'normal_type'
+        quest_data[quest_type_field] = message.get('type')
+
+        # Extract rewards and process only the first reward.
+        rewards_extracted = self.extract_quest_rewards(message.get('rewards', []))
+        processed_reward = self.process_first_reward(rewards_extracted, message.get('with_ar', False))
+        quest_data.update(processed_reward)
+
+        logger.info(f"✅ Processed quest data: {quest_data}")
+        return quest_data
+
 
     def handle_raid_data(self, message, geofence_id):
         """Process Raid webhook data."""
