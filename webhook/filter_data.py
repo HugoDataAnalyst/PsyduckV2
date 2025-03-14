@@ -97,10 +97,10 @@ class WebhookFilter:
             # Set the reward type field
             if with_ar:
                 processed["reward_ar_type"] = reward.get("reward_type")
-                logger.debug(f"☑️ Set reward_ar_type: {processed["reward_ar_type"]}.")
+                logger.debug(f"☑️ Set reward_ar_type: {processed['reward_ar_type']}.")
             else:
                 processed['reward_normal_type'] = reward.get('reward_type')
-                logger.debug(f"☑️ Set reward_normal_type: {processed["reward_normal_type"]}.")
+                logger.debug(f"☑️ Set reward_normal_type: {processed['reward_normal_type']}.")
         else:
             logger.debug("❌ No rewards to process in process_first_reward.")
         return processed
@@ -142,7 +142,7 @@ class WebhookFilter:
         try:
             if not self.geofences:
                 logger.warning("⚠️ No geofences available. Accepting all data by default.")
-                return True, None, None  # ✅ Accept data if no geofences exist
+                return True, None, None, None  # ✅ Accept data if no geofences exist
 
             point = Point(longitude, latitude)  # ✅ Create a point with (lon, lat)
 
@@ -150,15 +150,15 @@ class WebhookFilter:
                 polygon = Polygon(geofence["coordinates"][0])  # ✅ Convert geofence into Polygon
 
                 if point.within(polygon):  # ✅ Check if point is inside geofence
-                    logger.debug(f"✅ Data is inside geofence: {geofence['name']} (ID: {geofence['id']})")
-                    return True, geofence["id"], geofence["name"]  # ✅ Return True + Geofence Name
+                    logger.debug(f"✅ Data is inside geofence: {geofence['name']} (ID: {geofence['id']}), offset: {geofence['offset']}")
+                    return True, geofence["id"], geofence["name"], geofence["offset"]  # ✅ Return True + Geofence Name
 
             logger.debug("❌ Data is outside geofenced areas. Ignoring.")
-            return False, None, None  # ❌ Reject if outside geofences
+            return False, None, None, None  # ❌ Reject if outside geofences
 
         except Exception as e:
             logger.error(f"❌ Error checking geofence: {e}")
-            return False, None, None  # ❌ Reject data if an error occurs
+            return False, None, None, None  # ❌ Reject data if an error occurs
 
     async def filter_webhook_data(self, data):
         """Filter webhook data based on type and geofence validation."""
@@ -185,11 +185,11 @@ class WebhookFilter:
             if pokemon_data:
                 return pokemon_data
         elif data_type == "quest":
-            return self.handle_quest_data(message, geofence_id, geofence_name)
-        #elif data_type == "raid":
-        #    return self.handle_raid_data(message, geofence_id)
-        #elif data_type == "invasion":
-        #    return self.handle_invasion_data(message, geofence_id)
+            return await self.handle_quest_data(message, geofence_id, geofence_name)
+        elif data_type == "raid":
+            return await self.handle_raid_data(message, geofence_id)
+        elif data_type == "invasion":
+            return await self.handle_invasion_data(message, geofence_id)
         else:
             logger.warning(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
