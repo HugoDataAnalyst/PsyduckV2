@@ -415,7 +415,6 @@ class WebhookFilter:
             "invasion_grunt_type": message["grunt_type"],
             "invasion_confirmed": message["confirmed"],
             "invasion_pokestop_id": message["pokestop_id"],
-            "invasion_first_seen": message["updated"],
             "invasion_latitude": message["latitude"],
             "invasion_longitude": message["longitude"],
             "invasion_first_seen": corrected_first_seen,
