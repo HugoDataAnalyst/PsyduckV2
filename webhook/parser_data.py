@@ -1,3 +1,4 @@
+from ast import If
 import asyncio
 import json
 from textwrap import indent
@@ -15,18 +16,32 @@ from my_redis.queries.raids import (
     raids_counterseries,
     raids_hourly_counterseries
 )
+from my_redis.queries.invasions import (
+    invasions_timeseries,
+    invasions_counterseries,
+    invasions_hourly_counterseries
+)
+from my_redis.queries.quests import (
+    quests_timeseries,
+    quests_counterseries,
+    quests_hourly_counterseries
+)
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
 from sql.tasks.raids_processor import RaidSQLProcessor
+from sql.tasks.invasions_processor import InvasionSQLProcessor
+from sql.tasks.quests_processor import QuestSQLProcessor
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
 redis_manager = RedisManager()
 pokemon_sql = PokemonSQLProcessor()
 raid_sql = RaidSQLProcessor()
+invasion_sql = InvasionSQLProcessor()
+quest_sql = QuestSQLProcessor()
 
 async def process_pokemon_data(filtered_data):
     """
-    Process the filtered Pokémon event by updating both the time series and the counter series in a single Redis transaction.
+    Process the filtered Pokémon event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
     """
     if not filtered_data:
         logger.error("❌ No data provided to process_pokemon_data.")
@@ -87,7 +102,7 @@ async def process_pokemon_data(filtered_data):
 
 async def process_raid_data(filtered_data):
     """
-    Process the filtered Raid event by updating both the time series and the counter series in a single Redis transaction.
+    Process the filtered Raid event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
     """
     if not filtered_data:
         logger.error("❌ No data provided to process_pokemon_data.")
@@ -102,7 +117,7 @@ async def process_raid_data(filtered_data):
         client = redis_manager.redis_client
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
-            raid_timeseries_update = await raids_timeseries.add_timeseries_raid_event(filtered_data, pipe)
+            raid_timeseries_update = await raids_timeseries.add_raid_timeseries_event(filtered_data, pipe)
             raid_counterseries_update = await raids_counterseries.update_raid_counter(filtered_data, pipe)
             raid_hourly_counterseries_update = await raids_hourly_counterseries.update_raid_hourly_counter(filtered_data, pipe)
 
@@ -133,4 +148,103 @@ async def process_raid_data(filtered_data):
 
     except Exception as e:
         logger.error(f"❌ Error processing Pokémon event data in parser_data: {e}")
+        return None
+
+async def process_quest_data(filtered_data):
+    """
+    Process the filtered Quest event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
+    """
+    if not filtered_data:
+        logger.error("❌ No data provided to process_pokemon_data.")
+        return None
+
+    redis_status = await redis_manager.check_redis_connection()
+    if not redis_status:
+        logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
+        return None
+
+    try:
+        client = redis_manager.redis_client
+        async with client.pipeline() as pipe:
+            # Add all Redis operations to the pipeline
+            quest_timeseries_update = await quests_timeseries.add_timeseries_quest_event(filtered_data, pipe)
+            quest_counterseries_update = await quests_counterseries.update_quest_counter(filtered_data, pipe)
+            quest_hourly_counterseries_update = await quests_hourly_counterseries.update_quest_hourly_counter(filtered_data, pipe)
+
+            # Execute all Redis commands in a single batch
+            await pipe.execute()
+
+        # Execute SQl commands if Enabled
+        if AppConfig.store_sql_quest_aggregation:
+            logger.info("🔃 Processing Quest Aggregation...")
+            await quest_sql.upsert_aggregated_quest_from_filtered(filtered_data)
+        else:
+            logger.info("⚠️ SQL Quest Aggregation is disabled.")
+
+                # Map results to Meaningful Information.
+        structured_result = (
+            f"Quest Type: {filtered_data['with_ar']}\n"
+            f"Quest Reward Type: {filtered_data['reward_type']}\n"
+            f"Area: {filtered_data['area_name']}\n"
+            "Updates:\n"
+            f"  - Quest Timeseries Total: {json.dumps(quest_timeseries_update, indent=2)}\n"
+            f"  - Quest Counter Total: {json.dumps(quest_counterseries_update, indent=2)}\n"
+            f"  - Quest Counter Hourly Total: {json.dumps(quest_hourly_counterseries_update, indent=2)}\n"
+        )
+
+        logger.debug(f"✅ Processed Quest {filtered_data['with_ar']} in area {filtered_data['area_name']} - Updates: {structured_result}")
+        return structured_result
+
+    except Exception as e:
+        logger.error(f"❌ Error processing Pokémon event data in parser_data: {e}")
+        return None
+
+async def process_invasion_data(filtered_data):
+    """
+    Process the filtered Invasion event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
+    """
+    if not filtered_data:
+        logger.error("❌ No data provided to process_pokemon_data.")
+        return None
+
+    redis_status = await redis_manager.check_redis_connection()
+    if not redis_status:
+        logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
+        return None
+
+    try:
+        client = redis_manager.redis_client
+        async with client.pipeline() as pipe:
+            # Add all Redis operations to the pipeline
+            invasion_timeseries_update = await invasions_timeseries.add_timeseries_invasion_event(filtered_data, pipe)
+            invasion_counterseries_update = await invasions_counterseries.update_invasion_counter(filtered_data, pipe)
+            invasion_hourly_counterseries_update = await invasions_hourly_counterseries.update_invasion_hourly_counter(filtered_data, pipe)
+
+            # Execute all Redis commands in a single batch
+            await pipe.execute()
+
+        # Execute SQl commands if Enabled
+        if AppConfig.store_sql_invasion_aggregation:
+            logger.info("🔃 Processing Invasion Aggregation...")
+            await invasion_sql.upsert_aggregated_invasion_from_filtered(filtered_data)
+        else:
+            logger.info("⚠️ SQL Invasion Aggregation is disabled.")
+
+                # Map results to Meaningful Information.
+        structured_result = (
+            f"Invasion Type ID: {filtered_data['invasion_type']}\n"
+            f"Invasion Grunt Type: {filtered_data['invasion_grunt_type']}\n"
+            f"Invasion Confirmed: {filtered_data['invasion_confirmed']}\n"
+            f"Area: {filtered_data['area_name']}\n"
+            "Updates:\n"
+            f"  - Invasion Timeseries Total: {json.dumps(invasion_timeseries_update, indent=2)}\n"
+            f"  - Invasion Counter Total: {json.dumps(invasion_counterseries_update, indent=2)}\n"
+            f"  - Invasion Counter Hourly Total: {json.dumps(invasion_hourly_counterseries_update, indent=2)}\n"
+        )
+
+        logger.debug(f"✅ Processed Invasion {filtered_data['invasion_type']} in area {filtered_data['area_name']} - Updates: {structured_result}")
+        return structured_result
+
+    except Exception as e:
+        logger.error(f"❌ Error processing Invasion event data in parser_data: {e}")
         return None
