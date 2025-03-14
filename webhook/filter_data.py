@@ -245,9 +245,6 @@ class WebhookFilter:
             logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
             return None
 
-        # ✅ Calculate despawn timer
-        despawn_timer = await self.calculate_despawn_time(message["disappear_time"], message["first_seen"])
-
         # ✅ Calculate IV percentage
         iv_percentage = self.calculate_iv(
             message["individual_attack"],
@@ -261,6 +258,9 @@ class WebhookFilter:
         # ✅ Adjust first_seen timestamp to local time
         utc_first_seen = int(message["first_seen"])
         corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+
+        # ✅ Calculate despawn timer
+        despawn_timer = await self.calculate_despawn_time(message["disappear_time"], corrected_first_seen)
 
         # ✅ Extract Pokémon Data
         pokemon_data = {
@@ -362,7 +362,9 @@ class WebhookFilter:
 
         # ✅ Adjust first_seen timestamp to local time
         utc_first_seen = int(message["spawn"])
+        utc_end = int(message["end"])
         corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+        corrected_end = self.adjust_end_to_local(geofence_name, utc_end, offset)
 
         # ✅ Extract Raid Data
         raid_data = {
@@ -381,6 +383,7 @@ class WebhookFilter:
             "area_id": geofence_id,
             "area_name": geofence_name,
             "raid_first_seen": corrected_first_seen,
+            "raid_end": corrected_end,
         }
 
         logger.debug(f"✅ Raid {raid_data['raid_level']} - Boss {raid_data['raid_pokemon']} in Area: {raid_data['area_name']} with Spawn timer: {raid_data['raid_first_seen']}")
