@@ -10,6 +10,11 @@ from my_redis.queries.pokemons import (
     pokemon_tth_timeseries,
     pokemon_weather_iv_counterseries
 )
+from my_redis.queries.raids import (
+    raids_timeseries,
+    raids_counterseries,
+    raids_hourly_counterseries
+)
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
@@ -72,6 +77,56 @@ async def process_pokemon_data(filtered_data):
         )
 
         logger.debug(f"✅ Processed Pokémon {filtered_data['pokemon_id']} in area {filtered_data['area_name']} - Updates: {structured_result}")
+        return structured_result
+
+    except Exception as e:
+        logger.error(f"❌ Error processing Pokémon event data in parser_data: {e}")
+        return None
+
+async def process_raid_data(filtered_data):
+    """
+    Process the filtered Raid event by updating both the time series and the counter series in a single Redis transaction.
+    """
+    if not filtered_data:
+        logger.error("❌ No data provided to process_pokemon_data.")
+        return None
+
+    redis_status = await redis_manager.check_redis_connection()
+    if not redis_status:
+        logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
+        return None
+
+    try:
+        client = redis_manager.redis_client
+        async with client.pipeline() as pipe:
+            # Add all Redis operations to the pipeline
+            raid_timeseries_update = await raids_timeseries.add_timeseries_raid_event(filtered_data, pipe)
+            raid_counterseries_update = await raids_counterseries.update_raid_counter(filtered_data, pipe)
+            raid_hourly_counterseries_update = await raids_hourly_counterseries.update_raid_hourly_counter(filtered_data, pipe)
+
+            # Execute all Redis commands in a single batch
+            await pipe.execute()
+
+        # Execute SQl commands if Enabled
+        #if AppConfig.store_sql_raid_aggregation:
+        #    logger.info("🔃 Processing Raid Aggregation...")
+        #    await raid_sql.upsert_aggregated_from_filtered(filtered_data)
+        #else:
+        #    logger.info("⚠️ SQL Raid Aggregation is disabled.")
+
+                # Map results to Meaningful Information.
+        structured_result = (
+            f"Raid Pokémon ID: {filtered_data['raid_pokemon']}\n"
+            f"Raid Level: {filtered_data['raid_level']}\n"
+            f"Raid Form: {filtered_data['raid_form']}\n"
+            f"Area: {filtered_data['area_name']}\n"
+            "Updates:\n"
+            f"  - Raid Timeseries Total: {json.dumps(raid_timeseries_update, indent=2)}\n"
+            f"  - Raid Counter Total: {json.dumps(raid_counterseries_update, indent=2)}\n"
+            f"  - Raid Counter Hourly Total: {json.dumps(raid_hourly_counterseries_update, indent=2)}\n"
+        )
+
+        logger.debug(f"✅ Processed Raid {filtered_data['raid_pokemon']} in area {filtered_data['area_name']} - Updates: {structured_result}")
         return structured_result
 
     except Exception as e:
