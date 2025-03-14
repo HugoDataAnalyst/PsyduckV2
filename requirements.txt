@@ -11,3 +11,4 @@ httpx==0.28.1
 shapely==2.0.7
 uvicorn==0.34.0
 fastapi==0.115.11
+timezonefinder==6.5.8
