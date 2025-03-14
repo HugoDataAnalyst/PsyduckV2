@@ -9,6 +9,9 @@ from utils.logger import logger
 from my_redis.connect_redis import RedisManager
 from sql.models import AreaNames
 from server_fastapi import global_state
+from timezonefinder import TimezoneFinder
+from shapely.geometry import Polygon
+import pytz
 
 class KojiGeofences:
     """Koji Geofences class.
@@ -20,6 +23,7 @@ class KojiGeofences:
     bearer_token = AppConfig.koji_bearer_token
     geofence_api_url = AppConfig.koji_geofence_api_url
     redis_manager = RedisManager() # RedisManager is a Singleton
+    tf = TimezoneFinder()
     _instance = None # ✅ Singleton instance
 
     def __new__(cls, refresh_interval):
@@ -46,20 +50,39 @@ class KojiGeofences:
                     geometry = feature.get("geometry", {})
 
                     if geometry.get("type") == "Polygon":
-                        # Use the area name from the API response
                         area_name = properties.get("name", "Unknown")
-                        # Check if the area exists; if not insert it
+                        # Check if the area exists; if not, insert it.
                         area_obj, created = await AreaNames.get_or_create(name=area_name)
-                        # Append the area object to the list of geofences
                         if created:
                             logger.debug(f"✅ Created new area: {area_name}")
                         else:
                             logger.debug(f"🚨 Found existing area: '{area_name}' with id {area_obj.id}")
 
+                        coordinates = geometry.get("coordinates", [])
+                        offset = 0  # default offset is 0
+                        if coordinates and coordinates[0]:
+                            poly = Polygon(coordinates[0])
+                            centroid = poly.centroid
+                            tz_str = cls.tf.timezone_at(lng=centroid.x, lat=centroid.y)
+                            if tz_str:
+                                try:
+                                    tz = pytz.timezone(tz_str)
+                                    now = datetime.now(tz)
+                                    offset_hours = now.utcoffset().total_seconds() / 3600
+                                    offset = int(round(offset_hours))
+                                    logger.debug(f"✅ Calculated offset {offset} for area '{area_name}'")
+                                except Exception as e:
+                                    logger.warning(f"❌ Could not calculate offset for area '{area_name}': {e}")
+                            else:
+                                logger.warning(f"❌ Timezone not determined for area '{area_name}'; defaulting offset to 0.")
+                        else:
+                            logger.warning(f"❌ No coordinates available for area '{area_name}', defaulting offset to 0.")
+
                         geofences.append({
                             "id": area_obj.id,
                             "name": area_name,
-                            "coordinates": geometry.get("coordinates", [])
+                            "offset": offset,  # store offset as an integer (e.g., -1, 0, +1)
+                            "coordinates": coordinates
                         })
 
                 logger.debug(f"✅ Parsed {len(geofences)} Koji Geofences.")
