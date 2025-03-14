@@ -405,13 +405,14 @@ class WebhookFilter:
             return None
 
         # ✅ Adjust first_seen timestamp to local time
-        utc_first_seen = int(message["updated"])
+        utc_first_seen = int(message["start"])
         corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
 
         # ✅ Extract Invasion Data
         invasion_data = {
             "invasion_type": message["display_type"],
             "invasion_character": message["character"],
+            "invasion_grunt_type": message["grunt_type"],
             "invasion_confirmed": message["confirmed"],
             "invasion_pokestop_id": message["pokestop_id"],
             "invasion_first_seen": message["updated"],
