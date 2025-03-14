@@ -27,6 +27,23 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                 # Optionally, if you want to add form only when non-empty:
                 if form:
                     command.extend(["form", str(form)])
+            elif metric == "raid":
+                # For raid timeseries, 'identifier' is the combined raid attributes string,
+                # e.g., "10:5:0:0:1:1" representing raid_pokemon, raid_level, raid_form, raid_costume,
+                # raid_is_exclusive, and raid_ex_raid_eligible.
+                command = [
+                    "TS.CREATE",
+                    key,
+                    "RETENTION", retention_ms,
+                    "DUPLICATE_POLICY", "SUM",
+                    "LABELS",
+                    "metric", metric,
+                    "area", str(area),
+                    "raid", str(identifier)
+                ]
+                # Optionally, if you want to add 'form' as a label as well:
+                if form:
+                    command.extend(["form", str(form)])
             else:
                 command = [
                     "TS.CREATE",
