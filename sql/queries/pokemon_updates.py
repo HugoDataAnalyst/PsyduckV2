@@ -18,11 +18,13 @@ class PokemonUpdatesQueries:
             defaults={"latitude": latitude, "longitude": longitude}
         )
         if not created:
-            # Optionally, you can update the latitude/longitude if they've changed.
-            # For example:
+            updated = False
+            # Update the latitude/longitude if they've changed.
             if obj.latitude != latitude or obj.longitude != longitude:
                 obj.latitude = latitude
                 obj.longitude = longitude
+                updated = True
+            if updated:
                 await obj.save()
             logger.info(f"⏭️ Spawnpoint exists: id={obj.id}, spawnpoint={obj.spawnpoint}, lat={obj.latitude}, lon={obj.longitude}")
         else:
