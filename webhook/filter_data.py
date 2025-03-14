@@ -304,7 +304,8 @@ class WebhookFilter:
 
         # Build initial quest data structure.
         quest_data = {
-            "pokestop_id": message.get('pokestop_id'),
+            "pokestop_id": message['pokestop_id'],
+            "pokestop_name": message['pokestop_name'],
             "area_name": geofence_name,
             "area_id": geofence_id,
             # Initialize reward fields to None.
@@ -401,7 +402,7 @@ class WebhookFilter:
         ]
         # ✅ Check if all required fields are present
         if not all(field in message and message[field] is not None for field in required_invasion_fields):
-            logger.debug(f"⚠️ Skipping Invasion data due to missing fields: {message}")
+            logger.warning(f"⚠️ Skipping Invasion data due to missing fields: {message}")
             return None
 
         # ✅ Adjust first_seen timestamp to local time
@@ -415,6 +416,7 @@ class WebhookFilter:
             "invasion_grunt_type": message["grunt_type"],
             "invasion_confirmed": message["confirmed"],
             "invasion_pokestop_id": message["pokestop_id"],
+            "invasion_pokestop_name": message["pokestop_name"],
             "invasion_latitude": message["latitude"],
             "invasion_longitude": message["longitude"],
             "invasion_first_seen": corrected_first_seen,
