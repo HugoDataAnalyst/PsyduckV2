@@ -3,7 +3,6 @@ import sys
 import json
 import dotenv
 import urllib.parse
-from my_redis.queries.quests import quests_timeseries
 from utils.logger import logger
 from typing import List, Optional, Dict
 
