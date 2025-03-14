@@ -1,4 +1,5 @@
 from calendar import month
+from enum import unique
 from tortoise.models import Model
 from tortoise import fields
 import config as AppConfig
@@ -20,6 +21,38 @@ class Spawnpoint(Model):
 
     class Meta:
         table = "spawnpoints"
+
+class Gyms(Model):
+    """Stores gym information."""
+    id = fields.BigIntField(pk=True)
+    gym = fields.CharField(max_length=50, unique=True)
+    gym_name = fields.CharField(max_length=255)
+    latitude = fields.FloatField()
+    longitude = fields.FloatField()
+
+    class Meta:
+        table = "gyms"
+
+class AggregatedRaids(Model):
+    """Stores aggregated raid data per gym, monthly."""
+    id = fields.BigIntField(pk=True)
+    gym = fields.ForeignKeyField("models.Gyms", related_name="aggregated_stats")
+    raid_pokemon = fields.SmallIntField()
+    raid_level = fields.SmallIntField()
+    raid_form = fields.SmallIntField(default=0)
+    raid_team = fields.SmallIntField(default=0)
+    raid_costume = fields.SmallIntField(default=0)
+    raid_is_exclusive = fields.SmallIntField(default=0)
+    raid_ex_raid_eligible = fields.SmallIntField(default=0)
+    area = fields.ForeignKeyField("models.AreaNames", related_name="aggregated_stats")
+    month_year = fields.SmallIntField()  # Format: YYMM (2503 for March 2025)
+    total_count = fields.IntField(default=0)
+
+    class Meta:
+        table = "aggregated_raids"
+        unique_together = (
+            "gym", "raid_pokemon", "raid_level", "raid_form", "raid_team", "raid_costume", "raid_is_exclusive", "raid_ex_raid_eligible", "area", "month_year"
+        )
 
 class AggregatedPokemonIVMonthly(Model):
     """Stores aggregated IV data per spawnpoint, monthly."""
