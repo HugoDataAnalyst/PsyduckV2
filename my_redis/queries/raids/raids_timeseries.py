@@ -40,7 +40,7 @@ async def add_raid_timeseries_event(data, pipe=None):
 
     # Construct the timeseries key from the raid data
     key = f"ts:raid_totals:{area}:{raid_pokemon}:{raid_level}:{raid_form}:{raid_costume}:{raid_is_exclusive}:{raid_ex_raid_eligible}"
-    logger.debug(f"🔑 Constructed Timeseries Key for raid: {key}")
+    logger.debug(f"🔑 Constructed Raid Timeseries Key: {key}")
 
     client = redis_manager.redis_client
     updated_fields = {}
@@ -48,7 +48,7 @@ async def add_raid_timeseries_event(data, pipe=None):
     # Get retention from config.
     retention_ms = AppConfig.raid_timeseries_retention_ms
     logger.debug(f"🚨 Set Raid TimeSeries retention timer: {retention_ms}")
-    # Ensure the time series key exists
+
     # Ensure the timeseries key exists.
     await ensure_timeseries_key(redis_manager.redis_client, key, "raid", area, f"{raid_pokemon}:{raid_level}:{raid_form}", "", retention_ms, pipe)
 
