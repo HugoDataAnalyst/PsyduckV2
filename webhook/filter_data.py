@@ -395,7 +395,7 @@ class WebhookFilter:
             "character",
             "confirmed",
             "pokestop_id",
-            "updated",
+            "start",
             "latitude",
             "longitude"
         ]
@@ -422,5 +422,5 @@ class WebhookFilter:
             "area_name": geofence_name,
         }
 
-        logger.debug(f"✅ Invasion Type: {invasion_data['invasion_type']}, Character: {invasion_data['character']} in Area {invasion_data['area_name']}. First seen at: {invasion_data['invasion_first_seen']}")
+        logger.debug(f"✅ Invasion Type: {invasion_data['invasion_type']}, Character: {invasion_data['invasion_character']} in Area {invasion_data['area_name']}. First seen at: {invasion_data['invasion_first_seen']}")
         return invasion_data
