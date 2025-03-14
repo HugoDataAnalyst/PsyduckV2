@@ -1,6 +1,5 @@
 from datetime import datetime
 from utils.logger import logger
-from tortoise.exceptions import DoesNotExist
 from sql.models import AggreagatedInvasions, Pokestops
 
 class InvasionsSQLProcessor:
@@ -59,30 +58,21 @@ class InvasionsSQLProcessor:
         pokestop_obj = await cls.upsert_pokestop(pokestop_id, pokestop_name, latitude, longitude)
         ps_obj_id = pokestop_obj.id
 
-        try:
-            obj = await AggreagatedInvasions.get(
-                pokestop=ps_obj_id,
-                display_type=display_type,
-                character=character,
-                grunt=grunt,
-                confirmed=confirmed,
-                area_id=area_id,
-                month_year=month_year
-            )
+        obj, created = await AggreagatedInvasions.get_or_create(
+            pokestop_id=ps_obj_id,
+            display_type=display_type,
+            character=character,
+            grunt=grunt,
+            confirmed=confirmed,
+            area_id=area_id,
+            month_year=month_year,
+            defaults={"total_count": increment}
+        )
+
+        if not created:
             obj.total_count += increment
             await obj.save()
-            logger.debug(f"⬆️ Updated AggreagatedInvasions: {obj}")
-            return obj
-        except DoesNotExist:
-            obj = await AggreagatedInvasions.create(
-                pokestop=ps_obj_id,
-                display_type=display_type,
-                character=character,
-                grunt=grunt,
-                confirmed=confirmed,
-                area_id=area_id,
-                month_year=month_year,
-                total_count=increment
-            )
-            logger.debug(f"✅ Created new AggreagatedInvasions: {obj}")
-            return obj
+            logger.debug(f"⬆️ Updated AggreagatedInvasions: Pokestop={obj.pokestop}, Display Type={obj.display_type}, Character={obj.character}, Grunt={obj.grunt}, Confirmed={obj.confirmed}, Area={obj.area}, Month Year={obj.month_year}")
+        else:
+            logger.debug(f"✅ Created new AggreagatedInvasions: Pokestop={obj.pokestop}, Display Type={obj.display_type}, Character={obj.character}, Grunt={obj.grunt}, Confirmed={obj.confirmed}, Area={obj.area}, Month Year={obj.month_year}")
+        return obj

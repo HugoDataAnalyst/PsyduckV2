@@ -63,36 +63,25 @@ class RaidsSQLProcessor:
         gym_obj = await cls.upsert_gym(gym_id, gym_name, latitude, longitude)
         gym_obj_id = gym_obj.id
 
-        try:
-            obj = await AggregatedRaids.get(
-                gym=gym_obj_id,
-                raid_pokemon=raid_pokemon,
-                raid_level=raid_level,
-                raid_form=raid_form,
-                raid_team=raid_team,
-                raid_costume=raid_costume,
-                raid_is_exclusive=raid_is_exclusive,
-                raid_ex_raid_eligible=raid_ex_raid_eligible,
-                area_id=area_id,
-                month_year=month_year
-            )
+
+        obj, created = await AggregatedRaids.get(
+            gym_id=gym_obj_id,
+            raid_pokemon=raid_pokemon,
+            raid_level=raid_level,
+            raid_form=raid_form,
+            raid_team=raid_team,
+            raid_costume=raid_costume,
+            raid_is_exclusive=raid_is_exclusive,
+            raid_ex_raid_eligible=raid_ex_raid_eligible,
+            area_id=area_id,
+            month_year=month_year
+        )
+
+        if not created:
             obj.total_count += increment
             await obj.save()
-            logger.debug(f"⬆️ Updated AggregatedRaids: {obj}")
-            return obj
-        except DoesNotExist:
-            obj = await AggregatedRaids.create(
-                gym=gym_obj_id,
-                raid_pokemon=raid_pokemon,
-                raid_level=raid_level,
-                raid_form=raid_form,
-                raid_team=raid_team,
-                raid_costume=raid_costume,
-                raid_is_exclusive=raid_is_exclusive,
-                raid_ex_raid_eligible=raid_ex_raid_eligible,
-                area_id=area_id,
-                month_year=month_year,
-                total_count=increment
-            )
-            logger.debug(f"✅ Created new AggregatedRaids: {obj}")
-            return obj
+            logger.debug(f"⬆️ Updated AggregatedRaids: Gym={obj.gym}, Raid Pokemon={obj.raid_pokemon}, Raid Level={obj.raid_level}, Raid Form={obj.raid_form}, Raid Team={obj.raid_team}, Raid Costume={obj.raid_costume}, Raid Is Exclusive={obj.raid_is_exclusive}, Raid Ex Raid Eligible={obj.raid_ex_raid_eligible}, Area={obj.area}, Month Year={obj.month_year}")
+        else:
+            logger.debug(f"✅ Created new AggregatedRaids: Gym={obj.gym}, Raid Pokemon={obj.raid_pokemon}, Raid Level={obj.raid_level}, Raid Form={obj.raid_form}, Raid Team={obj.raid_team}, Raid Costume={obj.raid_costume}, Raid Is Exclusive={obj.raid_is_exclusive}, Raid Ex Raid Eligible={obj.raid_ex_raid_eligible}, Area={obj.area}, Month Year={obj.month_year}")
+
+        return obj

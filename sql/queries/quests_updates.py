@@ -70,46 +70,30 @@ class QuestsSQLProcessor:
         pokestop_obj = await cls.upsert_pokestop(pokestop_id, pokestop_name, latitude, longitude)
         ps_obj_id = pokestop_obj.id
 
-        try:
-            obj = await AggregatedQuests.get(
-                pokestop=ps_obj_id,
-                ar_type=ar_type,
-                normal_type=normal_type,
-                reward_ar_type=reward_ar_type,
-                reward_normal_type=reward_normal_type,
-                reward_ar_item_id=reward_ar_item_id,
-                reward_ar_item_amount=reward_ar_item_amount,
-                reward_normal_item_id=reward_normal_item_id,
-                reward_normal_item_amount=reward_normal_item_amount,
-                reward_ar_poke_id=reward_ar_poke_id,
-                reward_ar_poke_form=reward_ar_poke_form,
-                reward_normal_poke_id=reward_normal_poke_id,
-                reward_normal_poke_form=reward_normal_poke_form,
-                area_id=area_id,
-                month_year=month_year
-            )
+        obj, created = await AggregatedQuests.get(
+            pokestop_id=ps_obj_id,
+            ar_type=ar_type,
+            normal_type=normal_type,
+            reward_ar_type=reward_ar_type,
+            reward_normal_type=reward_normal_type,
+            reward_ar_item_id=reward_ar_item_id,
+            reward_ar_item_amount=reward_ar_item_amount,
+            reward_normal_item_id=reward_normal_item_id,
+            reward_normal_item_amount=reward_normal_item_amount,
+            reward_ar_poke_id=reward_ar_poke_id,
+            reward_ar_poke_form=reward_ar_poke_form,
+            reward_normal_poke_id=reward_normal_poke_id,
+            reward_normal_poke_form=reward_normal_poke_form,
+            area_id=area_id,
+            month_year=month_year,
+            defaults={"total_count": increment}
+        )
+
+        if not created:
             obj.total_count += increment
             await obj.save()
-            logger.debug(f"⬆️ Updated AggregatedQuests: {obj}")
-            return obj
-        except DoesNotExist:
-            obj = await AggregatedQuests.create(
-                pokestop=ps_obj_id,
-                ar_type=ar_type,
-                normal_type=normal_type,
-                reward_ar_type=reward_ar_type,
-                reward_normal_type=reward_normal_type,
-                reward_ar_item_id=reward_ar_item_id,
-                reward_ar_item_amount=reward_ar_item_amount,
-                reward_normal_item_id=reward_normal_item_id,
-                reward_normal_item_amount=reward_normal_item_amount,
-                reward_ar_poke_id=reward_ar_poke_id,
-                reward_ar_poke_form=reward_ar_poke_form,
-                reward_normal_poke_id=reward_normal_poke_id,
-                reward_normal_poke_form=reward_normal_poke_form,
-                area_id=area_id,
-                month_year=month_year,
-                total_count=increment
-            )
-            logger.debug(f"✅ Created new AggregatedQuests: {obj}")
-            return obj
+            logger.debug(f"⬆️ Updated AggregatedQuests: Pokestop={obj.pokestop}, AR Type={obj.ar_type}, Normal Type={obj.normal_type}, Reward AR Type={obj.reward_ar_type}, Reward Normal Type={obj.reward_normal_type}, Reward AR Item ID={obj.reward_ar_item_id}, Reward AR Item Amount={obj.reward_ar_item_amount}, Reward Normal Item ID={obj.reward_normal_item_id}, Reward Normal Item Amount={obj.reward_normal_item_amount}, Reward AR Poke ID={obj.reward_ar_poke_id}, Reward AR Poke Form={obj.reward_ar_poke_form}, Reward Normal Poke ID={obj.reward_normal_poke_id}, Reward Normal Poke Form={obj.reward_normal_poke_form}, Area={obj.area}, Month Year={obj.month_year}")
+        else:
+            logger.debug(f"✅ Created new AggregatedQuests: Pokestop={obj.pokestop}, AR Type={obj.ar_type}, Normal Type={obj.normal_type}, Reward AR Type={obj.reward_ar_type}, Reward Normal Type={obj.reward_normal_type}, Reward AR Item ID={obj.reward_ar_item_id}, Reward AR Item Amount={obj.reward_ar_item_amount}, Reward Normal Item ID={obj.reward_normal_item_id}, Reward Normal Item Amount={obj.reward_normal_item_amount}, Reward AR Poke ID={obj.reward_ar_poke_id}, Reward AR Poke Form={obj.reward_ar_poke_form}, Reward Normal Poke ID={obj.reward_normal_poke_id}, Reward Normal Poke Form={obj.reward_normal_poke_form}, Area={obj.area}, Month Year={obj.month_year}")
+
+        return obj
