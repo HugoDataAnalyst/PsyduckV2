@@ -37,13 +37,16 @@ async def add_timeseries_invasion_event(data, pipe=None):
 
     logger.debug(f"🔑 Constructed Invasion TimeSeries Key: {key}")
 
+    # Build an identifier for the labels.
+    identifier = f"{display_type}:{character}:{grunt}:{confirmed}"
+
     client = redis_manager.redis_client
     updated_fields = {}
 
     # Ensure the time series key exists
     retention_ms = AppConfig.invasion_timeseries_retention_ms
     logger.debug(f"🚨 Set Invasion retention timer: {retention_ms}")
-    await ensure_timeseries_key(client, key, "invasion", area, "", "", retention_ms, pipe)
+    await ensure_timeseries_key(client, key, "invasion", area, identifier, "", retention_ms, pipe)
 
     if pipe:
         pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
