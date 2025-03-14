@@ -5,7 +5,7 @@ class QuestSQLProcessor(QuestsSQLProcessor):
     @classmethod
     async def upsert_aggregated_quest_from_filtered(cls, filtered_data, increment: int = 1):
         try:
-            pokestop = filtered_data.get('pokestop')
+            pokestop = filtered_data.get('pokestop_id')
             pokestop_name = filtered_data.get('pokestop_name')
             latitude = filtered_data.get('latitude')
             longitude = filtered_data.get('longitude')
