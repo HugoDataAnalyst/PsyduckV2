@@ -39,7 +39,7 @@ class RaidsSQLProcessor:
         longitude: float,
         raid_pokemon: int,
         raid_level: int,
-        raid_form: int,
+        raid_form: str,
         raid_team: int,
         raid_costume: int,
         raid_is_exclusive: int,
