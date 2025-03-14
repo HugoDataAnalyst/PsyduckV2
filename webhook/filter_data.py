@@ -32,7 +32,7 @@ class WebhookFilter:
         offset_secs = offset * 3600
         # Add the offset to the UTC timestamp.
         adjusted_first_seen = utc_first_seen + offset_secs
-        logger.debug(f"Adjusting timezone for {geofence_name} from UTC: {utc_first_seen} to: {adjusted_first_seen}")
+        logger.debug(f"🔧 Adjusting timezone for {geofence_name} from UTC: {utc_first_seen} to: {adjusted_first_seen}")
         return adjusted_first_seen
 
     @staticmethod
@@ -205,11 +205,17 @@ class WebhookFilter:
             if pokemon_data:
                 return pokemon_data
         elif data_type == "quest":
-            return await self.handle_quest_data(message, geofence_id, geofence_name, offset)
+            quest_data = await self.handle_quest_data(message, geofence_id, geofence_name, offset)
+            if quest_data:
+                return quest_data
         elif data_type == "raid":
-            return await self.handle_raid_data(message, geofence_id, geofence_name, offset)
+            raid_data = await self.handle_raid_data(message, geofence_id, geofence_name, offset)
+            if raid_data:
+                return raid_data
         elif data_type == "invasion":
-            return await self.handle_invasion_data(message, geofence_id, geofence_name, offset)
+            invasion_data = await self.handle_invasion_data(message, geofence_id, geofence_name, offset)
+            if invasion_data:
+                return invasion_data
         else:
             logger.warning(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
