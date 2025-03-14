@@ -1,9 +1,11 @@
 import asyncio
 import json
+from textwrap import indent
 import config as AppConfig
 from my_redis.queries.pokemons import (
     pokemon_timeseries,
     pokemon_counterseries,
+    pokemon_hourly_counterseries,
     pokemon_tth_counterseries,
     pokemon_tth_timeseries,
     pokemon_weather_iv_counterseries
@@ -34,6 +36,7 @@ async def process_pokemon_data(filtered_data):
             # Add all Redis operations to the pipeline
             pokemon_timeseries_update = await pokemon_timeseries.add_timeseries_total_pokemon_event(filtered_data, pipe)
             pokemon_counterseries_update = await pokemon_counterseries.update_total_pokemon_counter(filtered_data, pipe)
+            pokemon_hourly_counterseries_update = await pokemon_hourly_counterseries.update_pokemon_hourly_counter(filtered_data, pipe)
             pokemon_tth_timeseries_update = await pokemon_tth_timeseries.add_tth_timeseries_pokemon_event(filtered_data, pipe)
             pokemon_tth_counterseries_update = await pokemon_tth_counterseries.update_tth_pokemon_counter(filtered_data, pipe)
             pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
@@ -62,6 +65,7 @@ async def process_pokemon_data(filtered_data):
             "Updates:\n"
             f"  - Timeseries Total: {json.dumps(pokemon_timeseries_update, indent=2)}\n"
             f"  - Counter Total: {json.dumps(pokemon_counterseries_update, indent=2)}\n"
+            f"  - Counter Hourly Total: {json.dumps(pokemon_hourly_counterseries_update, indent=2)}\n"
             f"  - TTH Timeseries: {json.dumps(pokemon_tth_timeseries_update, indent=2)}\n"
             f"  - TTH Counter: {json.dumps(pokemon_tth_counterseries_update, indent=2)}\n"
             f"  - Counter Weather: {json.dumps(pokemon_weather_counterseries_update, indent=2)}\n"
