@@ -2,7 +2,9 @@
     "SQL": {
         "store_sql_pokemon_aggregation": true,
         "store_sql_pokemon_shiny": true,
-        "store_sql_raid_aggregation": true
+        "store_sql_raid_aggregation": true,
+        "store_sql_quest_aggregation": true,
+        "store_sql_invasion_aggregation": true
     },
     "geofences": {
         "expire_cache_seconds": 3600,
