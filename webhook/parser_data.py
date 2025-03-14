@@ -1,7 +1,4 @@
-from ast import If
-import asyncio
 import json
-from textwrap import indent
 import config as AppConfig
 from my_redis.queries.pokemons import (
     pokemon_timeseries,
