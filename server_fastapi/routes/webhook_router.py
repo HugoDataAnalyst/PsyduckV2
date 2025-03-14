@@ -5,7 +5,10 @@ from fastapi.responses import RedirectResponse
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
 from webhook.filter_data import WebhookFilter
-from webhook.parser_data import process_pokemon_data
+from webhook.parser_data import (
+    process_pokemon_data,
+    process_raid_data
+)
 from server_fastapi import global_state
 
 router = APIRouter()
@@ -28,6 +31,12 @@ async def process_single_event(event: dict):
     if data_type == "pokemon":
         logger.info("✅ Processing Pokémon data.")
         result = await process_pokemon_data(filtered_data)
+        if result:
+            logger.success(f"✅ Webhook processed successfully:\n{result}")
+            return {"status": "success", "processed_data": result}
+    elif data_type == "raid":
+        logger.info("✅ Processing Raid data.")
+        result = await process_raid_data(filtered_data)
         if result:
             logger.success(f"✅ Webhook processed successfully:\n{result}")
             return {"status": "success", "processed_data": result}
