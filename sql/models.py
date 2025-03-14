@@ -48,7 +48,7 @@ class Gyms(Model):
 class AggregatedQuests(Model):
     """Stores aggregated quest data per pokestop, monthly"""
     id = fields.BigIntField(pk=True)
-    pokestop = fields.ForeignKeyField("models.Pokestops", related_name="aggregated_stats")
+    pokestop = fields.ForeignKeyField("models.Pokestops", related_name="aggregated_quests_stats")
     ar_type = fields.SmallIntField()
     normal_type = fields.SmallIntField()
     reward_ar_type = fields.SmallIntField()
@@ -61,7 +61,7 @@ class AggregatedQuests(Model):
     reward_ar_poke_form = fields.CharField(max_length=15)
     reward_normal_poke_id = fields.SmallIntField()
     reward_normal_poke_form = fields.CharField(max_length=15)
-    area = fields.ForeignKeyField("models.Areas", related_name="aggregated_stats")
+    area = fields.ForeignKeyField("models.AreaNames", related_name="aggregated_quests_stats")
     month_year = fields.SmallIntField()  # Format: YYMM (2503 for March 2025)
     total_count = fields.IntField(default=0)
 
@@ -78,12 +78,12 @@ class AggregatedQuests(Model):
 class AggreagatedInvasions(Model):
     """Stores aggregated invasion data per gym, monthly."""
     id = fields.BigIntField(pk=True)
-    pokestop = fields.ForeignKeyField("models.Pokestops", related_name="aggregated_stats")
+    pokestop = fields.ForeignKeyField("models.Pokestops", related_name="aggregated_invasions_stats")
     display_type = fields.SmallIntField()
     character = fields.SmallIntField()
     grunt = fields.SmallIntField()
     confirmed = fields.SmallIntField()
-    area = fields.ForeignKeyField("models.Areas", related_name="aggregated_stats")
+    area = fields.ForeignKeyField("models.AreaNames", related_name="aggregated_invasions_stats")
     month_year = fields.SmallIntField()  # Format: YYMM (2503 for March 2025)
     total_count = fields.IntField(default=0)
 
@@ -97,7 +97,7 @@ class AggreagatedInvasions(Model):
 class AggregatedRaids(Model):
     """Stores aggregated raid data per gym, monthly."""
     id = fields.BigIntField(pk=True)
-    gym = fields.ForeignKeyField("models.Gyms", related_name="aggregated_stats")
+    gym = fields.ForeignKeyField("models.Gyms", related_name="aggregated_raids_stats")
     raid_pokemon = fields.SmallIntField()
     raid_level = fields.SmallIntField()
     raid_form = fields.CharField(max_length=15)
@@ -105,7 +105,7 @@ class AggregatedRaids(Model):
     raid_costume = fields.SmallIntField(default=0)
     raid_is_exclusive = fields.SmallIntField(default=0)
     raid_ex_raid_eligible = fields.SmallIntField(default=0)
-    area = fields.ForeignKeyField("models.AreaNames", related_name="aggregated_stats")
+    area = fields.ForeignKeyField("models.AreaNames", related_name="aggregated_raids_stats")
     month_year = fields.SmallIntField()  # Format: YYMM (2503 for March 2025)
     total_count = fields.IntField(default=0)
 
