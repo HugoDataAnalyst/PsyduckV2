@@ -402,7 +402,7 @@ class WebhookFilter:
         ]
         # ✅ Check if all required fields are present
         if not all(field in message and message[field] is not None for field in required_invasion_fields):
-            logger.warning(f"⚠️ Skipping Invasion data due to missing fields: {message}")
+            logger.debug(f"⚠️ Skipping Invasion data due to missing fields: {message}")
             return None
 
         # ✅ Adjust first_seen timestamp to local time
