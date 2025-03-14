@@ -15,6 +15,26 @@ class WebhookFilter:
         self.geofences = geofences  # ✅ Inject geofences dynamically
 
     # Helper functions
+
+    @staticmethod
+    def adjust_first_seen_to_local(geofence_name, utc_first_seen:int, offset: int) -> int:
+        """
+        Adjust a UTC timestamp by a given offset in hours.
+
+        Args:
+            utc_first_seen: The original UTC timestamp (in seconds).
+            offset: The UTC offset in hours (can be negative, zero, or positive).
+
+        Returns:
+            The adjusted timestamp (in seconds) accounting for the offset.
+        """
+        # Convert the offset to seconds.
+        offset_secs = offset * 3600
+        # Add the offset to the UTC timestamp.
+        adjusted_first_seen = utc_first_seen + offset_secs
+        logger.debug(f"Adjusting timezone for {geofence_name} from UTC: {utc_first_seen} to: {adjusted_first_seen}")
+        return adjusted_first_seen
+
     @staticmethod
     def quest_filter_criteria(message: dict) -> bool:
         """
@@ -175,21 +195,21 @@ class WebhookFilter:
             logger.debug("⚠️ Webhook data missing coordinates. Ignoring.")
             return None
 
-        inside_geofence, geofence_id, geofence_name = await self.is_inside_geofence(latitude, longitude)
+        inside_geofence, geofence_id, geofence_name, offset = await self.is_inside_geofence(latitude, longitude)
         if not inside_geofence:
             return None  # ❌ Reject if outside geofence
 
         # ✅ Handle each webhook type separately
         if data_type == "pokemon":
-            pokemon_data = await self.handle_pokemon_data(message, geofence_id, geofence_name)
+            pokemon_data = await self.handle_pokemon_data(message, geofence_id, geofence_name, offset)
             if pokemon_data:
                 return pokemon_data
         elif data_type == "quest":
-            return await self.handle_quest_data(message, geofence_id, geofence_name)
+            return await self.handle_quest_data(message, geofence_id, geofence_name, offset)
         elif data_type == "raid":
-            return await self.handle_raid_data(message, geofence_id)
+            return await self.handle_raid_data(message, geofence_id, geofence_name, offset)
         elif data_type == "invasion":
-            return await self.handle_invasion_data(message, geofence_id)
+            return await self.handle_invasion_data(message, geofence_id, geofence_name, offset)
         else:
             logger.warning(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
@@ -200,7 +220,7 @@ class WebhookFilter:
 
     ## ✅ Type-Specific Handling Functions
 
-    async def handle_pokemon_data(self, message, geofence_id, geofence_name):
+    async def handle_pokemon_data(self, message, geofence_id, geofence_name, offset: int):
         """Process and filter Pokémon webhook data."""
         required_fields = [
             "pokemon_id",
@@ -232,6 +252,10 @@ class WebhookFilter:
         # ✅ Extract PVP Ranks
         pvp_ranks = self.extract_pvp_ranks(message.get("pvp", {}))
 
+        # ✅ Adjust first_seen timestamp to local time
+        utc_first_seen = int(message["first_seen"])
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+
         # ✅ Extract Pokémon Data
         pokemon_data = {
             "pokemon_id": message["pokemon_id"],
@@ -246,7 +270,7 @@ class WebhookFilter:
             "shiny": message["shiny"],
             "size": message["size"],
             "username": message["username"],
-            "first_seen": message["first_seen"],
+            "first_seen": corrected_first_seen,
             "despawn_timer": despawn_timer,
             "weather": message["weather"],
             "spawnpoint": message["spawnpoint_id"],
@@ -258,7 +282,7 @@ class WebhookFilter:
         return pokemon_data  # ✅ Return structured Pokémon data
 
 
-    async def handle_quest_data(self, message, geofence_id, geofence_name):
+    async def handle_quest_data(self, message, geofence_id, geofence_name, offset):
         """
         Process Quest webhook data.
         Returns a dictionary with processed quest data, or None if criteria are not met.
@@ -267,6 +291,10 @@ class WebhookFilter:
         if not self.quest_filter_criteria(message):
             logger.debug(f"⚠️ Skipping Quest data due to failing criteria: {message}")
             return None
+
+        # ✅ Adjust first_seen timestamp to local time
+        utc_first_seen = int(message["updated"])
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
 
         # Build initial quest data structure.
         quest_data = {
@@ -286,6 +314,7 @@ class WebhookFilter:
             "reward_ar_poke_form": None,
             "reward_normal_poke_id": None,
             "reward_normal_poke_form": None,
+            "first_seen": corrected_first_seen
         }
         # Set quest type based on 'with_ar'
         quest_type_field = 'ar_type' if message.get('with_ar') else 'normal_type'
@@ -300,7 +329,7 @@ class WebhookFilter:
         return quest_data
 
 
-    async def handle_raid_data(self, message, geofence_id, geofence_name):
+    async def handle_raid_data(self, message, geofence_id, geofence_name, offset):
         """Process Raid webhook data."""
         required_raid_fields = [
             "gym_id",
@@ -319,6 +348,10 @@ class WebhookFilter:
             logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
             return None
 
+        # ✅ Adjust first_seen timestamp to local time
+        utc_first_seen = int(message["spawn"])
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+
         # ✅ Extract Raid Data
         raid_data = {
             "raid_pokemon": message["pokemon_id"],
@@ -332,13 +365,13 @@ class WebhookFilter:
             "raid_is_exclusive": message["is_exclusive"],
             "area_id": geofence_id,
             "area_name": geofence_name,
-            "invasion_first_seen": message["spawn"],
+            "raid_first_seen": corrected_first_seen,
         }
 
         logger.debug(f"✅ Raid {raid_data['raid_level']} - Boss {raid_data['raid_pokemon']} in Area: {raid_data['area_name']} with Spawn timer: {raid_data['first_seen']}")
         return raid_data
 
-    async def handle_invasion_data(self, message, geofence_id, geofence_name):
+    async def handle_invasion_data(self, message, geofence_id, geofence_name, offset):
         """Process Invasion (Rocket) webhook data."""
         required_invasion_fields = [
             "display_type",
@@ -354,6 +387,10 @@ class WebhookFilter:
             logger.debug(f"⚠️ Skipping Invasion data due to missing fields: {message}")
             return None
 
+        # ✅ Adjust first_seen timestamp to local time
+        utc_first_seen = int(message["updated"])
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+
         # ✅ Extract Invasion Data
         invasion_data = {
             "invasion_type": message["display_type"],
@@ -363,6 +400,7 @@ class WebhookFilter:
             "invasion_first_seen": message["updated"],
             "invasion_latitude": message["latitude"],
             "invasion_longitude": message["longitude"],
+            "invasion_first_seen": corrected_first_seen,
             "area_id": geofence_id,
             "area_name": geofence_name,
         }
