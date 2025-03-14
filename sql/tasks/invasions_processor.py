@@ -5,16 +5,16 @@ class InvasionSQLProcessor(InvasionsSQLProcessor):
     @classmethod
     async def upsert_aggregated_invasion_from_filtered(cls, filtered_data, increment: int = 1):
         try:
-            pokestop = filtered_data.get('pokestop')
-            pokestop_name = filtered_data.get('pokestop_name')
-            latitude = filtered_data.get('latitude')
-            longitude = filtered_data.get('longitude')
-            display_type = filtered_data.get('display_type')
-            character = filtered_data.get('character')
-            grunt = filtered_data.get('grunt')
-            confirmed = filtered_data.get('confirmed')
+            pokestop = filtered_data.get('invasion_pokestop_id')
+            pokestop_name = filtered_data.get('invasion_pokestop_name')
+            latitude = filtered_data.get('invasion_latitude')
+            longitude = filtered_data.get('invasion_longitude')
+            display_type = filtered_data.get('invasion_type')
+            character = filtered_data.get('invasion_character')
+            grunt = filtered_data.get('invasion_grunt_type')
+            confirmed = filtered_data.get('invasion_confirmed')
             area_id = filtered_data.get('area_id')
-            first_seen_timestamp = filtered_data.get('first_seen')
+            first_seen_timestamp = filtered_data.get('invasion_first_seen')
 
             result = await cls.upsert_aggregated_invasion(
                 pokestop_id=pokestop,
