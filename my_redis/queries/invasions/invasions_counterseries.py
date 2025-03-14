@@ -20,14 +20,14 @@ async def update_invasion_counter(data, pipe=None):
         return "ERROR"
 
     # Convert first_seen timestamp (in seconds) to a date string (YYYYMMDD)
-    ts = data["first_seen"]
+    ts = data["invasion_first_seen"]
     date_str = datetime.fromtimestamp(ts).strftime("%Y%m%d")
 
     area = data["area_name"]
     display_type = data["invasion_type"]
     character = data["invasion_character"]
     grunt = data["invasion_grunt_type"]
-    confirmed = int(bool(data["invasion_confirmed"], 0))
+    confirmed = int(bool(data["invasion_confirmed"]))
 
     # Construct the hash key for the area and date
     hash_key = f"counter:invasion:{area}:{date_str}"

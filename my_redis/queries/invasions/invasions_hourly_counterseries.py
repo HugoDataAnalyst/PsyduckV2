@@ -25,7 +25,7 @@ async def update_invasion_hourly_counter(data, pipe=None):
     display_type = data["invasion_type"]
     character = data["invasion_character"]
     grunt = data["invasion_grunt_type"]
-    confirmed = int(bool(data["invasion_confirmed"], 0))
+    confirmed = int(bool(data["invasion_confirmed"]))
 
     # Construct the hash key for the area and hour
     hash_key = f"counter:invasion_hourly:{area}:{date_hour}"

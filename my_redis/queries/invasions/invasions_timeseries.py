@@ -30,7 +30,7 @@ async def add_timeseries_invasion_event(data, pipe=None):
     display_type = data["invasion_type"]
     character = data["invasion_character"]
     grunt = data["invasion_grunt_type"]
-    confirmed = int(bool(data["invasion_confirmed"], 0))
+    confirmed = int(bool(data["invasion_confirmed"]))
 
     # Construct a timeseries key combining these values.
     key = f"ts:invasion:{area}:{display_type}:{character}:{grunt}:{confirmed}"
