@@ -349,9 +349,15 @@ class WebhookFilter:
             "longitude"
             ]
 
-        # ✅ Check if all required fields are present
+        #✅ Check if all required fields are present
         if not all(field in message and message[field] is not None for field in required_raid_fields):
-            logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
+            logger.debug(f"⚠️ Skipping Raid data due to missing fields: {message}")
+            return None
+
+        #✅ Extra check: ensure 'pokemon_id' is not None or 0
+        pokemon_id_val = message.get("pokemon_id")
+        if not pokemon_id_val or int(pokemon_id_val) == 0:
+            logger.debug(f"⚠️ Skipping Raid data due to invalid 'pokemon_id': {pokemon_id_val}")
             return None
 
         # ✅ Adjust first_seen timestamp to local time
@@ -369,12 +375,15 @@ class WebhookFilter:
             "raid_gym_id": message["gym_id"],
             "raid_ex_raid_eligible": message["ex_raid_eligible"],
             "raid_is_exclusive": message["is_exclusive"],
+            "raid_gym_id": message["gym_id"],
+            "raid_gym_name": message["gym_name"],
+            "raid_team_id": message["team_id"],
             "area_id": geofence_id,
             "area_name": geofence_name,
             "raid_first_seen": corrected_first_seen,
         }
 
-        logger.debug(f"✅ Raid {raid_data['raid_level']} - Boss {raid_data['raid_pokemon']} in Area: {raid_data['area_name']} with Spawn timer: {raid_data['first_seen']}")
+        logger.debug(f"✅ Raid {raid_data['raid_level']} - Boss {raid_data['raid_pokemon']} in Area: {raid_data['area_name']} with Spawn timer: {raid_data['raid_first_seen']}")
         return raid_data
 
     async def handle_invasion_data(self, message, geofence_id, geofence_name, offset):
