@@ -13,6 +13,8 @@
     "retention_hours": {
         "timeseries_pokemon": 720,
         "tth_timeseries_pokemon": 720,
-        "timeseries_raid": 720
+        "timeseries_raid": 720,
+        "timeseries_invasion": 720,
+        "timeseries_quest": 720
     }
 }
