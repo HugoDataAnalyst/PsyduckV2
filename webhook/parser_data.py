@@ -16,11 +16,13 @@ from my_redis.queries.raids import (
     raids_hourly_counterseries
 )
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
+from sql.tasks.raids_processor import RaidSQLProcessor
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
 redis_manager = RedisManager()
 pokemon_sql = PokemonSQLProcessor()
+raid_sql = RaidSQLProcessor()
 
 async def process_pokemon_data(filtered_data):
     """
@@ -108,11 +110,11 @@ async def process_raid_data(filtered_data):
             await pipe.execute()
 
         # Execute SQl commands if Enabled
-        #if AppConfig.store_sql_raid_aggregation:
-        #    logger.info("🔃 Processing Raid Aggregation...")
-        #    await raid_sql.upsert_aggregated_from_filtered(filtered_data)
-        #else:
-        #    logger.info("⚠️ SQL Raid Aggregation is disabled.")
+        if AppConfig.store_sql_raid_aggregation:
+            logger.info("🔃 Processing Raid Aggregation...")
+            await raid_sql.upsert_aggregated_raid_from_filtered(filtered_data)
+        else:
+            logger.info("⚠️ SQL Raid Aggregation is disabled.")
 
                 # Map results to Meaningful Information.
         structured_result = (
