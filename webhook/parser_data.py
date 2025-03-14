@@ -1,7 +1,7 @@
 import asyncio
 import json
 import config as AppConfig
-from my_redis.queries import (
+from my_redis.queries.pokemons import (
     pokemon_timeseries,
     pokemon_counterseries,
     pokemon_tth_counterseries,
