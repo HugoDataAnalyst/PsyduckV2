@@ -365,7 +365,7 @@ class WebhookFilter:
         utc_first_seen = int(message["spawn"])
         utc_end = int(message["end"])
         corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
-        corrected_end = self.adjust_end_to_local(geofence_name, utc_end, offset)
+        corrected_end = self.adjust_first_seen_to_local(geofence_name, utc_end, offset)
 
         # ✅ Extract Raid Data
         raid_data = {
