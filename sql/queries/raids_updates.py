@@ -64,7 +64,7 @@ class RaidsSQLProcessor:
         gym_obj_id = gym_obj.id
 
 
-        obj, created = await AggregatedRaids.get(
+        obj, created = await AggregatedRaids.get_or_create(
             gym_id=gym_obj_id,
             raid_pokemon=raid_pokemon,
             raid_level=raid_level,
@@ -80,8 +80,17 @@ class RaidsSQLProcessor:
         if not created:
             obj.total_count += increment
             await obj.save()
-            logger.debug(f"⬆️ Updated AggregatedRaids: Gym={obj.gym}, Raid Pokemon={obj.raid_pokemon}, Raid Level={obj.raid_level}, Raid Form={obj.raid_form}, Raid Team={obj.raid_team}, Raid Costume={obj.raid_costume}, Raid Is Exclusive={obj.raid_is_exclusive}, Raid Ex Raid Eligible={obj.raid_ex_raid_eligible}, Area={obj.area}, Month Year={obj.month_year}")
+            logger.debug(
+                f"⬆️ Updated AggregatedRaids: Gym={obj.gym_id}, Raid Pokemon={obj.raid_pokemon}, "
+                f"Raid Level={obj.raid_level}, Raid Form={obj.raid_form}, Raid Team={obj.raid_team}, "
+                f"Raid Costume={obj.raid_costume}, Raid Is Exclusive={obj.raid_is_exclusive}, "
+                f"Raid Ex Raid Eligible={obj.raid_ex_raid_eligible}, Area={obj.area_id}, Month Year={obj.month_year}"
+            )
         else:
-            logger.debug(f"✅ Created new AggregatedRaids: Gym={obj.gym}, Raid Pokemon={obj.raid_pokemon}, Raid Level={obj.raid_level}, Raid Form={obj.raid_form}, Raid Team={obj.raid_team}, Raid Costume={obj.raid_costume}, Raid Is Exclusive={obj.raid_is_exclusive}, Raid Ex Raid Eligible={obj.raid_ex_raid_eligible}, Area={obj.area}, Month Year={obj.month_year}")
-
+            logger.debug(
+                f"✅ Created new AggregatedRaids: Gym={obj.gym_id}, Raid Pokemon={obj.raid_pokemon}, "
+                f"Raid Level={obj.raid_level}, Raid Form={obj.raid_form}, Raid Team={obj.raid_team}, "
+                f"Raid Costume={obj.raid_costume}, Raid Is Exclusive={obj.raid_is_exclusive}, "
+                f"Raid Ex Raid Eligible={obj.raid_ex_raid_eligible}, Area={obj.area_id}, Month Year={obj.month_year}"
+            )
         return obj
