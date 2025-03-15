@@ -181,10 +181,17 @@ async def process_quest_data(filtered_data):
         else:
             logger.info("⚠️ SQL Quest Aggregation is disabled.")
 
+        with_ar = filtered_data.get("ar_type") is not None
+        if with_ar:
+            mode = "AR"
+            reward_type = filtered_data.get("reward_ar_type")
+        else:
+            mode = "Normal"
+            reward_type = filtered_data.get("reward_normal_type")
                 # Map results to Meaningful Information.
         structured_result = (
-            f"Quest Type: {filtered_data['with_ar']}\n"
-            f"Quest Reward Type: {filtered_data['reward_type']}\n"
+            f"Quest Type: {mode}\n"
+            f"Quest Reward Type: {reward_type}\n"
             f"Area: {filtered_data['area_name']}\n"
             "Updates:\n"
             f"  - Quest Timeseries Total: {json.dumps(quest_timeseries_update, indent=2)}\n"
@@ -192,11 +199,11 @@ async def process_quest_data(filtered_data):
             f"  - Quest Hourly Counter Total: {json.dumps(quest_hourly_counterseries_update, indent=2)}\n"
         )
 
-        logger.debug(f"✅ Processed Quest {filtered_data['with_ar']} in area {filtered_data['area_name']} - Updates: {structured_result}")
+        logger.debug(f"✅ Processed Quest {mode} in area {filtered_data['area_name']} - Updates: {structured_result}")
         return structured_result
 
     except Exception as e:
-        logger.error(f"❌ Error processing Pokémon event data in parser_data: {e}")
+        logger.error(f"❌ Error processing Quest event data in parser_data: {e}")
         return None
 
 async def process_invasion_data(filtered_data):
