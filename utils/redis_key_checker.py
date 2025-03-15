@@ -39,7 +39,7 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "LABELS",
                     "metric", metric,
                     "area", str(area),
-                    "raid", str(identifier)
+                    "raid", str(identifier),
                 ]
                 # Optionally, if you want to add 'form' as a label as well:
                 if form:
@@ -54,10 +54,10 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "LABELS",
                     "metric", metric,
                     "area", str(area),
-                    "quest", str(identifier)
+                    "quest", str(identifier),
                 ]
                 if form:
-                    command.extend(["form", str(form)])
+                    command.extend(["mode", str(form)])
             elif metric == "invasion":
                 # For invasion timeseries, 'identifier' can hold combined invasion attributes.
                 command = [
@@ -68,10 +68,10 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "LABELS",
                     "metric", metric,
                     "area", str(area),
-                    "invasion", str(identifier)
+                    "invasion", str(identifier),
                 ]
                 if form:
-                    command.extend(["form", str(form)])
+                    command.extend(["grunt", str(form)])
             else:
                 command = [
                     "TS.CREATE",
