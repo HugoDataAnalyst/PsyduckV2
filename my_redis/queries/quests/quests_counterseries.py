@@ -33,7 +33,7 @@ async def update_quest_counter(data, pipe=None):
     area = data["area_name"]
     pokestop = data["pokestop_id"]
     # Determine quest type from the two possible keys.
-    with_ar = data.get("with_ar", False)
+    with_ar = data.get("ar_type") is not None
 
     if with_ar:
         mode = "ar"

@@ -26,8 +26,13 @@ async def add_timeseries_quest_event(data, pipe=None):
 
     area = data["area_name"]
     pokestop = data["pokestop_id"]
+    # Log the raw input data for debugging
+    logger.debug(f"🆕 Raw quest data: {data}")
+    # Define defaults so both variables are always available
+    ar_type = ""
+    normal_type = ""
     # Determine quest type from the two possible keys.
-    with_ar = data.get("with_ar", False)
+    with_ar = data.get("ar_type") is not None
 
     # Build field details based on the mode.
     if with_ar:
