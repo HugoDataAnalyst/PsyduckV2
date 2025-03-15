@@ -26,7 +26,10 @@ async def retry_call(coro_func, *args, max_attempts=5, initial_delay=2, delay_in
     while attempt < max_attempts:
         try:
             result = await coro_func(*args, **kwargs)
-            return result
+            if result:
+                return result
+            else:
+                raise Exception("❌ No result returned from function.")
         except Exception as e:
             attempt += 1
             if attempt >= max_attempts:
