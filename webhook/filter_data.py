@@ -306,6 +306,8 @@ class WebhookFilter:
         quest_data = {
             "pokestop_id": message['pokestop_id'],
             "pokestop_name": message['pokestop_name'],
+            "latitude": message["latitude"],
+            "longitude": message["longitude"],
             "area_name": geofence_name,
             "area_id": geofence_id,
             # Initialize reward fields to None.
