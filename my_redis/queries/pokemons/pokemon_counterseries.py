@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
@@ -14,9 +14,15 @@ async def update_total_pokemon_counter(data, pipe=None):
         logger.error("❌ Redis is not connected. Cannot update Pokémon counter.")
         return "ERROR"
 
-    # Convert first_seen timestamp (in seconds) to a date string (YYYYMMDD)
     ts = data["first_seen"]
-    date_str = datetime.fromtimestamp(ts).strftime("%Y%m%d")
+    dt = datetime.fromtimestamp(ts)
+    # dt.weekday() returns 0 for Monday, 6 for Sunday.
+    monday_dt = dt - timedelta(days=dt.weekday(),
+                                hours=dt.hour,
+                                minutes=dt.minute,
+                                seconds=dt.second,
+                                microseconds=dt.microsecond)
+    date_str = monday_dt.strftime("%Y%m%d")
 
     area = data["area_name"]
     pokemon_id = data["pokemon_id"]

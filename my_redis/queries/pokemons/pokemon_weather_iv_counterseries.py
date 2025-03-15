@@ -28,6 +28,7 @@ async def update_pokemon_weather_iv(data, pipe=None):
     if ts is None:
         logger.error("❌ Missing 'first_seen' timestamp in data.")
         return "ERROR"
+    # Use monthly timeframe
     date_str = datetime.fromtimestamp(ts).strftime("%Y%m")
 
     area = data.get("area_name")

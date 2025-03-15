@@ -30,16 +30,9 @@ async def update_tth_pokemon_counter(data, pipe=None):
         logger.error("❌ Redis is not connected. Cannot update Pokémon TTH counter.")
         return "ERROR"
 
-    # Convert first_seen timestamp to YYYYMMDD format
+    # Convert first_seen timestamp (in seconds) to a date string (YYYYMMDD) and hour (HH)
     ts = data["first_seen"]
-    dt = datetime.fromtimestamp(ts)
-    # dt.weekday() returns 0 for Monday, 6 for Sunday.
-    monday_dt = dt - timedelta(days=dt.weekday(),
-                                hours=dt.hour,
-                                minutes=dt.minute,
-                                seconds=dt.second,
-                                microseconds=dt.microsecond)
-    date_str = monday_dt.strftime("%Y%m%d")
+    date_hour = datetime.fromtimestamp(ts).strftime("%Y%m%d%H")
 
     area = data["area_name"]
     despawn_timer = data.get("despawn_timer", 0)
@@ -54,7 +47,7 @@ async def update_tth_pokemon_counter(data, pipe=None):
         return "IGNORED"
 
     # Construct Redis key for the area and date
-    hash_key = f"counter:tth_pokemon:{area}:{date_str}"
+    hash_key = f"counter:tth_pokemon_hourly:{area}:{date_hour}"
     field_name = f"{tth_bucket}"
 
     logger.debug(f"🔑 Hash Key: {hash_key}, Field: {field_name}")

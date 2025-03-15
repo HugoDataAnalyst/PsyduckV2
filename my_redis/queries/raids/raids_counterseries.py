@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
@@ -14,9 +14,15 @@ async def update_raid_counter(raid_data, pipe=None):
         logger.error("❌ Redis is not connected. Cannot update Raid counters.")
         return None
 
-    # Convert raids first seen timestamp (in seconds) to a date string (YYYYMMDD)
     ts = raid_data["raid_first_seen"]
-    date_str = datetime.fromtimestamp(ts).strftime("%Y%m%d")
+    dt = datetime.fromtimestamp(ts)
+    # dt.weekday() returns 0 for Monday, 6 for Sunday.
+    monday_dt = dt - timedelta(days=dt.weekday(),
+                                hours=dt.hour,
+                                minutes=dt.minute,
+                                seconds=dt.second,
+                                microseconds=dt.microsecond)
+    date_str = monday_dt.strftime("%Y%m%d")
 
     area = raid_data["area_name"]
     raid_pokemon = raid_data["raid_pokemon"]
