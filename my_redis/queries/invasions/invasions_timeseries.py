@@ -28,17 +28,15 @@ async def add_timeseries_invasion_event(data, pipe=None):
     area = data["area_name"]
 
     display_type = data["invasion_type"]
-    character = data["invasion_character"]
     grunt = data["invasion_grunt_type"]
     confirmed = int(bool(data["invasion_confirmed"]))
 
     # Construct a timeseries key combining these values.
-    key = f"ts:invasion:total:{area}:{display_type}:{character}:{grunt}:{confirmed}"
+    key_total = f"ts:invasion:total:{area}:{display_type}:{grunt}"
+    key_confirmed = f"ts:invasion:confirmed:{area}:{display_type}:{grunt}"
 
-    logger.debug(f"🔑 Constructed Invasion TimeSeries Key: {key}")
+    logger.debug(f"🔑 Constructed Invasion TimeSeries Key: {key_total}")
 
-    # Build an identifier for the labels.
-    identifier = f"{display_type}:{character}:{grunt}:{confirmed}"
 
     client = redis_manager.redis_client
     updated_fields = {}
@@ -46,20 +44,28 @@ async def add_timeseries_invasion_event(data, pipe=None):
     # Ensure the time series key exists
     retention_ms = AppConfig.invasion_timeseries_retention_ms
     logger.debug(f"🚨 Set Invasion retention timer: {retention_ms}")
-    await ensure_timeseries_key(client, key, "invasion", area, identifier, "", retention_ms, pipe)
+    await ensure_timeseries_key(client, key_total, "invasion_total", area, display_type, grunt, retention_ms, pipe)
+    await ensure_timeseries_key(client, key_confirmed, "invasion_confirmed", area, display_type, grunt, retention_ms, pipe)
 
     # Determine metric increments
     inc_total      = 1  # Always add 1 for total
+    inc_confirmed  = 1 if confirmed and 1 in confirmed else 0
 
     if pipe:
-        pipe.execute_command("TS.ADD", key, ts, inc_total, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
+        pipe.execute_command("TS.ADD", key_total, ts, inc_total, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
         updated_fields["total"] = "OK"
+        if inc_confirmed:
+            pipe.execute_command("TS.ADD", key_confirmed, ts, inc_confirmed, "DUPLICATE_POLICY", "SUM")
+            updated_fields["confirmed"] = "OK"
     else:
         async with client.pipeline() as pipe:
-            pipe.execute_command("TS.ADD", key, ts, inc_total, "DUPLICATE_POLICY", "SUM")
+            pipe.execute_command("TS.ADD", key_total, ts, inc_total, "DUPLICATE_POLICY", "SUM")
+            updated_fields["total"] = "OK"
+            if inc_confirmed:
+                pipe.execute_command("TS.ADD", key_confirmed, ts, inc_confirmed, "DUPLICATE_POLICY", "SUM")
+                updated_fields["confirmed"] = "OK"
             await pipe.execute()  # Execute pipeline transaction
 
-        updated_fields["total"] = "OK"
 
-    logger.info(f"✅ Added Invasion event to TimeSeries: {key}")
+    logger.info(f"✅ Added Invasion event to TimeSeries for display {display_type} with grunt: {grunt} in the Area: {area}")
     return updated_fields

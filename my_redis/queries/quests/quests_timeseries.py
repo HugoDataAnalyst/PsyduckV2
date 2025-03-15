@@ -29,6 +29,7 @@ async def add_timeseries_quest_event(data, pipe=None):
     # Determine quest type from the two possible keys.
     with_ar = data.get("with_ar", False)
 
+    # Build field details based on the mode.
     if with_ar:
         mode = "ar"
         ar_type = data.get("ar_type", "")
@@ -37,7 +38,7 @@ async def add_timeseries_quest_event(data, pipe=None):
         reward_ar_item_amount = data.get("reward_ar_item_amount", "")
         reward_ar_poke_id = data.get("reward_ar_poke_id", "")
         reward_ar_poke_form = data.get("reward_ar_poke_form", "")
-        field_details = f"{ar_type}:{reward_ar_type}:{reward_ar_item_id}:{reward_ar_item_amount}:{reward_ar_poke_id}:{reward_ar_poke_form}"
+        ar_field_details = f"{ar_type}:{reward_ar_type}:{reward_ar_item_id}:{reward_ar_item_amount}:{reward_ar_poke_id}:{reward_ar_poke_form}"
     else:
         mode = "normal"
         normal_type = data.get("normal_type", "")
@@ -46,30 +47,75 @@ async def add_timeseries_quest_event(data, pipe=None):
         reward_normal_item_amount = data.get("reward_normal_item_amount", "")
         reward_normal_poke_id = data.get("reward_normal_poke_id", "")
         reward_normal_poke_form = data.get("reward_normal_poke_form", "")
-        field_details = f"{normal_type}:{reward_normal_type}:{reward_normal_item_id}:{reward_normal_item_amount}:{reward_normal_poke_id}:{reward_normal_poke_form}"
+        normal_field_details = f"{normal_type}:{reward_normal_type}:{reward_normal_item_id}:{reward_normal_item_amount}:{reward_normal_poke_id}:{reward_normal_poke_form}"
 
+    # Define keys for each series.
+    key_overall = f"ts:quests_total:total:{area}:{pokestop}"
+    if with_ar:
+        key_mode_ar = f"ts:quests_ar_total:total_ar:{area}:{pokestop}:{mode}"
+        key_ar_detailed = f"ts:quests_total:total_ar_detailed:{area}:{pokestop}:{ar_field_details}"
+    else:
+        key_mode_normal = f"ts:quests_normal_total:total_normal:{area}:{pokestop}:{mode}"
+        key_normal_detailed = f"ts:quests_total:total_normal_detailed:{area}:{pokestop}:{normal_field_details}"
 
-    # Construct the timeseries key from the quest data
-    key = f"ts:quests:{area}:{pokestop}:{mode}"
-    field_name = f"{field_details}:total"
-
-    logger.debug(f"🔑 Quest TS Key: {key}, Field: {field_name}")
-
-    # Ensure the time series key exists
     retention_ms = AppConfig.quests_timeseries_retention_ms
     logger.debug(f"🚨 Set Quest retention timer: {retention_ms}")
-    await ensure_timeseries_key(redis_manager.redis_client, key, "quest", area, f"{pokestop}:{mode}", "", retention_ms, pipe)
 
     client = redis_manager.redis_client
     updated_fields = {}
+
+    # Ensure overall series key exists.
+    await ensure_timeseries_key(client, key_overall, "quest_total", area, pokestop, "", retention_ms, pipe)
+    # Ensure mode-specific series key exists.
+    if with_ar:
+        await ensure_timeseries_key(client, key_mode_ar, "quest_ar_total", area, pokestop, mode, retention_ms, pipe)
+        await ensure_timeseries_key(client, key_ar_detailed, "quest_ar_detailed", area, pokestop, mode, retention_ms, pipe)
+    else:
+        await ensure_timeseries_key(client, key_mode_normal, "quest_normal_total", area, pokestop, mode, retention_ms, pipe)
+        await ensure_timeseries_key(client, key_normal_detailed, "quest_normal_detailed", area, pokestop, mode, retention_ms, pipe)
+
+
+    # Determine metric increments
+    inc_total      = 1  # Always add 1 for total
+    inc_ar_total   = 1 if ar_type else 0
+    inc_normal_total = 1 if normal_type else 0
+
+    # Add the data point (value=1) to the overall series.
     if pipe:
-        pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
+        pipe.execute_command("TS.ADD", key_overall, ts, inc_total, "DUPLICATE_POLICY", "SUM")
         updated_fields["total"] = "OK"
+        if with_ar:
+            pipe.execute_command("TS.ADD", key_mode_ar, ts, inc_ar_total, "DUPLICATE_POLICY", "SUM")
+            updated_fields["ar_total"] = "OK"
+            pipe.execute_command("TS.ADD", key_ar_detailed, ts, 1, "DUPLICATE_POLICY", "SUM")
+            updated_fields["ar_detailed"] = "OK"
+        else:
+            pipe.execute_command("TS.ADD", key_mode_normal, ts, inc_normal_total, "DUPLICATE_POLICY", "SUM")
+            updated_fields["normal_total"] = "OK"
+            pipe.execute_command("TS.ADD", key_normal_detailed, ts, 1, "DUPLICATE_POLICY", "SUM")
+            updated_fields["normal_detailed"] = "OK"
     else:
         async with client.pipeline() as pipe:
-            pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
+            pipe.execute_command("TS.ADD", key_overall, ts, inc_total, "DUPLICATE_POLICY", "SUM")
+            updated_fields["total"] = "OK"
+            if with_ar:
+                pipe.execute_command("TS.ADD", key_mode_ar, ts, inc_ar_total, "DUPLICATE_POLICY", "SUM")
+                updated_fields["ar_total"] = "OK"
+                pipe.execute_command("TS.ADD", key_ar_detailed, ts, 1, "DUPLICATE_POLICY", "SUM")
+                updated_fields["ar_detailed"] = "OK"
+            else:
+                pipe.execute_command("TS.ADD", key_mode_normal, ts, inc_normal_total, "DUPLICATE_POLICY", "SUM")
+                updated_fields["normal_total"] = "OK"
+                pipe.execute_command("TS.ADD", key_normal_detailed, ts, 1, "DUPLICATE_POLICY", "SUM")
+                updated_fields["normal_detailed"] = "OK"
             await pipe.execute()
         updated_fields["total"] = "OK"
 
-    logger.info(f"✅ Added Quest event to timeseries: {key} at timestamp {ts}")
+
+    logger.info(f"✅ Added Quest event to timeseries: overall key {key_overall} at timestamp {ts}")
+    if with_ar:
+        logger.info(f"✅ Added Quest event to AR key: {key_mode_ar} at timestamp {ts}")
+    else:
+        logger.info(f"✅ Added Quest event to Normal key: {key_mode_normal} at timestamp {ts}")
+
     return updated_fields

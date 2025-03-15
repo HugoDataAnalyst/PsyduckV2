@@ -1,3 +1,4 @@
+from ast import Await
 import config as AppConfig
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
@@ -39,8 +40,12 @@ async def add_raid_timeseries_event(data, pipe=None):
     raid_ex_raid_eligible = data["raid_ex_raid_eligible"]
 
     # Construct the timeseries key from the raid data
-    key = f"ts:raid_totals:{area}:{raid_pokemon}:{raid_level}:{raid_form}:{raid_costume}:{raid_is_exclusive}:{raid_ex_raid_eligible}"
-    logger.debug(f"🔑 Constructed Raid Timeseries Key: {key}")
+    key_total = f"ts:raids_total:total:{area}:{raid_pokemon}:{raid_level}:{raid_form}"
+    key_costume = f"ts:raids_total:costume:{area}:{raid_pokemon}:{raid_level}:{raid_form}"
+    key_exclusive = f"ts:raids_total:exclusive:{area}:{raid_pokemon}:{raid_level}:{raid_form}"
+    key_ex_raid_eligible = f"ts:raids_total:ex_raid_eligible:{area}:{raid_pokemon}:{raid_level}:{raid_form}"
+
+    logger.debug(f"🔑 Constructed Raid Timeseries Key: {key_total}")
 
     client = redis_manager.redis_client
     updated_fields = {}
@@ -50,18 +55,47 @@ async def add_raid_timeseries_event(data, pipe=None):
     logger.debug(f"🚨 Set Raid TimeSeries retention timer: {retention_ms}")
 
     # Ensure the timeseries key exists.
-    await ensure_timeseries_key(redis_manager.redis_client, key, "raid", area, f"{raid_pokemon}:{raid_level}:{raid_form}", "", retention_ms, pipe)
+    await ensure_timeseries_key(client, key_total, "raid_total", area, raid_pokemon, raid_form, retention_ms, pipe)
+    await ensure_timeseries_key(client, key_costume, "raid_costume", area, raid_pokemon, raid_form, retention_ms, pipe)
+    await ensure_timeseries_key(client, key_exclusive, "raid_exclusive", area, raid_pokemon, raid_form, retention_ms, pipe)
+    await ensure_timeseries_key(client, key_ex_raid_eligible, "raid_ex_raid_eligible", area, raid_pokemon, raid_form, retention_ms, pipe)
+
+
+    # Determine metric increments
+    inc_total      = 1  # Always add 1 for total
+    inc_costume    = 1 if raid_costume and 1 in raid_costume else 0
+    inc_exclusive  = 1 if raid_is_exclusive and 1 in raid_is_exclusive else 0
+    inc_ex_raid_eligible = 1 if raid_ex_raid_eligible and 1 in raid_ex_raid_eligible else 0
 
     client = redis_manager.redis_client
     updated_fields = {}
     if pipe:
-        pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
+        pipe.execute_command("TS.ADD", key_total, ts, inc_total, "DUPLICATE_POLICY", "SUM")
         updated_fields["total"] = "OK"
+        if inc_costume:
+            pipe.execute_command("TS.ADD", key_costume, ts, inc_costume, "DUPLICATE_POLICY", "SUM")
+            updated_fields["costume"] = "OK"
+        if inc_exclusive:
+            pipe.execute_command("TS.ADD", key_exclusive, ts, inc_exclusive, "DUPLICATE_POLICY", "SUM")
+            updated_fields["exclusive"] = "OK"
+        if inc_ex_raid_eligible:
+            pipe.execute_command("TS.ADD", key_ex_raid_eligible, ts, inc_ex_raid_eligible, "DUPLICATE_POLICY", "SUM")
+            updated_fields["ex_raid_eligible"] = "OK"
     else:
         async with client.pipeline() as pipe:
-            pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
+            pipe.execute_command("TS.ADD", key_total, ts, inc_total, "DUPLICATE_POLICY", "SUM")
+            updated_fields["total"] = "OK"
+            if inc_costume:
+                pipe.execute_command("TS.ADD", key_costume, ts, inc_costume, "DUPLICATE_POLICY", "SUM")
+                updated_fields["costume"] = "OK"
+            if inc_exclusive:
+                pipe.execute_command("TS.ADD", key_exclusive, ts, inc_exclusive, "DUPLICATE_POLICY", "SUM")
+                updated_fields["exclusive"] = "OK"
+            if inc_ex_raid_eligible:
+                pipe.execute_command("TS.ADD", key_ex_raid_eligible, ts, inc_ex_raid_eligible, "DUPLICATE_POLICY", "SUM")
+                updated_fields["ex_raid_eligible"] = "OK"
             await pipe.execute()
-        updated_fields["total"] = "OK"
 
-    logger.info(f"✅ Added Raid event to Timeseries: {key}")
+
+    logger.info(f"✅ Added Raid event to Timeseries for Pokémon ID: {raid_pokemon} in area {area}")
     return updated_fields
