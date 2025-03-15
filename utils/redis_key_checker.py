@@ -40,10 +40,8 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "metric", metric,
                     "area", str(area),
                     "raid", str(identifier),
+                    "form", str(form)
                 ]
-                # Optionally, if you want to add 'form' as a label as well:
-                if form:
-                    command.extend(["form", str(form)])
             elif metric == "quest":
                 # For quest timeseries, use 'identifier' to store combined quest reward details.
                 command = [
@@ -56,7 +54,7 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "area", str(area),
                     "quest", str(identifier),
                 ]
-                if form:
+                if form not in (None, ""):
                     command.extend(["mode", str(form)])
             elif metric == "invasion":
                 # For invasion timeseries, 'identifier' can hold combined invasion attributes.
@@ -70,7 +68,7 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "area", str(area),
                     "invasion", str(identifier),
                 ]
-                if form:
+                if form not in (None, ""):
                     command.extend(["grunt", str(form)])
             else:
                 command = [
