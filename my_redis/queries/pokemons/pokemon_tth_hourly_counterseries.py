@@ -19,7 +19,7 @@ def get_tth_bucket(despawn_timer_sec):
 
     return None  # Out of range
 
-async def update_tth_pokemon_counter(data, pipe=None):
+async def update_tth_pokemon_hourly_counter(data, pipe=None):
     """
     Increment Pokémon TTH counters for the given area & time-to-hatch range using Redis pipelines.
     - Uses Redis hash to store per-day per-area TTH counters.
