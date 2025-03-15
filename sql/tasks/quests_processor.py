@@ -10,18 +10,18 @@ class QuestSQLProcessor(QuestsSQLProcessor):
             latitude = filtered_data.get('latitude')
             longitude = filtered_data.get('longitude')
             # Extract quest-specific fields:
-            ar_type = filtered_data.get('ar_type')
-            normal_type = filtered_data.get('normal_type')
-            reward_ar_type = filtered_data.get('reward_ar_type')
-            reward_normal_type = filtered_data.get('reward_normal_type')
-            reward_ar_item_id = filtered_data.get('reward_ar_item_id')
-            reward_ar_item_amount = filtered_data.get('reward_ar_item_amount')
-            reward_normal_item_id = filtered_data.get('reward_normal_item_id')
-            reward_normal_item_amount = filtered_data.get('reward_normal_item_amount')
-            reward_ar_poke_id = filtered_data.get('reward_ar_poke_id')
-            reward_ar_poke_form = filtered_data.get('reward_ar_poke_form')
-            reward_normal_poke_id = filtered_data.get('reward_normal_poke_id')
-            reward_normal_poke_form = filtered_data.get('reward_normal_poke_form')
+            ar_type = filtered_data.get('ar_type') or 0
+            normal_type = filtered_data.get('normal_type') or 0
+            reward_ar_type = filtered_data.get('reward_ar_type') or 0
+            reward_normal_type = filtered_data.get('reward_normal_type') or 0
+            reward_ar_item_id = filtered_data.get('reward_ar_item_id') or 0
+            reward_ar_item_amount = filtered_data.get('reward_ar_item_amount') or 0
+            reward_normal_item_id = filtered_data.get('reward_normal_item_id') or 0
+            reward_normal_item_amount = filtered_data.get('reward_normal_item_amount') or 0
+            reward_ar_poke_id = filtered_data.get('reward_ar_poke_id') or 0
+            reward_ar_poke_form = filtered_data.get('reward_ar_poke_form') or ""
+            reward_normal_poke_id = filtered_data.get('reward_normal_poke_id') or 0
+            reward_normal_poke_form = filtered_data.get('reward_normal_poke_form') or ""
             area_id = filtered_data.get('area_id')
             first_seen_timestamp = filtered_data.get('first_seen')
 

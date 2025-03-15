@@ -70,7 +70,7 @@ class QuestsSQLProcessor:
         pokestop_obj = await cls.upsert_pokestop(pokestop_id, pokestop_name, latitude, longitude)
         ps_obj_id = pokestop_obj.id
 
-        obj, created = await AggregatedQuests.get(
+        obj, created = await AggregatedQuests.get_or_create(
             pokestop_id=ps_obj_id,
             ar_type=ar_type,
             normal_type=normal_type,
