@@ -33,7 +33,7 @@ async def add_timeseries_invasion_event(data, pipe=None):
     confirmed = int(bool(data["invasion_confirmed"]))
 
     # Construct a timeseries key combining these values.
-    key = f"ts:invasion:{area}:{display_type}:{character}:{grunt}:{confirmed}"
+    key = f"ts:invasion:total:{area}:{display_type}:{character}:{grunt}:{confirmed}"
 
     logger.debug(f"🔑 Constructed Invasion TimeSeries Key: {key}")
 
@@ -48,12 +48,15 @@ async def add_timeseries_invasion_event(data, pipe=None):
     logger.debug(f"🚨 Set Invasion retention timer: {retention_ms}")
     await ensure_timeseries_key(client, key, "invasion", area, identifier, "", retention_ms, pipe)
 
+    # Determine metric increments
+    inc_total      = 1  # Always add 1 for total
+
     if pipe:
-        pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
+        pipe.execute_command("TS.ADD", key, ts, inc_total, "DUPLICATE_POLICY", "SUM")  # Add to pipeline
         updated_fields["total"] = "OK"
     else:
         async with client.pipeline() as pipe:
-            pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")
+            pipe.execute_command("TS.ADD", key, ts, inc_total, "DUPLICATE_POLICY", "SUM")
             await pipe.execute()  # Execute pipeline transaction
 
         updated_fields["total"] = "OK"
