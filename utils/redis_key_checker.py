@@ -52,10 +52,10 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "LABELS",
                     "metric", metric,
                     "area", str(area),
-                    "quest", str(identifier),
+                    "mode", str(identifier),
                 ]
                 if form not in (None, ""):
-                    command.extend(["mode", str(form)])
+                    command.extend(["reward_type", str(form)])
             elif metric.startswith("invasion"):
                 # For invasion timeseries, 'identifier' can hold combined invasion attributes.
                 command = [
