@@ -25,7 +25,6 @@ async def add_timeseries_quest_event(data, pipe=None):
     ts = int((first_seen // 60) * 60 * 1000)  # Convert to ms, rounding to minute
 
     area = data["area_name"]
-    pokestop = data["pokestop_id"]
     # Log the raw input data for debugging
     logger.debug(f"🆕 Raw quest data: {data}")
     # Define defaults so both variables are always available

@@ -23,7 +23,6 @@ async def update_quest_hourly_counter(data, pipe=None):
     date_hour = datetime.fromtimestamp(ts).strftime("%Y%m%d%H")
 
     area = data["area_name"]
-    pokestop = data["pokestop_id"]
     # Determine quest type from the two possible keys.
     with_ar = data.get("ar_type") is not None
 
@@ -47,7 +46,7 @@ async def update_quest_hourly_counter(data, pipe=None):
         field_details = f"{normal_type}:{reward_normal_type}:{reward_normal_item_id}:{reward_normal_item_amount}:{reward_normal_poke_id}:{reward_normal_poke_form}"
 
     hash_key = f"counter:quest_hourly:{area}:{date_hour}"
-    field_name = f"{pokestop}:{mode}:{field_details}:total"
+    field_name = f"{mode}:{field_details}:total"
 
     client = redis_manager.redis_client
     updated_fields = {}
