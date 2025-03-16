@@ -1,66 +1,73 @@
+from multiprocessing import pool
 import redis.asyncio as redis
 import config as AppConfig
 from utils.logger import logger
 
 class RedisManager:
-    """Handles Redis connection, reconnection, and closure."""
-    # Set class level attributes
+    """Manages separate Redis connection pools for each webhook type."""
     redis_url = AppConfig.redis_url
-    _instance = None # ✅ Singleton instance
+    _instances = {}  # ✅ Dictionary to store different pools
 
-    def __new__(cls):
-        """Ensures only one RedisManager instance is created (Singleton)."""
-        if cls._instance is None:
-            cls._instance = super(RedisManager, cls).__new__(cls)
-            cls._instance.redis_client = None  # Initialize connection as None
-        return cls._instance
+    @classmethod
+    def get_max_connections_for_pool(cls, pool_name):
+        """Return the max connections based on the pool type."""
+        pool_config = {
+            "pokemon_pool": AppConfig.redis_pokemon_pool,
+            "quest_pool": AppConfig.redis_quest_pool,
+            "raid_pool": AppConfig.redis_raid_pool,
+            "invasion_pool": AppConfig.redis_invasion_pool,
+            "koji_geofence_pool": AppConfig.redis_geofence_pool,
+        }
+        max_conn = pool_config.get(pool_name, 5)  # Default to 5 connections if not found
+        logger.success(f"🔎 Using {max_conn} connections for {pool_name} pool.")
+        return max_conn
 
-    # Connect to Redis
-    async def init_redis(self):
-        """Initialize Redis connection and handle errors."""
-        if self.redis_client:  # ✅ Prevent reinitializing an active connection
-            return True
+    @classmethod
+    async def init_pool(cls, pool_name, max_connections=10):
+        """Initialize a separate Redis pool per webhook type."""
+        if pool_name in cls._instances:
+            return cls._instances[pool_name]  # ✅ Return existing pool
 
         try:
-            logger.info("🔃 Connecting to Redis...")
-            self.redis_client = await redis.from_url(self.redis_url, decode_responses=True)
-            if await self.redis_client.ping(): # test connection
-                logger.success("✅ Connected to Redis!")
-                return True
+            logger.info(f"🔃 Connecting Redis ({pool_name}) with a pool of {max_connections} connections...")
+            pool = redis.ConnectionPool.from_url(cls.redis_url, max_connections=max_connections, decode_responses=True)
+            client = redis.Redis(connection_pool=pool)
+
+            if await client.ping():
+                cls._instances[pool_name] = client  # Store the connection pool
+                logger.success(f"✅ Redis ({pool_name}) connected!")
+                return client
             else:
-                logger.error("❌ Failed to connect to Redis!")
-                self.redis_client = None
-
+                logger.error(f"❌ Redis ({pool_name}) failed to connect!")
+                return None
         except Exception as e:
-            logger.error(f"❌ Failed to connect to Redis: {e}")
-            self.redis_client = None  # Prevent crashes if Redis is unavailable
-        return False
+            logger.error(f"❌ Redis ({pool_name}) connection error: {e}")
+            return None
 
-    async def close_redis(self):
-        """Close Redis connection."""
-        if self.redis_client:
-            await self.redis_client.close()
-            logger.success("✅ Closed Redis connection.")
-            self.redis_client = None
-        else:
-            logger.warning("⚠️ Redis connection is already closed.")
+    @classmethod
+    async def close_all_pools(cls):
+        """Close all Redis connection pools."""
+        for pool_name, client in cls._instances.items():
+            await client.close()
+            logger.success(f"✅ Closed Redis connection ({pool_name})")
+        cls._instances.clear()
 
+    @classmethod
+    async def check_redis_connection(cls, pool_name):
+        """Check if a Redis connection is active for a specific pool."""
+        client = cls._instances.get(pool_name)
 
-    async def check_redis_connection(self):
-        """Check if Redis connection is running and attempt reconnection if necessary."""
-        try:
-            ping = await self.redis_client.ping()  # ✅ Await Redis ping check
-            if ping:
-                logger.debug("✅ Redis connection is active.")
-                return True
-        except Exception as e:
-            logger.warning(f"⚠️ Redis connection lost: {e}. 🔃 Attempting to reconnect...")
+        if client:
+            try:
+                if await client.ping():  # ✅ Check if Redis connection is alive
+                    logger.debug(f"✅ Redis ({pool_name}) is active.")
+                    return client
+                else:
+                    logger.warning(f"⚠️ Redis ({pool_name}) pool exists but is unresponsive. Reconnecting...")
+            except Exception as e:
+                logger.warning(f"⚠️ Redis ({pool_name}) connection lost: {e}. Reconnecting...")
 
-        # ❌ If ping fails, reconnect
-        result = await self.init_redis()
-        if result:
-            logger.success("✅ Redis connection restored.")
-            return True
-        else:
-            return False
+        # ❌ Either the pool didn't exist or was unresponsive, so reinitialize it with the correct max_connections
+        max_connections = cls.get_max_connections_for_pool(pool_name)
+        return await cls.init_pool(pool_name, max_connections=max_connections)
 
