@@ -45,7 +45,7 @@ async def process_pokemon_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection()
+    redis_status = await redis_manager.check_redis_connection("pokemon_pool")
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
@@ -108,7 +108,7 @@ async def process_raid_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection()
+    redis_status = await redis_manager.check_redis_connection("raid_pool")
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
@@ -158,7 +158,7 @@ async def process_quest_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection()
+    redis_status = await redis_manager.check_redis_connection("quest_pool")
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
@@ -214,7 +214,7 @@ async def process_invasion_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection()
+    redis_status = await redis_manager.check_redis_connection("invasion_pool")
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
