@@ -83,6 +83,12 @@ redis_gui_port = get_env_int("REDIS_GUI_PORT", 8001)
 redis_db = get_env_int("REDIS_DB", 1)
 # Build Redis url connection
 redis_url = f"redis://:{redis_encoded_password}@{redis_host}:{redis_server_port}/{redis_db}"
+# Redis max connections per pool
+redis_pokemon_pool = 10
+redis_quest_pool = 5
+redis_raid_pool = 5
+redis_invasion_pool = 5
+redis_geofence_pool = 1
 # Redis retention settings
 timeseries_pokemon_retention_ms  = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 720))
 tth_timeseries_retention_ms      = retention_ms(config.get("retention_hours", {}).get("tth_timeseries_pokemon", 720))
