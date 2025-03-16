@@ -20,7 +20,7 @@ async def update_pokemon_hourly_counter(data, pipe=None):
       - pvp_ultra (if pvp_ultra_rank qualifies)
       - shiny (if shiny is truthy)
     """
-    redis_status = await redis_manager.check_redis_connection()
+    redis_status = await redis_manager.check_redis_connection("pokemon_pool")
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot update Pokémon counter.")
         return "ERROR"

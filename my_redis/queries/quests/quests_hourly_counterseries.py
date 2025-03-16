@@ -14,7 +14,7 @@ async def update_quest_hourly_counter(data, pipe=None):
       - "pokestop": pokestop ID
       - "quest_type": a field indicating the quest type (e.g., "ar" or "normal")
     """
-    redis_status = await redis_manager.check_redis_connection()
+    redis_status = await redis_manager.check_redis_connection("quest_pool")
     if not redis_status:
         logger.error("❌ Redis is not connected. Cannot update Quest hourly counter.")
         return "ERROR"
