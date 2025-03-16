@@ -64,7 +64,6 @@ async def main():
     await init_db()  # Initialize DB (Automatically creates tables if needed)
     await apply_migrations()  # Apply any new migrations
 
-    await redis_manager.init_redis()  # Initialize Redis connection
     logger.info("✅ Psyduck is ready to process data!")
 
     # Start both API servers concurrently
