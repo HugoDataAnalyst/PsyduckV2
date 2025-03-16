@@ -30,24 +30,24 @@ async def process_single_event(event: dict):
         logger.debug("⚠️ Webhook ignored (filtered out).")
         return {"status": "ignored"}
 
-    #if data_type == "pokemon":
-    #    logger.info("✅ Processing 👻 Pokémon data.")
-    #    result = await process_pokemon_data(filtered_data)
-    #    if result:
-    #        logger.success(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
-    #        return {"status": "success", "processed_data": result}
-    if data_type == "raid":
+    if data_type == "pokemon":
+        logger.info("✅ Processing 👻 Pokémon data.")
+        result = await process_pokemon_data(filtered_data)
+        if result:
+            logger.success(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
+            return {"status": "success", "processed_data": result}
+    elif data_type == "raid":
         logger.info("✅ Processing 👹 Raid data.")
         result = await process_raid_data(filtered_data)
         if result:
             logger.success(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
             return {"status": "success", "processed_data": result}
-    #elif data_type == "quest":
-    #    logger.info("✅ Processing 🔎 Quest data.")
-    #    result = await process_quest_data(filtered_data)
-    #    if result:
-    #        logger.success(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
-    #        return {"status": "success", "processed_data": result}
+    elif data_type == "quest":
+        logger.info("✅ Processing 🔎 Quest data.")
+        result = await process_quest_data(filtered_data)
+        if result:
+            logger.success(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
+            return {"status": "success", "processed_data": result}
     elif data_type == "invasion":
         logger.info("✅ Processing 🕴️ Invasion data.")
         result = await process_invasion_data(filtered_data)
