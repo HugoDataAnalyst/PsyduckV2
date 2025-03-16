@@ -11,7 +11,7 @@ async def update_quest_counter(data, pipe=None):
     Expected keys in `data`:
       - "first_seen": UTC timestamp (in seconds)
       - "area_name": area name
-      - "pokestop": pokestop ID
+      - "mode": a field indicating the quest type (e.g., "ar" or "normal")
       - "quest_type": a field indicating the quest type (e.g., "ar" or "normal")
     """
     redis_status = await redis_manager.check_redis_connection()
@@ -31,7 +31,6 @@ async def update_quest_counter(data, pipe=None):
     date_str = monday_dt.strftime("%Y%m%d")
 
     area = data["area_name"]
-    pokestop = data["pokestop_id"]
     # Determine quest type from the two possible keys.
     with_ar = data.get("ar_type") is not None
 
@@ -55,7 +54,7 @@ async def update_quest_counter(data, pipe=None):
         field_details = f"{normal_type}:{reward_normal_type}:{reward_normal_item_id}:{reward_normal_item_amount}:{reward_normal_poke_id}:{reward_normal_poke_form}"
 
     hash_key = f"counter:quest:{area}:{date_str}"
-    field_name = f"{pokestop}:{mode}:{field_details}:total"
+    field_name = f"{mode}:{field_details}:total"
 
     client = redis_manager.redis_client
     updated_fields = {}
