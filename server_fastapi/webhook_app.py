@@ -6,7 +6,9 @@ from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
 from server_fastapi.routes import webhook_router
 from server_fastapi import global_state
+from my_redis.connect_redis import RedisManager
 
+redis_manager = RedisManager()
 
 async def retry_call(coro_func, *args, max_attempts=5, initial_delay=2, delay_increment=2, **kwargs):
     """
@@ -47,6 +49,13 @@ async def lifespan(app: FastAPI):
     if not global_state.geofences:
         logger.error("⚠️ No geofences available at startup. Exiting application.")
         raise Exception("❌ No geofences available at startup, stopping application.")
+
+    """Initialize all Redis pools on startup."""
+    pool_names = ["pokemon_pool", "quest_pool", "raid_pool", "invasion_pool"]
+
+    for pool_name in pool_names:
+        max_conn = RedisManager.get_max_connections_for_pool(pool_name)
+        await RedisManager.init_pool(pool_name, max_connections=max_conn)
 
     # Wrap the refresh task in a safe retry wrapper
     async def safe_refresh():
