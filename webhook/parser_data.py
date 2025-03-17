@@ -45,13 +45,12 @@ async def process_pokemon_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection("pokemon_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("pokemon_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
 
     try:
-        client = redis_manager.redis_client
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
             pokemon_timeseries_update = await pokemon_timeseries.add_timeseries_total_pokemon_event(filtered_data, pipe)
@@ -108,13 +107,12 @@ async def process_raid_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection("raid_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("raid_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
 
     try:
-        client = redis_manager.redis_client
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
             raid_timeseries_update = await raids_timeseries.add_raid_timeseries_event(filtered_data, pipe)
@@ -158,13 +156,12 @@ async def process_quest_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection("quest_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("quest_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
 
     try:
-        client = redis_manager.redis_client
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
             quest_timeseries_update = await quests_timeseries.add_timeseries_quest_event(filtered_data, pipe)
@@ -214,13 +211,12 @@ async def process_invasion_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    redis_status = await redis_manager.check_redis_connection("invasion_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("invasion_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
 
     try:
-        client = redis_manager.redis_client
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
             invasion_timeseries_update = await invasions_timeseries.add_timeseries_invasion_event(filtered_data, pipe)
