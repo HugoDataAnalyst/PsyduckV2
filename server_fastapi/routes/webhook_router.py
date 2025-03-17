@@ -1,6 +1,6 @@
 # webhook_routes.py
 import asyncio
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
@@ -12,6 +12,7 @@ from webhook.parser_data import (
     process_invasion_data
 )
 from server_fastapi import global_state
+from utils.secure_api import validate_remote_addr
 
 router = APIRouter()
 
@@ -59,7 +60,7 @@ async def process_single_event(event: dict):
         return {"status": "ignored", "message": f"Webhook type '{data_type}' not processed."}
 
 
-@router.post("/webhook")
+@router.post("/webhook", dependencies=[Depends(validate_remote_addr)], include_in_schema=False)
 async def receive_webhook(request: Request):
     """Receives and processes incoming webhooks."""
     #try:
