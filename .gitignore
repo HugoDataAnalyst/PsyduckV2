@@ -26,3 +26,4 @@ config/config.json
 # Database rubbish
 database/
 redis-data/
+examples/test_api_url.py
