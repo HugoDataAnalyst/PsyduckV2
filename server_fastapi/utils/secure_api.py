@@ -2,6 +2,7 @@ import config as AppConfig
 from fastapi import Request, HTTPException, Header, Query
 from utils.logger import logger
 from typing import Optional
+from starlette.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # Optional parameter. Validate Remote Address
@@ -91,15 +92,20 @@ def get_secret_key_param():
 class AllowedPathsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Special handling for /openapi.json:
-        # Allow it only if the referer header comes from /docs.
         if request.url.path == "/openapi.json":
             referer = request.headers.get("referer", "")
             if "/docs" not in referer:
                 logger.warning("Direct access to /openapi.json is not allowed")
-                raise HTTPException(status_code=403, detail="Access to OpenAPI schema is not allowed.")
-        # For all other paths, check against ALLOWED_PATHS.
+                return JSONResponse(
+                    {"detail": "Access to OpenAPI schema is not allowed."},
+                    status_code=403
+                )
+        # For all other paths, check if the path is in ALLOWED_PATHS.
         elif request.url.path not in ALLOWED_PATHS:
             logger.warning(f"Path not allowed: {request.url.path}")
-            raise HTTPException(status_code=403, detail="Path not allowed.")
+            return JSONResponse(
+                {"detail": "Path not allowed."},
+                status_code=403
+            )
         response = await call_next(request)
         return response
