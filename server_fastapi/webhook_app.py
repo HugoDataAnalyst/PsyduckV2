@@ -7,6 +7,10 @@ from utils.koji_geofences import KojiGeofences
 from server_fastapi.routes import data_api, webhook_router
 from server_fastapi import global_state
 from my_redis.connect_redis import RedisManager
+from server_fastapi.utils import (
+    details,
+    secure_api,
+)
 
 redis_manager = RedisManager()
 
@@ -67,7 +71,18 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("👋 Shutting down Webhook Receiver application.")
 
-app = FastAPI(lifespan=lifespan)
+# Customise FastAPI instance.
+app = FastAPI(
+    title=details.TITLE,
+    description=details.DESCRIPTION,
+    version=details.VERSION,
+    openapi_tags=details.TAGS_METADATA,
+    docs_url="/docs",  # Swagger UI available at /docs
+    redoc_url=None,    # Disable ReDoc UI
+    lifespan=lifespan,
+)
+
+app.add_middleware(secure_api.AllowedPathsMiddleware)
 
 # Include the webhook router
 app.include_router(webhook_router.router)

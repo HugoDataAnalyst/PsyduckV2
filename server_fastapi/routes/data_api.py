@@ -1,5 +1,5 @@
 import config as AppConfig
-from utils import secure_api
+from server_fastapi.utils import secure_api
 from my_redis.connect_redis import RedisManager  # Assuming this module has the required methods
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from typing import Optional
@@ -7,6 +7,7 @@ router = APIRouter()
 
 @router.get(
     "/api/redis/total_pokemons_hourly",
+    tags=["Total Hourly Pokémon"],
     dependencies=[
         Depends(secure_api.validate_path),
         Depends(secure_api.validate_ip),
