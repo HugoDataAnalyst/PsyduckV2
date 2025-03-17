@@ -17,6 +17,7 @@ async def validate_remote_addr(request: Request):
 
 # Define allowed paths for the API
 ALLOWED_PATHS = [
+    "/webhook",
     "/docs", # Allow default docs FastAPI page
     "/api/redis/total_pokemons_hourly",
 
