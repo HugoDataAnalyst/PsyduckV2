@@ -12,7 +12,7 @@ from webhook.parser_data import (
     process_invasion_data
 )
 from server_fastapi import global_state
-from utils.secure_api import validate_remote_addr
+from server_fastapi.utils import secure_api
 
 router = APIRouter()
 
@@ -60,7 +60,7 @@ async def process_single_event(event: dict):
         return {"status": "ignored", "message": f"Webhook type '{data_type}' not processed."}
 
 
-@router.post("/webhook", dependencies=[Depends(validate_remote_addr)], include_in_schema=False)
+@router.post("/webhook", dependencies=[Depends(secure_api.validate_remote_addr)], include_in_schema=False)
 async def receive_webhook(request: Request):
     """Receives and processes incoming webhooks."""
     #try:
