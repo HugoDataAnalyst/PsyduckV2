@@ -133,6 +133,7 @@ class WebhookFilter:
 
         time_diff = disappear_time - first_seen
         total_seconds = time_diff // 1
+        logger.debug(f"▶️ Despawn timer: {total_seconds}s")
         return total_seconds
 
     @staticmethod
@@ -260,7 +261,7 @@ class WebhookFilter:
         corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
 
         # ✅ Calculate despawn timer
-        despawn_timer = await self.calculate_despawn_time(message["disappear_time"], corrected_first_seen)
+        despawn_timer = await self.calculate_despawn_time(message["disappear_time"], utc_first_seen)
 
         # ✅ Extract Pokémon Data
         pokemon_data = {
