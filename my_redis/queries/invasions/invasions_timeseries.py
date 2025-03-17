@@ -17,8 +17,8 @@ async def add_timeseries_invasion_event(data, pipe=None):
       - "invasion_grunt_type": invasion grunt (int)
       - "invasion_confirmed": invasion confirmed flag (int or boolean)
     """
-    redis_status = await redis_manager.check_redis_connection("invasion_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("invasion_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot add Pokémon TTH event to time series.")
         return "ERROR"
 
@@ -36,8 +36,6 @@ async def add_timeseries_invasion_event(data, pipe=None):
 
     logger.debug(f"🔑 Constructed Invasion TimeSeries Key: {key_total}")
 
-
-    client = redis_manager.redis_client
     updated_fields = {}
 
     # Ensure the time series key exists

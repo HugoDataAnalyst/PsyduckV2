@@ -19,8 +19,8 @@ async def update_pokemon_weather_iv(data, pipe=None):
       - "iv": the raw IV value (0-100)
       - "weather_boost": a flag (0 or 1, or a boolean; converted to int) indicating whether weather boost is active.
     """
-    redis_status = await redis_manager.check_redis_connection("pokemon_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("pokemon_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot update Pokémon weather IV counter.")
         return "ERROR"
 
@@ -56,7 +56,6 @@ async def update_pokemon_weather_iv(data, pipe=None):
 
     logger.debug(f"🔑 Constructed Hash Key: {hash_key}, Field: {field_name}")
 
-    client = redis_manager.redis_client
     updated_fields = {}
 
     if pipe:

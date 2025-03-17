@@ -9,8 +9,8 @@ async def update_total_pokemon_counter(data, pipe=None):
     Update daily counters for a Pokémon event using a single Redis hash per area per day.
     Supports Redis pipelines for batch processing.
     """
-    redis_status = await redis_manager.check_redis_connection("pokemon_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("pokemon_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot update Pokémon counter.")
         return "ERROR"
 
@@ -49,7 +49,6 @@ async def update_total_pokemon_counter(data, pipe=None):
     inc_pvp_ultra  = 1 if data.get("pvp_ultra_rank") and 1 in data.get("pvp_ultra_rank") else 0
     inc_shiny      = 1 if data.get("shiny") else 0
 
-    client = redis_manager.redis_client
     updated_fields = {}
 
     if pipe:

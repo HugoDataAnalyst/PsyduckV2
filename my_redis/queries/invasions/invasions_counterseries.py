@@ -14,8 +14,8 @@ async def update_invasion_counter(data, pipe=None):
       - "pokestop": pokestop ID
       - "display_type", "character", "grunt", "confirmed": invasion attributes
     """
-    redis_status = await redis_manager.check_redis_connection("invasion_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("invasion_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot update Invasion counter.")
         return "ERROR"
 
@@ -41,7 +41,6 @@ async def update_invasion_counter(data, pipe=None):
     # Construct field name for each metric
     field_name = f"{display_type}:{character}:{grunt}:{confirmed}:total"
 
-    client = redis_manager.redis_client
     updated_fields = {}
 
     if pipe:

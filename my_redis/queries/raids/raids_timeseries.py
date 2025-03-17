@@ -21,8 +21,8 @@ async def add_raid_timeseries_event(data, pipe=None):
       - "raid_is_exclusive": whether the raid is exclusive (boolean/int; converted to 0 or 1)
       - "raid_ex_raid_eligible": whether the raid is eligible for EX (boolean/int; converted to 0 or 1)
     """
-    redis_status = await redis_manager.check_redis_connection("raid_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("raid_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot add Raid event to time series.")
         return "ERROR"
 
@@ -47,9 +47,6 @@ async def add_raid_timeseries_event(data, pipe=None):
 
     logger.debug(f"🔑 Constructed Raid Timeseries Key: {key_total}")
 
-    client = redis_manager.redis_client
-    updated_fields = {}
-
     # Get retention from config.
     retention_ms = AppConfig.raid_timeseries_retention_ms
     logger.debug(f"🚨 Set Raid TimeSeries retention timer: {retention_ms}")
@@ -67,7 +64,6 @@ async def add_raid_timeseries_event(data, pipe=None):
     inc_exclusive  = 1 if raid_is_exclusive and 1 in raid_is_exclusive else 0
     inc_ex_raid_eligible = 1 if raid_ex_raid_eligible and 1 in raid_ex_raid_eligible else 0
 
-    client = redis_manager.redis_client
     updated_fields = {}
     if pipe:
         pipe.execute_command("TS.ADD", key_total, ts, inc_total, "DUPLICATE_POLICY", "SUM")

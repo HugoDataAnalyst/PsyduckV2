@@ -25,8 +25,8 @@ async def update_tth_pokemon_counter(data, pipe=None):
     - Uses Redis hash to store per-day per-area TTH counters.
     - Supports optional Redis pipeline for batch processing.
     """
-    redis_status = await redis_manager.check_redis_connection("pokemon_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("pokemon_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot update Pokémon TTH counter.")
         return "ERROR"
 
@@ -59,7 +59,6 @@ async def update_tth_pokemon_counter(data, pipe=None):
 
     logger.debug(f"🔑 Hash Key: {hash_key}, Field: {field_name}")
 
-    client = redis_manager.redis_client
     updated_fields = {}
 
     if pipe:

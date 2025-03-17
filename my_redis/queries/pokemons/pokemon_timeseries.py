@@ -10,8 +10,8 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
     Add a Pokémon event into Redis TimeSeries.
     Supports Redis pipelines for batch processing.
     """
-    redis_status = await redis_manager.check_redis_connection("pokemon_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("pokemon_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot add Pokémon event to time series.")
         return "ERROR"
 
@@ -33,7 +33,6 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
     key_pvp_ultra  = f"ts:pokemon_totals:pvp_ultra:{area}:{pokemon_id}:{form}"
     key_shiny      = f"ts:pokemon_totals:shiny:{area}:{pokemon_id}:{form}"
 
-    client = redis_manager.redis_client
     updated_fields = {}
 
     # Ensure keys exist

@@ -15,8 +15,8 @@ async def add_timeseries_quest_event(data, pipe=None):
       - "pokestop": pokestop ID
       - "quest_type": a field indicating the quest type (e.g., "ar" or "normal")
     """
-    redis_status = await redis_manager.check_redis_connection("quest_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("quest_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot add Quest event to timeseries.")
         return "ERROR"
 
@@ -63,7 +63,6 @@ async def add_timeseries_quest_event(data, pipe=None):
     retention_ms = AppConfig.quests_timeseries_retention_ms
     logger.debug(f"🚨 Set Quest retention timer: {retention_ms}")
 
-    client = redis_manager.redis_client
     updated_fields = {}
 
     # Ensure overall series key exists.

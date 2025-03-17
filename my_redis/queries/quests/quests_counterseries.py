@@ -14,8 +14,8 @@ async def update_quest_counter(data, pipe=None):
       - "mode": a field indicating the quest type (e.g., "ar" or "normal")
       - "quest_type": a field indicating the quest type (e.g., "ar" or "normal")
     """
-    redis_status = await redis_manager.check_redis_connection("quest_pool")
-    if not redis_status:
+    client = await redis_manager.check_redis_connection("quest_pool")
+    if not client:
         logger.error("❌ Redis is not connected. Cannot update Quest counter.")
         return "ERROR"
 
@@ -56,7 +56,6 @@ async def update_quest_counter(data, pipe=None):
     hash_key = f"counter:quest:{area}:{date_str}"
     field_name = f"{mode}:{field_details}:total"
 
-    client = redis_manager.redis_client
     updated_fields = {}
     if pipe:
         pipe.hincrby(hash_key, field_name, 1)
