@@ -123,3 +123,8 @@ golbat_db_password = get_env_var("GOLBAT_DB_PASSWORD")
 # API
 api_host = get_env_var("API_HOST", "127.0.0.1")
 api_port = get_env_int("API_PORT", 8090)
+validated_remote_address = get_env_var("ALLOW_WEBHOOK_HOST")
+allowed_ips = get_env_list("ALLOWED_IPS")
+api_header_name = get_env_var("API_HEADER_NAME")
+api_header_secret = get_env_var("API_HEADER_SECRET")
+api_secret_key = get_env_var("API_SECRET_KEY")
