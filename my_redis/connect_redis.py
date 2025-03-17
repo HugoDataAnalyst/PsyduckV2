@@ -49,7 +49,7 @@ class RedisManager:
         """Close all Redis connection pools."""
         for pool_name, client in cls._instances.items():
             await client.close()
-            logger.success(f"✅ Closed Redis connection ({pool_name})")
+            logger.success(f"✅ Closed Redis connection pool: ({pool_name})")
         cls._instances.clear()
 
     @classmethod

@@ -35,14 +35,14 @@ async def start_servers():
     The webhook API is bound to AppConfig.golbat_host and AppConfig.golbat_webhook_port.
     """
     # Configure the main API server (e.g. defined in server_fastapi/api.py)
-    main_api_config = uvicorn.Config(
-        "server_fastapi.api:app",
-        host=AppConfig.api_host,
-        port=AppConfig.api_port,
-        workers=1,
-        reload=True
-    )
-    main_api_server = uvicorn.Server(main_api_config)
+    #main_api_config = uvicorn.Config(
+    #    "server_fastapi.api:app",
+    #    host=AppConfig.api_host,
+    #    port=AppConfig.api_port,
+    #    workers=1,
+    #    reload=True
+    #)
+    #main_api_server = uvicorn.Server(main_api_config)
 
     # Configure the webhook API server (e.g. defined in server_fastapi/webhook_app.py)
     webhook_api_config = uvicorn.Config(
@@ -53,12 +53,14 @@ async def start_servers():
         reload=True
     )
     webhook_api_server = uvicorn.Server(webhook_api_config)
+    logger.info("⬆️ Starting PsyduckV2 API server...")
+    await webhook_api_server.serve()
 
-    logger.info("⬆️ Starting both API servers concurrently...")
-    await asyncio.gather(
-        main_api_server.serve(),
-        webhook_api_server.serve()
-    )
+    #logger.info("⬆️ Starting both API servers concurrently...")
+    #await asyncio.gather(
+    #    main_api_server.serve(),
+    #    webhook_api_server.serve()
+    #)
 
 async def main():
     await init_db()  # Initialize DB (Automatically creates tables if needed)
@@ -76,7 +78,7 @@ async def main():
         logger.info("🫣 Shutting down...")
     finally:
         await close_db()
-        await redis_manager.close_redis()
+        await redis_manager.close_all_pools()
 
 if __name__ == "__main__":
     try:
