@@ -133,13 +133,9 @@ async def retrieve_weather_monthly(area: str, start: datetime, end: datetime, mo
     Key format: "counter:pokemon_weather_iv:{area}:{YYYYMM}:{weather_boost}"
 
     In "sum" mode, for each weather boost flag (0 or 1) the function sums all IV bucket counts.
-    In "grouped" mode, it groups keys by month and weather boost and computes the average for each IV bucket.
+    In "grouped" mode, it groups keys by month and weather boost and sums the fields.
 
-    Returns a dictionary with:
-      {
-        "mode": mode,
-        "data": { ... }  # aggregated data
-      }
+    Returns a dictionary with aggregated data.
     """
     time_format = "%Y%m"
     client = await redis_manager.check_redis_connection("retrieval_pool")
@@ -153,7 +149,8 @@ async def retrieve_weather_monthly(area: str, start: datetime, end: datetime, mo
         pattern = f"counter:pokemon_weather_iv:{area}:*"
 
     keys = await client.keys(pattern)
-    keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end)
+    # For weather keys, use component_index=-2 to extract the YYYYMM part.
+    keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end, component_index=-2)
     if not keys:
         return {"mode": mode, "data": {}}
 
@@ -166,7 +163,6 @@ async def retrieve_weather_monthly(area: str, start: datetime, end: datetime, mo
                 continue
             weather_boost = parts[-1]
             data = await client.hgetall(key)
-            # Convert values to int
             data = {k: int(v) for k, v in data.items()}
             if weather_boost not in aggregated:
                 aggregated[weather_boost] = {}
@@ -175,7 +171,6 @@ async def retrieve_weather_monthly(area: str, start: datetime, end: datetime, mo
         return {"mode": "sum", "data": aggregated}
 
     elif mode == "grouped":
-        # Group by composite key: "YYYYMM:weather_boost" and sum the fields.
         grouped = {}
         for key in keys:
             parts = key.split(":")

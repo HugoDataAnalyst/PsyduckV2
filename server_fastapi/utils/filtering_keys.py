@@ -32,36 +32,29 @@ async def aggregate_keys(keys: list, mode: str) -> dict:
     logger.info(f"✅ Aggregation complete. Aggregated data: {aggregated}")
     return aggregated
 
-def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: datetime) -> list:
+def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: datetime, component_index: int = -1) -> list:
     """
-    Filters keys by extracting the time component at the end of the key,
-    parsing it according to time_format, and returning only those keys
-    whose datetime falls within [start, end].
+    Filters keys by extracting the time component from the specified component index (default is the last component)
+    after splitting the key by a colon, parsing it according to time_format, and returning only those keys
+    whose datetime falls between start and end.
     """
     filtered = []
-    # Build a regex pattern that captures the time part at the end of the key.
-    pattern_str = r".*:([\d]{%d})$" % len(datetime.now().strftime(time_format))
-    pattern = re.compile(pattern_str)
-    logger.info(f"▶️ Using regex pattern: {pattern_str} for time_format: {time_format}")
-    logger.info(f"🔍 Filtering {len(keys)} 🔑 keys between {start} and {end}")
-
     for key in keys:
-        m = pattern.match(key)
-        if m:
-            timestr = m.group(1)
-            try:
-                dt = datetime.strptime(timestr, time_format)
-                logger.info(f"🔑 Key: {key} parsed time: {dt}")
-                if start <= dt <= end:
-                    logger.info(f"🔑 Key: {key} ✅ is in range.")
-                    filtered.append(key)
-                else:
-                    logger.info(f"🔑 Key: {key} with time {dt} ❌ is out of range.")
-            except Exception as e:
-                logger.warning(f"❌ Could not parse time from 🔑 key {key}: {e}")
-        else:
-            logger.info(f"🔑 Key: {key} ❌ does not match pattern")
-    logger.info(f"✅ Filtered down to {len(filtered)} 🔑 keys")
+        parts = key.split(":")
+        if len(parts) < abs(component_index):
+            continue
+        try:
+            timestr = parts[component_index]
+            dt = datetime.strptime(timestr, time_format)
+            logger.debug(f"Key: {key} parsed time: {dt}")
+            if start <= dt <= end:
+                logger.debug(f"Key: {key} is in range.")
+                filtered.append(key)
+            else:
+                logger.debug(f"Key: {key} with time {dt} is out of range.")
+        except Exception as e:
+            logger.warning(f"❌ Could not parse time from key {key}: {e}")
+    logger.info(f"✅ Filtered down to {len(filtered)} keys")
     return filtered
 
 def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
