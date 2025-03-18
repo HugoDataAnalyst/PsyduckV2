@@ -89,6 +89,7 @@ redis_quest_pool = 5
 redis_raid_pool = 5
 redis_invasion_pool = 5
 redis_geofence_pool = 1
+redis_retrieval_pool = 5
 # Redis retention settings
 timeseries_pokemon_retention_ms  = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 720))
 tth_timeseries_retention_ms      = retention_ms(config.get("retention_hours", {}).get("tth_timeseries_pokemon", 720))

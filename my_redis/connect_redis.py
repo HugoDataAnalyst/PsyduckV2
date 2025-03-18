@@ -1,4 +1,3 @@
-from multiprocessing import pool
 import redis.asyncio as redis
 import config as AppConfig
 from utils.logger import logger
@@ -17,6 +16,7 @@ class RedisManager:
             "raid_pool": AppConfig.redis_raid_pool,
             "invasion_pool": AppConfig.redis_invasion_pool,
             "koji_geofence_pool": AppConfig.redis_geofence_pool,
+            "retrieval_pool": AppConfig.redis_retrieval_pool,
         }
         max_conn = pool_config.get(pool_name, 5)  # Default to 5 connections if not found
         logger.success(f"🔎 Using {max_conn} connections for {pool_name} pool.")
