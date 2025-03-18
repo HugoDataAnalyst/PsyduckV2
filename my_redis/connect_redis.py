@@ -30,7 +30,7 @@ class RedisManager:
 
         try:
             logger.info(f"🔃 Connecting Redis ({pool_name}) with a pool of {max_connections} connections...")
-            pool = redis.ConnectionPool.from_url(cls.redis_url, max_connections=max_connections, decode_responses=True)
+            pool = redis.ConnectionPool.from_url(cls.redis_url, max_connections=max_connections, encoding="utf-8", decode_responses=True)
             client = redis.Redis(connection_pool=pool)
 
             if await client.ping():

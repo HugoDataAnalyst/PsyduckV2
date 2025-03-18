@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         raise Exception("❌ No geofences available at startup, stopping application.")
 
     """Initialize all Redis pools on startup."""
-    pool_names = ["pokemon_pool", "quest_pool", "raid_pool", "invasion_pool"]
+    pool_names = ["pokemon_pool", "quest_pool", "raid_pool", "invasion_pool", "retrieval_pool"]
 
     for pool_name in pool_names:
         max_conn = RedisManager.get_max_connections_for_pool(pool_name)
