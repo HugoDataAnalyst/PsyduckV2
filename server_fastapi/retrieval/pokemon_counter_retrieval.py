@@ -22,10 +22,10 @@ async def retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode
     if not keys:
         return {"mode": mode, "data": {}}
     raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
-    if mode == "sum":
+    if mode in ["sum", "grouped"]:
         final_data = filtering_keys.transform_aggregated_totals(raw_aggregated, mode)
-    elif mode == "grouped":
-        final_data = filtering_keys.transform_grouped_totals_hourly(raw_aggregated)
+    elif mode == "surged":
+        final_data = filtering_keys.transform_surged_totals_hourly_by_hour(raw_aggregated)
     return {"mode": mode, "data": final_data}
 
 async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
@@ -68,8 +68,9 @@ async def retrieve_tth_hourly(area: str, start: datetime, end: datetime, mode: s
     Key format: "counter:tth_pokemon_hourly:{area}:{YYYYMMDDHH}"
 
     In "sum" mode, values are summed across matching keys.
-    In "grouped" mode, only hours that have data are combined into a single dictionary,
-    then re-labeled sequentially as "hour 1", "hour 2", etc., with inner dictionaries ordered by TTH bucket.
+    In "grouped" mode, only hours that have data are combined into a dictionary keyed by the full hour (e.g. "2025031718")
+      and then re-labeled sequentially if needed.
+    In "surged" mode, data is grouped by the actual hour of day (e.g. "18") across all keys (regardless of date).
     """
     time_format = "%Y%m%d%H"
     client = await redis_manager.check_redis_connection("retrieval_pool")
@@ -88,12 +89,14 @@ async def retrieve_tth_hourly(area: str, start: datetime, end: datetime, mode: s
         return {"mode": mode, "data": {}}
 
     raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
-    if mode == "sum":
+
+    if mode in ["sum", "grouped"]:
         final_data = filtering_keys.transform_aggregated_tth(raw_aggregated, mode)
-    elif mode == "grouped":
-        final_data = filtering_keys.transform_grouped_tth_hourly_by_hour(raw_aggregated)
+    elif mode == "surged":
+        final_data = filtering_keys.transform_surged_tth_hourly_by_hour(raw_aggregated)
     else:
         final_data = raw_aggregated
+
     return {"mode": mode, "data": final_data}
 
 

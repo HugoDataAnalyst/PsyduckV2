@@ -40,7 +40,7 @@ async def get_pokemon_counterseries(
     interval: str = Query(..., description="Interval: hourly or weekly for totals and tth; monthly for weather"),
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
-    mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped'"),
+    mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
@@ -55,15 +55,17 @@ async def get_pokemon_counterseries(
     interval = interval.lower()
     mode = mode.lower()
     if counter_type not in ["totals", "tth", "weather"]:
-        raise HTTPException(status_code=400, detail="Invalid counter_type. Must be totals, tth, or weather.")
+        raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals, tth, or weather.")
     if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
-        raise HTTPException(status_code=400, detail="For totals and tth, interval must be hourly or weekly.")
+        raise HTTPException(status_code=400, detail="❌ For totals and tth, interval must be hourly or weekly.")
     if counter_type == "weather" and interval != "monthly":
-        raise HTTPException(status_code=400, detail="For weather, interval must be monthly.")
-    if mode not in ["sum", "grouped"]:
-        raise HTTPException(status_code=400, detail="Invalid mode. Must be sum or grouped.")
+        raise HTTPException(status_code=400, detail="❌ For weather, interval must be monthly.")
+    if mode not in ["sum", "grouped", "surged"]:
+        raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be one of 'sum', 'grouped', or 'surged'.")
+    if mode == "surged" and interval != "hourly":
+        raise HTTPException(status_code=400, detail="❌ Surged mode is only supported for hourly intervals.")
     if response_format.lower() not in ["json", "text"]:
-        raise HTTPException(status_code=400, detail="Invalid response_format. Must be json or text.")
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
         start_dt = filtering_keys.parse_time_input(start_time)
