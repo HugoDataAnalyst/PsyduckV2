@@ -5,12 +5,11 @@ import re
 
 redis_manager = RedisManager()
 
-async def aggregate_keys(keys: list, mode: str, pool: str = None) -> dict:
+async def aggregate_keys(keys: list, mode: str) -> dict:
     """
     Aggregates hash data from a list of keys.
     For "sum" mode, sums all field values (assuming integer values).
     For "grouped" mode, returns a dictionary mapping each key to its hash data.
-    Uses the specified Redis pool if provided.
     """
     client = await redis_manager.check_redis_connection("retrieval_pool")
     if not client:
@@ -19,7 +18,8 @@ async def aggregate_keys(keys: list, mode: str, pool: str = None) -> dict:
 
     aggregated = {}
     for key in keys:
-        data = await client.hgetall(key, pool=pool)  # Expected to return a dict {field: value}
+        data = await client.hgetall(key)
+        logger.info(f"🔑 Aggregating key: {key} with data: {data}")
         if mode == "sum":
             for field, value in data.items():
                 try:
@@ -29,6 +29,7 @@ async def aggregate_keys(keys: list, mode: str, pool: str = None) -> dict:
                 aggregated[field] = aggregated.get(field, 0) + value
         elif mode == "grouped":
             aggregated[key] = {k: int(v) for k, v in data.items()}
+    logger.info(f"✅ Aggregation complete. Aggregated data: {aggregated}")
     return aggregated
 
 def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: datetime) -> list:
@@ -39,17 +40,28 @@ def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: date
     """
     filtered = []
     # Build a regex pattern that captures the time part at the end of the key.
-    pattern = re.compile(r".*:([\d]{%d})$" % len(datetime.now().strftime(time_format)))
+    pattern_str = r".*:([\d]{%d})$" % len(datetime.now().strftime(time_format))
+    pattern = re.compile(pattern_str)
+    logger.info(f"▶️ Using regex pattern: {pattern_str} for time_format: {time_format}")
+    logger.info(f"🔍 Filtering {len(keys)} 🔑 keys between {start} and {end}")
+
     for key in keys:
         m = pattern.match(key)
         if m:
             timestr = m.group(1)
             try:
                 dt = datetime.strptime(timestr, time_format)
+                logger.info(f"🔑 Key: {key} parsed time: {dt}")
                 if start <= dt <= end:
+                    logger.info(f"🔑 Key: {key} ✅ is in range.")
                     filtered.append(key)
+                else:
+                    logger.info(f"🔑 Key: {key} with time {dt} ❌ is out of range.")
             except Exception as e:
-                logger.warning(f"Could not parse time from key {key}: {e}")
+                logger.warning(f"❌ Could not parse time from 🔑 key {key}: {e}")
+        else:
+            logger.info(f"🔑 Key: {key} ❌ does not match pattern")
+    logger.info(f"✅ Filtered down to {len(filtered)} 🔑 keys")
     return filtered
 
 def parse_time_input(time_str: str, reference: datetime = None) -> datetime:

@@ -25,11 +25,11 @@ async def retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode
     else:
         pattern = f"counter:pokemon_hourly:{area}:*"
     # Use retrieval_pool  for keys
-    keys = await client.keys(pattern, pool="retrieval_pool")
+    keys = await client.keys(pattern)
     keys = filter_keys_by_time(keys, time_format, start, end)
     if not keys:
         return {"mode": mode, "data": {}}
-    aggregated = await aggregate_keys(keys, mode, pool="retrieval_pool")
+    aggregated = await aggregate_keys(keys, mode)
     return {"mode": mode, "data": aggregated}
 
 async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
@@ -48,11 +48,11 @@ async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode
         pattern = "counter:pokemon_total:*"
     else:
         pattern = f"counter:pokemon_total:{area}:*"
-    keys = await client.keys(pattern, pool="retrieval_pool")
+    keys = await client.keys(pattern)
     keys = filter_keys_by_time(keys, time_format, start, end)
     if not keys:
         return {"mode": mode, "data": {}}
-    aggregated = await aggregate_keys(keys, mode, pool="retrieval_pool")
+    aggregated = await aggregate_keys(keys, mode)
     return {"mode": mode, "data": aggregated}
 
 # --- Retrieval functions for TTH ---
@@ -87,7 +87,7 @@ async def retrieve_tth_hourly(area: str, start: datetime, end: datetime, mode: s
         return {"mode": mode, "data": timeline}
 
     if mode == "sum":
-        aggregated = await aggregate_keys(keys, mode, pool="retrieval_pool")
+        aggregated = await aggregate_keys(keys, mode)
         return {"mode": "sum", "data": aggregated}
     elif mode == "grouped":
         # Group by hour, compute average per field, and ensure every hour in the time window is present.
@@ -146,7 +146,7 @@ async def retrieve_tth_weekly(area: str, start: datetime, end: datetime, mode: s
         return {"mode": mode, "data": timeline}
 
     if mode == "sum":
-        aggregated = await aggregate_keys(keys, mode, pool="retrieval_pool")
+        aggregated = await aggregate_keys(keys, mode)
         return {"mode": "sum", "data": aggregated}
     elif mode == "grouped":
         daily_data = {}
@@ -233,7 +233,7 @@ async def retrieve_weather_monthly(area: str, start: datetime, end: datetime, mo
             month = parts[-2]  # the YYYYMM part
             weather_boost = parts[-1]
             composite_key = f"{month}:{weather_boost}"
-            data = await client.hgetall(key, pool="retrieval_pool")
+            data = await client.hgetall(key)
             data = {k: int(v) for k, v in data.items()}
             if composite_key not in grouped:
                 grouped[composite_key] = {}
