@@ -8,18 +8,11 @@ redis_manager = RedisManager()
 # --- Retrieval functions for totals ---
 
 async def retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
-    """
-    Retrieve hourly totals for Pokémon counters.
-    If area is "global", aggregate data across all areas.
-    Key format: "counter:pokemon_hourly:{area}:{YYYYMMDDHH}"
-    Uses the "retrieval_pool" for Redis operations.
-    """
+    time_format = "%Y%m%d%H"
     client = await redis_manager.check_redis_connection("retrieval_pool")
     if not client:
         logger.error("❌ Retrieval pool connection not available")
         return {"mode": mode, "data": {}}
-
-    time_format = "%Y%m%d%H"
     if area.lower() == "global":
         pattern = "counter:pokemon_hourly:*"
     else:
@@ -28,9 +21,11 @@ async def retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode
     keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end)
     if not keys:
         return {"mode": mode, "data": {}}
-
     raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
-    final_data = filtering_keys.transform_aggregated_totals(raw_aggregated, mode)
+    if mode == "sum":
+        final_data = filtering_keys.transform_aggregated_totals(raw_aggregated, mode)
+    elif mode == "grouped":
+        final_data = filtering_keys.transform_grouped_totals_hourly(raw_aggregated)
     return {"mode": mode, "data": final_data}
 
 async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
@@ -73,9 +68,8 @@ async def retrieve_tth_hourly(area: str, start: datetime, end: datetime, mode: s
     Key format: "counter:tth_pokemon_hourly:{area}:{YYYYMMDDHH}"
 
     In "sum" mode, values are summed across matching keys.
-    In "grouped" mode, the function combines data from all matching keys into one dictionary,
-    computes an average per field over the entire timeframe, and orders the result by TTH bucket.
-    Only hours with data are returned.
+    In "grouped" mode, only hours that have data are combined into a single dictionary,
+    then re-labeled sequentially as "hour 1", "hour 2", etc., with inner dictionaries ordered by TTH bucket.
     """
     time_format = "%Y%m%d%H"
     client = await redis_manager.check_redis_connection("retrieval_pool")
@@ -94,7 +88,12 @@ async def retrieve_tth_hourly(area: str, start: datetime, end: datetime, mode: s
         return {"mode": mode, "data": {}}
 
     raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
-    final_data = filtering_keys.transform_aggregated_tth(raw_aggregated, mode, start, end)
+    if mode == "sum":
+        final_data = filtering_keys.transform_aggregated_tth(raw_aggregated, mode)
+    elif mode == "grouped":
+        final_data = filtering_keys.transform_grouped_tth_hourly_by_hour(raw_aggregated)
+    else:
+        final_data = raw_aggregated
     return {"mode": mode, "data": final_data}
 
 

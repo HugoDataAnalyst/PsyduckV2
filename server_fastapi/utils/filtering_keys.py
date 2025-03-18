@@ -192,3 +192,73 @@ def transform_aggregated_tth(raw_aggregated: dict, mode: str, start: datetime = 
         return sorted_averaged
     else:
         return raw_aggregated
+
+def transform_grouped_totals_hourly(raw_aggregated: dict) -> dict:
+    """
+    Transforms raw aggregated data for totals hourly grouped mode.
+    raw_aggregated is assumed to be a dict with keys as Redis keys (each corresponding to an hour)
+    and values as dictionaries mapping fields to counts.
+    This function groups the data by hour (extracted from the key) and sums the fields.
+    Returns a dictionary keyed by hour with sorted inner dictionaries.
+    """
+    hourly = {}
+    for redis_key, fields in raw_aggregated.items():
+        hour_str = redis_key.split(":")[-1]
+        if hour_str not in hourly:
+            hourly[hour_str] = {}
+        for field, value in fields.items():
+            hourly[hour_str][field] = hourly[hour_str].get(field, 0) + value
+    # Sort each hour's dictionary by pokemon_id (first component)
+    for hour in hourly:
+        hourly[hour] = dict(sorted(hourly[hour].items(), key=lambda item: int(item[0].split(":")[0])))
+    return hourly
+
+def transform_grouped_tth_hourly_by_hour(raw_aggregated: dict) -> dict:
+    """
+    Transforms raw aggregated TTH hourly data (grouped mode) into a dictionary keyed by the hour of day.
+
+    Expected raw_aggregated: a dict where keys are full Redis keys, e.g.
+      "counter:tth_pokemon_hourly:Saarlouis:2025031718"
+    This function extracts the hour from the last two digits of the time component,
+    then combines (sums) the inner dictionaries for keys with the same hour.
+
+    The inner dictionaries are then sorted by the defined TTH bucket order.
+
+    Example output:
+    {
+      "13": { "20_25": 4, "25_30": 7, "55_60": 2 },
+      "17": { "15_20": 7, "20_25": 27, "25_30": 66, "50_55": 2, "55_60": 6 },
+      "18": { "25_30": 4, "55_60": 1 }
+    }
+    """
+    # Define TTH bucket order.
+    TTH_BUCKETS = [
+        (0, 5), (5, 10), (10, 15), (15, 20), (20, 25),
+        (25, 30), (30, 35), (35, 40), (40, 45), (45, 50),
+        (50, 55), (55, 60)
+    ]
+    bucket_order = {f"{low}_{high}": idx for idx, (low, high) in enumerate(TTH_BUCKETS)}
+
+    grouped = {}
+    for full_key, fields in raw_aggregated.items():
+        parts = full_key.split(":")
+        if len(parts) < 4:
+            continue
+        # The last component is expected to be a time string in the format "YYYYMMDDHH"
+        time_component = parts[-1]
+        if len(time_component) < 2:
+            continue
+        hour_only = time_component[-2:]  # Extract the last two characters representing the hour.
+        if hour_only not in grouped:
+            grouped[hour_only] = {}
+        # Sum the fields for this hour.
+        for field, value in fields.items():
+            grouped[hour_only][field] = grouped[hour_only].get(field, 0) + value
+
+    # Now, sort the inner dictionaries by TTH bucket order.
+    for hour in grouped:
+        grouped[hour] = dict(sorted(grouped[hour].items(), key=lambda item: bucket_order.get(item[0], 9999)))
+
+    # Finally, sort the outer dictionary by the hour as an integer.
+    sorted_grouped = dict(sorted(grouped.items(), key=lambda item: int(item[0])))
+    return sorted_grouped
