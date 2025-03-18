@@ -105,3 +105,97 @@ def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
                 # Approximate a year as 365 days
                 return reference - timedelta(days=365 * value)
     raise ValueError(f"Unrecognized time format: {time_str}")
+
+def transform_aggregated_totals(raw_aggregated: dict, mode: str) -> dict:
+    """
+    Transforms raw aggregated data for totals retrieval.
+
+    In "sum" mode:
+      - raw_aggregated is a flat dictionary (e.g., {"1:163:total": 35, "2:166:total": 1, ...}).
+      - This function groups fields by the metric (the third component) and sums the values.
+      - Example result: {"total": 36, "iv100": X, ...}
+
+    In "grouped" mode:
+      - raw_aggregated is a dictionary with keys representing individual Redis keys,
+        and values as dictionaries mapping fields (e.g., "1:163:total") to counts.
+      - This function combines all the fields into a single dictionary (summing counts across keys)
+        and then sorts the result by the numeric value of the first component (pokemon_id).
+      - Example result: {"1:163:total": 35, "2:166:total": 1, ...}
+    """
+    if mode == "sum":
+        final = {}
+        # raw_aggregated is flat: field -> value
+        for field, value in raw_aggregated.items():
+            parts = field.split(":")
+            metric = parts[-1] if len(parts) >= 3 else field
+            final[metric] = final.get(metric, 0) + value
+        sorted_final = dict(sorted(final.items(), key=lambda item: item[0]))
+        return sorted_final
+    elif mode == "grouped":
+        combined = {}
+        # raw_aggregated is a dict: redis_key -> {field: value}
+        for redis_key, fields in raw_aggregated.items():
+            for field, value in fields.items():
+                combined[field] = combined.get(field, 0) + value
+        sorted_combined = dict(sorted(combined.items(), key=lambda item: int(item[0].split(":")[0])))
+        return sorted_combined
+    else:
+        return raw_aggregated
+
+
+def transform_aggregated_tth(raw_aggregated: dict, mode: str, start: datetime = None, end: datetime = None) -> dict:
+    """
+    Transforms raw aggregated data for TTH retrieval.
+
+    In "sum" mode:
+      - raw_aggregated is a flat dictionary where keys are TTH buckets (e.g., "0_5", "5_10", etc.)
+        possibly along with other identifiers.
+      - This function merges the values by TTH bucket. For example, if the keys are
+        "1:163:0_5", "2:165:0_5", etc., it sums all values for the "0_5" bucket.
+      - The final dictionary is then sorted by TTH bucket order.
+
+    In "grouped" mode:
+      - raw_aggregated is a dictionary with keys (e.g., Redis keys) and values as dictionaries.
+      - This function combines all inner dictionaries into accumulators: one for the total sum
+        and one for the count of hours that provided data for each bucket.
+      - It then computes the average for each bucket (total divided by count), rounds the result
+        to 3 decimals, and orders the final output by TTH bucket order.
+    """
+    from datetime import timedelta
+
+    TTH_BUCKETS = [
+        (0, 5), (5, 10), (10, 15), (15, 20), (20, 25),
+        (25, 30), (30, 35), (35, 40), (40, 45), (45, 50),
+        (50, 55), (55, 60)
+    ]
+    bucket_order = {f"{low}_{high}": idx for idx, (low, high) in enumerate(TTH_BUCKETS)}
+
+    if mode == "sum":
+        final = {}
+        for field, value in raw_aggregated.items():
+            parts = field.split(":")
+            bucket = parts[-1] if len(parts) >= 3 else field
+            final[bucket] = final.get(bucket, 0) + value
+        sorted_final = dict(sorted(final.items(), key=lambda item: bucket_order.get(item[0], 9999)))
+        return sorted_final
+
+    elif mode == "grouped":
+        combined = {}
+        counts = {}
+        # raw_aggregated is a dict: redis_key -> {field: value}
+        for redis_key, fields in raw_aggregated.items():
+            for field, value in fields.items():
+                parts = field.split(":")
+                bucket = parts[-1] if len(parts) >= 3 else field
+                combined[bucket] = combined.get(bucket, 0) + value
+                counts[bucket] = counts.get(bucket, 0) + 1
+        averaged = {}
+        for bucket in combined:
+            if counts.get(bucket, 0) > 0:
+                averaged[bucket] = round(combined[bucket] / counts[bucket], 3)
+            else:
+                averaged[bucket] = 0
+        sorted_averaged = dict(sorted(averaged.items(), key=lambda item: bucket_order.get(item[0], 9999)))
+        return sorted_averaged
+    else:
+        return raw_aggregated

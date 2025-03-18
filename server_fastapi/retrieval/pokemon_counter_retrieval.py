@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
-from server_fastapi.utils.filtering_keys import aggregate_keys, filter_keys_by_time
+from server_fastapi.utils import filtering_keys
 
 redis_manager = RedisManager()
 
@@ -24,19 +24,27 @@ async def retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode
         pattern = "counter:pokemon_hourly:*"
     else:
         pattern = f"counter:pokemon_hourly:{area}:*"
-    # Use retrieval_pool  for keys
     keys = await client.keys(pattern)
-    keys = filter_keys_by_time(keys, time_format, start, end)
+    keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end)
     if not keys:
         return {"mode": mode, "data": {}}
-    aggregated = await aggregate_keys(keys, mode)
-    return {"mode": mode, "data": aggregated}
+
+    raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
+    final_data = filtering_keys.transform_aggregated_totals(raw_aggregated, mode)
+    return {"mode": mode, "data": final_data}
 
 async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
     """
     Retrieve weekly totals for Pokémon counters.
     Key format: "counter:pokemon_total:{area}:{YYYYMMDD}"
     Uses the "retrieval_pool" for Redis operations.
+
+    In SUM mode, the function aggregates all hash fields from all matching keys and then
+    groups them by metric (the third component, e.g. "total", "iv100", etc.).
+
+    In GROUPED mode, the function combines data from all keys into a single dictionary
+    keyed by the full field (e.g., "1:163:total") summing counts across keys, then sorts
+    the final result by pokemon_id (the first component).
     """
     client = await redis_manager.check_redis_connection("retrieval_pool")
     if not client:
@@ -49,11 +57,13 @@ async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode
     else:
         pattern = f"counter:pokemon_total:{area}:*"
     keys = await client.keys(pattern)
-    keys = filter_keys_by_time(keys, time_format, start, end)
+    keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end)
     if not keys:
         return {"mode": mode, "data": {}}
-    aggregated = await aggregate_keys(keys, mode)
-    return {"mode": mode, "data": aggregated}
+
+    raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
+    final_data = filtering_keys.transform_aggregated_totals(raw_aggregated, mode)
+    return {"mode": mode, "data": final_data}
 
 # --- Retrieval functions for TTH ---
 
@@ -61,8 +71,11 @@ async def retrieve_tth_hourly(area: str, start: datetime, end: datetime, mode: s
     """
     Retrieve hourly TTH counters.
     Key format: "counter:tth_pokemon_hourly:{area}:{YYYYMMDDHH}"
-    For mode "grouped", data is grouped by hour and the average per field is computed.
-    Always returns a complete timeline (each hour in the requested range).
+
+    In "sum" mode, values are summed across matching keys.
+    In "grouped" mode, the function combines data from all matching keys into one dictionary,
+    computes an average per field over the entire timeframe, and orders the result by TTH bucket.
+    Only hours with data are returned.
     """
     time_format = "%Y%m%d%H"
     client = await redis_manager.check_redis_connection("retrieval_pool")
@@ -76,46 +89,14 @@ async def retrieve_tth_hourly(area: str, start: datetime, end: datetime, mode: s
         pattern = f"counter:tth_pokemon_hourly:{area}:*"
 
     keys = await client.keys(pattern)
-    keys = filter_keys_by_time(keys, time_format, start, end)
+    keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end)
     if not keys:
-        # Even if no keys, return the timeline with no data.
-        timeline = {}
-        current = start.replace(minute=0, second=0, microsecond=0)
-        while current <= end:
-            timeline[current.strftime(time_format)] = {}
-            current += timedelta(hours=1)
-        return {"mode": mode, "data": timeline}
+        return {"mode": mode, "data": {}}
 
-    if mode == "sum":
-        aggregated = await aggregate_keys(keys, mode)
-        return {"mode": "sum", "data": aggregated}
-    elif mode == "grouped":
-        # Group by hour, compute average per field, and ensure every hour in the time window is present.
-        hourly_data = {}
-        for key in keys:
-            hour_str = key.split(":")[-1]
-            data = await client.hgetall(key)
-            data = {k: int(v) for k, v in data.items()}
-            if hour_str not in hourly_data:
-                hourly_data[hour_str] = {"count": 0, "fields": {}}
-            hourly_data[hour_str]["count"] += 1
-            for field, value in data.items():
-                hourly_data[hour_str]["fields"][field] = hourly_data[hour_str]["fields"].get(field, 0) + value
+    raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
+    final_data = filtering_keys.transform_aggregated_tth(raw_aggregated, mode, start, end)
+    return {"mode": mode, "data": final_data}
 
-        # Build a complete timeline for each hour in the range.
-        timeline = {}
-        current = start.replace(minute=0, second=0, microsecond=0)
-        while current <= end:
-            hour_str = current.strftime(time_format)
-            timeline[hour_str] = hourly_data.get(hour_str, {"count": 0, "fields": {}})
-            current += timedelta(hours=1)
-
-        # Compute averages: if no data (count==0), return empty dict.
-        averaged = {}
-        for hour_str, info in timeline.items():
-            cnt = info["count"] if info["count"] > 0 else 1  # avoid division by zero
-            averaged[hour_str] = {field: (val / cnt) for field, val in info["fields"].items()} if info["fields"] else {}
-        return {"mode": "grouped", "data": averaged}
 
 async def retrieve_tth_weekly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
     """
@@ -136,43 +117,13 @@ async def retrieve_tth_weekly(area: str, start: datetime, end: datetime, mode: s
         pattern = f"counter:tth_pokemon:{area}:*"
 
     keys = await client.keys(pattern)
-    keys = filter_keys_by_time(keys, time_format, start, end)
+    keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end)
     if not keys:
-        timeline = {}
-        current = start.date()
-        while current <= end.date():
-            timeline[current.strftime(time_format)] = {}
-            current += timedelta(days=1)
-        return {"mode": mode, "data": timeline}
+        return {"mode": mode, "data": {}}
 
-    if mode == "sum":
-        aggregated = await aggregate_keys(keys, mode)
-        return {"mode": "sum", "data": aggregated}
-    elif mode == "grouped":
-        daily_data = {}
-        for key in keys:
-            day_str = key.split(":")[-1]
-            data = await client.hgetall(key)
-            data = {k: int(v) for k, v in data.items()}
-            if day_str not in daily_data:
-                daily_data[day_str] = {"count": 0, "fields": {}}
-            daily_data[day_str]["count"] += 1
-            for field, value in data.items():
-                daily_data[day_str]["fields"][field] = daily_data[day_str]["fields"].get(field, 0) + value
-
-        # Build a complete timeline for each day in the range.
-        timeline = {}
-        current = start.date()
-        while current <= end.date():
-            day_str = current.strftime(time_format)
-            timeline[day_str] = daily_data.get(day_str, {"count": 0, "fields": {}})
-            current += timedelta(days=1)
-
-        averaged = {}
-        for day_str, info in timeline.items():
-            cnt = info["count"] if info["count"] > 0 else 1
-            averaged[day_str] = {field: (val / cnt) for field, val in info["fields"].items()} if info["fields"] else {}
-        return {"mode": "grouped", "data": averaged}
+    raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
+    final_data = filtering_keys.transform_aggregated_tth(raw_aggregated, mode, start, end)
+    return {"mode": mode, "data": final_data}
 
 # --- Retrieval function for Weather (monthly) ---
 
@@ -202,7 +153,7 @@ async def retrieve_weather_monthly(area: str, start: datetime, end: datetime, mo
         pattern = f"counter:pokemon_weather_iv:{area}:*"
 
     keys = await client.keys(pattern)
-    keys = filter_keys_by_time(keys, time_format, start, end)
+    keys = filtering_keys.filter_keys_by_time(keys, time_format, start, end)
     if not keys:
         return {"mode": mode, "data": {}}
 
