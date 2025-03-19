@@ -21,4 +21,10 @@ TAGS_METADATA = [
         "description": "Obtain Pokémon Counter Series Data from Redis.",
         "summary": "Get Pokémon counter series data.",
     },
+    {
+        "name": "Raid Counter Series",
+        "description": "Obtain Raid Counter Series Data from Redis.",
+        "summary": "Get Raid counter series data.",
+
+    },
 ]

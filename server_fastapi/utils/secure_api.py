@@ -23,6 +23,7 @@ ALLOWED_PATHS = [
     "/docs", # Allow default docs FastAPI page
     "/api/redis/total_pokemons_hourly",
     "/api/redis/get_pokemon_counterseries",
+    "/api/redis/get_raids_counterseries",
 
 ]
 
