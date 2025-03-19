@@ -17,6 +17,8 @@ async def validate_remote_addr(request: Request):
 
 # Define allowed paths for the API
 ALLOWED_PATHS = [
+    "/static/psyduck.webp",
+    "/static/psyduck-flex.gif",
     "/webhook",
     "/docs", # Allow default docs FastAPI page
     "/api/redis/total_pokemons_hourly",

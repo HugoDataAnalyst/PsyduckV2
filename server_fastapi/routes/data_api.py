@@ -29,7 +29,7 @@ async def get_total_pokemons_hourly(
 
 @router.get(
     "/api/redis/get_pokemon_counterseries",
-    tags=["Pokemon CounterSeries"],
+    tags=["Pokémon Counter Series"],
     dependencies=[
         Depends(secure_api.validate_path),
         Depends(secure_api.validate_ip),

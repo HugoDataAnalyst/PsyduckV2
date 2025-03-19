@@ -1,6 +1,7 @@
 TITLE = "PsyduckV2"
 
 DESCRIPTION = """
+![PsyduckV2](/static/psyduck.webp)
 
 ## PsyduckV2 is a Data Pipeline project developed and maintained by [Hugo Gomes](https://github.com/HugoDataAnalyst).
 
@@ -14,5 +15,10 @@ TAGS_METADATA = [
     {
         "name": "Total Hourly Pokémon",
         "description": "Obtain Total Hourly Pokémon Data from Redis."
+    },
+    {
+        "name": "Pokémon Counter Series",
+        "description": "Obtain Pokémon Counter Series Data from Redis.",
+        "summary": "Get Pokémon counter series data.",
     },
 ]

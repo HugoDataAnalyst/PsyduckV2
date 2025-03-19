@@ -1,6 +1,7 @@
 import asyncio
 import config as AppConfig
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
@@ -83,7 +84,8 @@ app = FastAPI(
 )
 
 app.add_middleware(secure_api.AllowedPathsMiddleware)
-
+# Mount static folder to serve favicon and other assets
+app.mount("/static", StaticFiles(directory="server_fastapi/static"), name="static")
 # Include the webhook router
 app.include_router(webhook_router.router)
 # Include the Data retriving router
