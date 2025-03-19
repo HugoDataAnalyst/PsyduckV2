@@ -1,6 +1,6 @@
 import json
 import config as AppConfig
-from my_redis.queries.pokemons import (
+from my_redis.queries.updates.pokemons import (
     pokemon_timeseries,
     pokemon_counterseries,
     pokemon_hourly_counterseries,
@@ -9,17 +9,17 @@ from my_redis.queries.pokemons import (
     pokemon_tth_hourly_counterseries,
     pokemon_weather_iv_counterseries
 )
-from my_redis.queries.raids import (
+from my_redis.queries.updates.raids import (
     raids_timeseries,
     raids_counterseries,
     raids_hourly_counterseries
 )
-from my_redis.queries.invasions import (
+from my_redis.queries.updates.invasions import (
     invasions_timeseries,
     invasions_counterseries,
     invasions_hourly_counterseries
 )
-from my_redis.queries.quests import (
+from my_redis.queries.updates.quests import (
     quests_timeseries,
     quests_counterseries,
     quests_hourly_counterseries

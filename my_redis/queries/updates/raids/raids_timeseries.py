@@ -2,7 +2,7 @@ from ast import Await
 import config as AppConfig
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
-from utils.redis_key_checker import ensure_timeseries_key
+from my_redis.utils.redis_key_checker import ensure_timeseries_key
 
 redis_manager = RedisManager()
 

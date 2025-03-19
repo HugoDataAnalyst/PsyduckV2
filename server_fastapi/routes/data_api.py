@@ -3,11 +3,9 @@ from datetime import datetime
 from server_fastapi.utils import secure_api
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from typing import Optional
-from server_fastapi.retrieval import (
-    pokemon_counter_retrieval,
-    raid_counter_retrieval,
-)
-from server_fastapi.utils import filtering_keys
+from my_redis.utils import filtering_keys
+from my_redis.queries.gets.pokemons.pokemon_counter_retrieval import PokemonCounterRetrieval
+from my_redis.queries.gets.raids.raid_counter_retrieval import RaidCounterRetrieval
 
 router = APIRouter()
 
@@ -76,20 +74,20 @@ async def get_pokemon_counterseries(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
-    # Retrieve data based on parameters and mode
-    result = {}
-    if counter_type == "totals":
-        if interval == "hourly":
-            result = await pokemon_counter_retrieval.retrieve_totals_hourly(area, start_dt, end_dt, mode=mode)
-        elif interval == "weekly":
-            result = await pokemon_counter_retrieval.retrieve_totals_weekly(area, start_dt, end_dt, mode=mode)
-    elif counter_type == "tth":
-        if interval == "hourly":
-            result = await pokemon_counter_retrieval.retrieve_tth_hourly(area, start_dt, end_dt, mode=mode)
-        elif interval == "weekly":
-            result = await pokemon_counter_retrieval.retrieve_tth_weekly(area, start_dt, end_dt, mode=mode)
-    elif counter_type == "weather":
-        result = await pokemon_counter_retrieval.retrieve_weather_monthly(area, start_dt, end_dt, mode=mode)
+    # Initialize the counter retrieval object
+    pokemon_counter_retrieval = PokemonCounterRetrieval(area, start_dt, end_dt, mode)
+
+    # Retrieve data dynamically based on counter type and interval
+    retrieval_methods = {
+        ("totals", "hourly"): pokemon_counter_retrieval.retrieve_totals_hourly,
+        ("totals", "weekly"): pokemon_counter_retrieval.retrieve_totals_weekly,
+        ("tth", "hourly"): pokemon_counter_retrieval.retrieve_tth_hourly,
+        ("tth", "weekly"): pokemon_counter_retrieval.retrieve_tth_weekly,
+        ("weather", "monthly"): pokemon_counter_retrieval.retrieve_weather_monthly,
+    }
+
+    retrieval_method = retrieval_methods.get((counter_type, interval))
+    result = await retrieval_method() if retrieval_method else {}
 
     if response_format.lower() == "json":
         return result
@@ -142,13 +140,17 @@ async def get_counter_raids(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
-    # Retrieve data based on parameters and mode
-    result = {}
-    if counter_type == "totals":
-        if interval == "hourly":
-            result = await raid_counter_retrieval.raid_retrieve_totals_hourly(area, start_dt, end_dt, mode=mode)
-        elif interval == "weekly":
-            result = await raid_counter_retrieval.raid_retrieve_totals_weekly(area, start_dt, end_dt, mode=mode)
+    # Initialize the counter retrieval object
+    raid_counter_retrieval = RaidCounterRetrieval(area, start_dt, end_dt, mode)
+
+    # Retrieve data dynamically based on counter type and interval
+    retrieval_methods = {
+        ("totals", "hourly"): raid_counter_retrieval.raid_retrieve_totals_hourly,
+        ("totals", "weekly"): raid_counter_retrieval.raid_retrieve_totals_weekly
+    }
+
+    retrieval_method = retrieval_methods.get((counter_type, interval))
+    result = await retrieval_method() if retrieval_method else {}
 
     if response_format.lower() == "json":
         return result
