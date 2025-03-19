@@ -25,6 +25,7 @@ ALLOWED_PATHS = [
     "/api/redis/get_pokemon_counterseries",
     "/api/redis/get_raids_counterseries",
     "/api/redis/get_invasions_counterseries",
+    "/api/redis/get_quest_counterseries",
 ]
 
 async def validate_path(request: Request):
