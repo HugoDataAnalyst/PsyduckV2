@@ -313,8 +313,6 @@ def transform_raid_totals_sum(raw_aggregated: dict) -> dict:
       - "raid_ex_eligible": aggregated sum per raid_ex_raid_eligible.
       - "total": overall total.
     """
-    from utils.logger import logger
-
     breakdown = {
         "raid_pokemon+raid_form": {},
         "raid_level": {},
@@ -323,40 +321,40 @@ def transform_raid_totals_sum(raw_aggregated: dict) -> dict:
         "raid_ex_eligible": {},
         "total": 0
     }
-    logger.info("▶️ Starting transform_raid_totals_sum")
+    logger.debug("▶️ Starting transform_raid_totals_sum")
     # raw_aggregated is assumed to be a flat dictionary: field -> value.
     for field, value in raw_aggregated.items():
         logger.info(f"▶️ Processing field: {field} with value: {value}")
         parts = field.split(":")
         if len(parts) != 7:
-            logger.warning(f"⏭️ Skipping field {field} because it does not have 7 parts")
+            logger.debug(f"⏭️ Skipping field {field} because it does not have 7 parts")
             continue  # Skip keys that don't follow the expected format.
         raid_pokemon, raid_level, raid_form, raid_costume, raid_is_exclusive, raid_ex_eligible, metric = parts
         try:
             val = int(value)
         except Exception as e:
-            logger.warning(f"❌ Could not convert value {value} of field {field} to int: {e}")
+            logger.debug(f"❌ Could not convert value {value} of field {field} to int: {e}")
             val = 0
         breakdown["total"] += val
-        logger.info(f"☑️ Added {val} to total; running total: {breakdown['total']}")
+        logger.debug(f"☑️ Added {val} to total; running total: {breakdown['total']}")
 
         key_pf = f"{raid_pokemon}:{raid_form}"
         breakdown["raid_pokemon+raid_form"][key_pf] = breakdown["raid_pokemon+raid_form"].get(key_pf, 0) + val
-        logger.info(f"⬆️ Updated raid_pokemon+raid_form for {key_pf}: {breakdown['raid_pokemon+raid_form'][key_pf]}")
+        logger.debug(f"⬆️ Updated raid_pokemon+raid_form for {key_pf}: {breakdown['raid_pokemon+raid_form'][key_pf]}")
 
         breakdown["raid_level"][raid_level] = breakdown["raid_level"].get(raid_level, 0) + val
-        logger.info(f"⬆️ Updated raid_level for {raid_level}: {breakdown['raid_level'][raid_level]}")
+        logger.debug(f"⬆️ Updated raid_level for {raid_level}: {breakdown['raid_level'][raid_level]}")
 
         breakdown["raid_costume"][raid_costume] = breakdown["raid_costume"].get(raid_costume, 0) + val
-        logger.info(f"⬆️ Updated raid_costume for {raid_costume}: {breakdown['raid_costume'][raid_costume]}")
+        logger.debug(f"⬆️ Updated raid_costume for {raid_costume}: {breakdown['raid_costume'][raid_costume]}")
 
         breakdown["raid_is_exclusive"][raid_is_exclusive] = breakdown["raid_is_exclusive"].get(raid_is_exclusive, 0) + val
-        logger.info(f"⬆️ Updated raid_is_exclusive for {raid_is_exclusive}: {breakdown['raid_is_exclusive'][raid_is_exclusive]}")
+        logger.debug(f"⬆️ Updated raid_is_exclusive for {raid_is_exclusive}: {breakdown['raid_is_exclusive'][raid_is_exclusive]}")
 
         breakdown["raid_ex_eligible"][raid_ex_eligible] = breakdown["raid_ex_eligible"].get(raid_ex_eligible, 0) + val
-        logger.info(f"⬆️ Updated raid_ex_eligible for {raid_ex_eligible}: {breakdown['raid_ex_eligible'][raid_ex_eligible]}")
+        logger.debug(f"⬆️ Updated raid_ex_eligible for {raid_ex_eligible}: {breakdown['raid_ex_eligible'][raid_ex_eligible]}")
 
-    logger.info(f"🔍 Before sorting, breakdown: {breakdown}")
+    logger.debug(f"🔍 Before sorting, breakdown: {breakdown}")
     # Optionally sort each dictionary by key (numeric sort for level if applicable)
     breakdown["raid_pokemon+raid_form"] = dict(sorted(breakdown["raid_pokemon+raid_form"].items()))
     try:

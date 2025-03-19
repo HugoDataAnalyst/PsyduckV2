@@ -146,9 +146,9 @@ async def get_counter_raids(
     result = {}
     if counter_type == "totals":
         if interval == "hourly":
-            result = await raid_counter_retrieval.retrieve_totals_hourly(area, start_dt, end_dt, mode=mode)
+            result = await raid_counter_retrieval.raid_retrieve_totals_hourly(area, start_dt, end_dt, mode=mode)
         elif interval == "weekly":
-            result = await raid_counter_retrieval.retrieve_totals_weekly(area, start_dt, end_dt, mode=mode)
+            result = await raid_counter_retrieval.raid_retrieve_totals_weekly(area, start_dt, end_dt, mode=mode)
 
     if response_format.lower() == "json":
         return result

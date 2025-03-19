@@ -5,7 +5,7 @@ from server_fastapi.utils import filtering_keys
 
 redis_manager = RedisManager()
 
-async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
+async def raid_retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
     """
     Retrieve weekly raid totals.
 
@@ -33,16 +33,18 @@ async def retrieve_totals_weekly(area: str, start: datetime, end: datetime, mode
         return {"mode": mode, "data": {}}
 
     raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
-    if mode == ["sum"]:
-        logger.info("▶️ Transforming weekly raid_totals sum")
+    if mode == "sum":
+        logger.debug("▶️ Transforming weekly raid_totals SUM")
         final_data = filtering_keys.transform_raid_totals_sum(raw_aggregated)
-    elif mode == ["grouped"]:
+    elif mode == "grouped":
+        logger.debug("▶️ Transforming weekly raid_totals GROUPED")
         final_data = filtering_keys.transform_aggregated_totals(raw_aggregated, mode)
     else:
+        logger.debug("❌ Else Block weekly raid_totals")
         final_data = raw_aggregated
     return {"mode": mode, "data": final_data}
 
-async def retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
+async def raid_retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode: str = "sum") -> dict:
     """
     Retrieve hourly raid totals.
 
@@ -70,14 +72,17 @@ async def retrieve_totals_hourly(area: str, start: datetime, end: datetime, mode
         return {"mode": mode, "data": {}}
 
     raw_aggregated = await filtering_keys.aggregate_keys(keys, mode)
-    if mode == ["sum"]:
-        logger.info("▶️ Transforming hourly raid_totals sum")
+    if mode == "sum":
+        logger.debug("▶️ Transforming hourly raid_totals SUM")
         final_data = filtering_keys.transform_raid_totals_sum(raw_aggregated)
-    elif mode == ["grouped"]:
+    elif mode == "grouped":
+        logger.debug("▶️ Transforming hourly raid_totals GROUPED")
         final_data = filtering_keys.transform_aggregated_totals(raw_aggregated, mode)
     elif mode == "surged":
         # If you want a surged mode for raids as well, you can implement a similar helper.
+        logger.debug("▶️ Transforming hourly raid_totals SURGED")
         final_data = filtering_keys.transform_surged_totals_hourly_by_hour(raw_aggregated)
     else:
+        logger.debug("❌ Else Block Hourly raid_totals")
         final_data = raw_aggregated
     return {"mode": mode, "data": final_data}
