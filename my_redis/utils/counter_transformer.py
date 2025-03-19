@@ -267,3 +267,64 @@ class CounterTransformer:
 
         logger.info(f"✅ Transformation complete. Final breakdown: {breakdown}")
         return breakdown
+
+
+    @staticmethod
+    def transform_invasion_totals_sum(raw_aggregated: dict) -> dict:
+        """
+        Transforms raw aggregated invasion totals (in sum mode) into a detailed breakdown.
+
+        Expected field format:
+        "{display_type}:{character}:{grunt}:{confirmed}:total"
+
+        Returns a dictionary with breakdown:
+        - "display_type+character": aggregated sum for each unique combination of display_type and character.
+        - "grunt": aggregated sum per grunt.
+        - "confirmed": aggregated sum per confirmed.
+        - "total": overall total.
+        """
+        breakdown = {
+            "display_type+character": {},
+            "grunt": {},
+            "confirmed": {},
+            "total": 0
+        }
+        logger.info("▶️ Starting transform_invasion_totals_sum")
+
+        # raw_aggregated is expected to be a flat dict: field -> value.
+        for field, value in raw_aggregated.items():
+            logger.debug(f"Processing field: {field} with value: {value}")
+            parts = field.split(":")
+            if len(parts) != 5:
+                logger.debug(f"⏭️ Skipping field {field} because it does not have 5 parts (found {len(parts)})")
+                continue
+            display_type, character, grunt, confirmed, metric = parts
+            try:
+                val = int(value)
+            except Exception as e:
+                logger.debug(f"❌ Could not convert value '{value}' for field '{field}' to int: {e}")
+                val = 0
+            breakdown["total"] += val
+            logger.debug(f"Added {val} to total; running total: {breakdown['total']}")
+
+            # Combine display_type and character.
+            key_dc = f"{display_type}:{character}"
+            breakdown["display_type+character"][key_dc] = breakdown["display_type+character"].get(key_dc, 0) + val
+            logger.debug(f"Updated display_type+character for {key_dc}: {breakdown['display_type+character'][key_dc]}")
+
+            breakdown["grunt"][grunt] = breakdown["grunt"].get(grunt, 0) + val
+            logger.debug(f"Updated grunt for {grunt}: {breakdown['grunt'][grunt]}")
+
+            breakdown["confirmed"][confirmed] = breakdown["confirmed"].get(confirmed, 0) + val
+            logger.debug(f"Updated confirmed for {confirmed}: {breakdown['confirmed'][confirmed]}")
+
+        logger.debug(f"Before sorting, breakdown: {breakdown}")
+        breakdown["display_type+character"] = dict(sorted(breakdown["display_type+character"].items()))
+        try:
+            breakdown["grunt"] = dict(sorted(breakdown["grunt"].items(), key=lambda item: int(item[0]) if item[0].isdigit() else item[0]))
+        except Exception as e:
+            logger.warning(f"❌ Could not sort grunt numerically: {e}")
+            breakdown["grunt"] = dict(sorted(breakdown["grunt"].items()))
+        breakdown["confirmed"] = dict(sorted(breakdown["confirmed"].items()))
+        logger.info(f"✅ Transformation complete. Final breakdown: {breakdown}")
+        return breakdown

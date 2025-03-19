@@ -27,4 +27,9 @@ TAGS_METADATA = [
         "summary": "Get Raid counter series data.",
 
     },
+    {
+        "name": "Invasion Counter Series",
+        "description": "Obtain Invasion Counter Series Data from Redis.",
+        "summary": "Get Invasion counter series data.",
+    },
 ]

@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from typing import Counter
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 from my_redis.utils import filtering_keys
