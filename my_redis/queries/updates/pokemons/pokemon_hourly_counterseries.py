@@ -37,6 +37,7 @@ async def update_pokemon_hourly_counter(data, pipe=None):
     hash_key = f"counter:pokemon_hourly:{area}:{date_hour}"
 
     # Construct field names for each metric
+    field_total      = f"{pokemon_id}:{form}:total"
     field_iv100      = f"{pokemon_id}:{form}:iv100"
     field_iv0        = f"{pokemon_id}:{form}:iv0"
     field_pvp_little = f"{pokemon_id}:{form}:pvp_little"
@@ -45,6 +46,7 @@ async def update_pokemon_hourly_counter(data, pipe=None):
     field_shiny      = f"{pokemon_id}:{form}:shiny"
 
     # Determine metric increments
+    inc_total      = 1  # Always add 1 for total
     inc_iv100      = 1 if data.get("iv") == 100 else 0
     inc_iv0        = 1 if data.get("iv") == 0 else 0
     inc_pvp_little = 1 if data.get("pvp_little_rank") and 1 in data.get("pvp_little_rank") else 0
@@ -56,6 +58,9 @@ async def update_pokemon_hourly_counter(data, pipe=None):
 
     if pipe:
         # Add commands to the provided pipeline
+        if inc_total:
+            pipe.hincrby(hash_key, field_total, inc_total)
+            updated_fields["total"] = "OK"
         if inc_iv100:
             pipe.hincrby(hash_key, field_iv100, inc_iv100)
             updated_fields["iv100"] = "OK"
@@ -77,6 +82,9 @@ async def update_pokemon_hourly_counter(data, pipe=None):
     else:
         # Execute pipeline transaction if no external pipeline is passed
         async with client.pipeline() as pipe:
+            if inc_total:
+                pipe.hincrby(hash_key, field_total, inc_total)
+                updated_fields["total"] = "OK"
             if inc_iv100:
                 pipe.hincrby(hash_key, field_iv100, inc_iv100)
                 updated_fields["iv100"] = "OK"
