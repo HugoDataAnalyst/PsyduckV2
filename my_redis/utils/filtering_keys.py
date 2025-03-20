@@ -62,7 +62,7 @@ def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
     Parses a time input string.
 
     If time_str can be parsed as an ISO datetime, returns that datetime.
-    Otherwise, if time_str is in a relative format like "1 month", "10 days", "1 day", "3 months", "1 year", or "10 hours",
+    Otherwise, if time_str is in a relative format like "1 month", "10 days", "1 day", "3 months", "1 year", "10 hours" or "15 minutes",
     subtracts that duration from the reference (or now if reference is None) and returns that datetime.
     If time_str is "now", returns datetime.now().
     """
@@ -77,7 +77,7 @@ def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
     except Exception:
         pass
     # Extend the relative time pattern to support hours.
-    pattern = re.compile(r"(\d+)\s*(day|days|month|months|year|years|hour|hours)")
+    pattern = re.compile(r"(\d+)\s*(day|days|month|months|year|years|hour|hours|minute|minutes)")
     match = pattern.fullmatch(time_str)
     if match:
         value = int(match.group(1))
@@ -87,6 +87,8 @@ def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
             return reference - timedelta(days=value)
         elif unit in ("hour", "hours"):
             return reference - timedelta(hours=value)
+        elif unit in ("minute", "minutes"):
+            return reference - timedelta(minutes=value)
         elif unit in ("month", "months"):
             try:
                 from dateutil.relativedelta import relativedelta
