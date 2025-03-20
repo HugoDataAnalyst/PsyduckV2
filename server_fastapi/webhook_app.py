@@ -1,6 +1,6 @@
 import asyncio
 import config as AppConfig
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, openapi
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from utils.logger import logger
@@ -12,6 +12,8 @@ from server_fastapi.utils import (
     details,
     secure_api,
 )
+from fastapi.openapi.docs import get_swagger_ui_html
+
 
 redis_manager = RedisManager()
 
@@ -72,18 +74,50 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("👋 Shutting down Webhook Receiver application.")
 
+# Custom Swagger UI HTML template
+def custom_swagger_ui_html(*args, **kwargs) -> Response:
+    # Get the default HTMLResponse from FastAPI
+    default_response = get_swagger_ui_html(*args, **kwargs)
+    # Convert the response body (bytes) to a string.
+    html_str = default_response.body.decode("utf-8")
+    # Add your custom CSS and custom button
+    custom_css = (
+        '<style>'
+        '.my-custom-button { '
+        '   color: #fff; '
+        '   background-color: #007BFF; '
+        '   padding: 10px 20px; '
+        '   border-radius: 5px; '
+        '   text-decoration: none; '
+        '}'
+        '</style>'
+    )
+    #custom_button = '<a href="https://example.com/docs" target="_blank" class="my-custom-button">Custom Docs</a>'
+    # Insert the custom CSS and button before the closing </head>
+    favicon_link = '<link rel="icon" href="/static/psyduck.ico" type="image/x-icon">'
+    html_str = html_str.replace('</head>', f'{favicon_link}{custom_css}</head>')
+    #html_str = html_str.replace('</head>', f'{favicon_link}{custom_css}{custom_button}</head>')
+    # Return a new Response with the modified HTML
+    return Response(content=html_str, media_type="text/html")
+
 # Customise FastAPI instance.
 app = FastAPI(
     title=details.TITLE,
     description=details.DESCRIPTION,
     version=details.VERSION,
     openapi_tags=details.TAGS_METADATA,
-    docs_url="/docs",  # Swagger UI available at /docs
+    docs_url=None,   # Swagger UI available at /docs
     redoc_url=None,    # Disable ReDoc UI
     lifespan=lifespan,
 )
 
 app.add_middleware(secure_api.AllowedPathsMiddleware)
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui():
+    return custom_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - UI"
+    )
 # Mount static folder to serve favicon and other assets
 app.mount("/static", StaticFiles(directory="server_fastapi/static"), name="static")
 # Include the webhook router

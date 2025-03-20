@@ -17,6 +17,7 @@ async def validate_remote_addr(request: Request):
 
 # Define allowed paths for the API
 ALLOWED_PATHS = [
+    "/static/psyduck.ico",
     "/static/psyduck.webp",
     "/static/psyduck-flex.gif",
     "/webhook",
@@ -26,6 +27,7 @@ ALLOWED_PATHS = [
     "/api/redis/get_raids_counterseries",
     "/api/redis/get_invasions_counterseries",
     "/api/redis/get_quest_counterseries",
+    "/api/redis/get_pokemon_timeseries"
 ]
 
 async def validate_path(request: Request):
