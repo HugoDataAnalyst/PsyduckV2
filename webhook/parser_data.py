@@ -145,7 +145,7 @@ async def process_raid_data(filtered_data):
         return structured_result
 
     except Exception as e:
-        logger.error(f"❌ Error processing Pokémon event data in parser_data: {e}")
+        logger.error(f"❌ Error processing Raid event data in parser_data: {e}")
         return None
 
 async def process_quest_data(filtered_data):
