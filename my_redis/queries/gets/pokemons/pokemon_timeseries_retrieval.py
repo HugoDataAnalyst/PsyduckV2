@@ -64,8 +64,11 @@ class PokemonTimeSeries(CounterTransformer):
         else:
             # For "all", use TS.MRANGE with filters.
             for metric, metric_label in metrics_info.items():
-                # Construct the filter expressions for clarity.
-                filter_exprs = [f"metric={metric_label}", f"area={self.area}"]
+                # If area is "global", we do not filter by area.
+                if self.area.lower() == "global":
+                    filter_exprs = [f"metric={metric_label}"]
+                else:
+                    filter_exprs = [f"metric={metric_label}", f"area={self.area}"]
                 logger.info(f"Querying TS.MRANGE for metric '{metric}' with filters: {filter_exprs}")
                 try:
                     ts_data = await client.execute_command(
