@@ -65,7 +65,7 @@ class PokemonTimeSeries(CounterTransformer):
             # For "all", use TS.MRANGE with filters.
             for metric, metric_label in metrics_info.items():
                 # Construct the filter expressions for clarity.
-                filter_exprs = [f"area={self.area}", f"metric={metric_label}"]
+                filter_exprs = [f"metric={metric_label}", f"area={self.area}"]
                 logger.info(f"Querying TS.MRANGE for metric '{metric}' with filters: {filter_exprs}")
                 try:
                     ts_data = await client.execute_command(
@@ -78,7 +78,7 @@ class PokemonTimeSeries(CounterTransformer):
                         total = sum(
                             float(point[1])
                             for series in ts_data
-                            for point in series[1]
+                            for point in series[2]
                         )
                         results[metric] = total
                     else:

@@ -60,9 +60,9 @@ async def add_raid_timeseries_event(data, pipe=None):
 
     # Determine metric increments
     inc_total      = 1  # Always add 1 for total
-    inc_costume    = 1 if raid_costume and 1 in raid_costume else 0
-    inc_exclusive  = 1 if raid_is_exclusive and 1 in raid_is_exclusive else 0
-    inc_ex_raid_eligible = 1 if raid_ex_raid_eligible and 1 in raid_ex_raid_eligible else 0
+    inc_costume = int(bool(raid_costume) and str(raid_costume) != "0")
+    inc_exclusive  = 1 if raid_is_exclusive == 1 else 0
+    inc_ex_raid_eligible = 1 if raid_ex_raid_eligible == 1 else 0
 
     updated_fields = {}
     if pipe:
