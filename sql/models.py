@@ -99,7 +99,7 @@ class AggregatedRaids(Model):
     raid_level = fields.SmallIntField()
     raid_form = fields.CharField(max_length=15)
     raid_team = fields.SmallIntField(default=0)
-    raid_costume = fields.SmallIntField(default=0)
+    raid_costume = fields.CharField(max_length=15)
     raid_is_exclusive = fields.SmallIntField(default=0)
     raid_ex_raid_eligible = fields.SmallIntField(default=0)
     area = fields.ForeignKeyField("models.AreaNames", related_name="aggregated_raids_stats")
