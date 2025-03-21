@@ -42,4 +42,9 @@ TAGS_METADATA = [
         "description": "Obtain Pokémon TimeSeries Data from Redis.",
         "summary": "Get Pokémon timeseries data.",
     },
+    {
+        "name": "Invasion TimeSeries",
+        "description": "Obtain Invasion TimeSeries Data from Redis.",
+        "summary": "Get Invasion timeseries data.",
+    },
 ]
