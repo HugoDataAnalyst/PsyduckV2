@@ -52,4 +52,9 @@ TAGS_METADATA = [
         "description": "Obtain Raid TimeSeries Data from Redis.",
         "summary": "Get Raid timeseries data.",
     },
+    {
+        "name": "Quest TimeSeries",
+        "description": "Obtain Quest TimeSeries Data from Redis.",
+        "summary": "Get Quest timeseries data.",
+    },
 ]
