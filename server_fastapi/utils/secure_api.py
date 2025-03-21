@@ -28,6 +28,7 @@ ALLOWED_PATHS = [
     "/api/redis/get_invasions_counterseries",
     "/api/redis/get_quest_counterseries",
     "/api/redis/get_pokemon_timeseries",
+    "/api/redis/get_raid_timeseries",
     "/api/redis/get_invasion_timeseries"
 ]
 

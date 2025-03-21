@@ -10,6 +10,7 @@ from my_redis.queries.gets.invasions.invasion_counter_retrieval import InvasionC
 from my_redis.queries.gets.quests.quest_counter_retrieval import QuestCounterRetrieval
 from my_redis.queries.gets.pokemons.pokemon_timeseries_retrieval import PokemonTimeSeries
 from my_redis.queries.gets.invasions.invasion_timeseries_retrieval import InvasionTimeSeries
+from my_redis.queries.gets.raids.raid_timeseries_retrieval import RaidTimeSeries
 
 router = APIRouter()
 
@@ -339,6 +340,60 @@ async def get_pokemon_timeseries(
 
 
 @router.get(
+    "/api/redis/get_raid_timeseries",
+    tags=["Raid TimeSeries"],
+    dependencies=[
+        Depends(secure_api.validate_path),
+        Depends(secure_api.validate_ip),
+    ]
+)
+async def get_raid_timeseries(
+    start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
+    end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
+    mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
+    response_format: str = Query("json", description="Response format: json or text"),
+    area: str = Query("global", description="Area to filter counters"),
+    raid_pokemon: str = Query("all", description="all or Pokémon ID"),
+    raid_form: str = Query("all", description="all or Form ID"),
+    raid_level: str = Query("all", description="all or Raid Level"),
+    raid_costume: str = Query("all", description="all or Costume ID"),
+    raid_is_exclusive: str = Query("all", description="all or 0=False or 1=True"),
+    raid_ex_raid_eligible: str = Query("all", description="all or 0=False or 1=True"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
+    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+):
+    # Validate secret parameters
+    await secure_api.check_secret_header_value(api_secret_header)
+    await secure_api.check_secret_key_value(api_secret_key)
+
+    # Normalize and validate inputs
+    mode = mode.lower()
+    if mode not in ["sum", "grouped", "surged"]:
+        raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be one of 'sum', 'grouped', or 'surged'.")
+    if response_format.lower() not in ["json", "text"]:
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+
+    try:
+        start_dt = filtering_keys.parse_time_input(start_time)
+        end_dt = filtering_keys.parse_time_input(end_time)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+
+    # Initialize the counter retrieval object
+    raid_timeseries = RaidTimeSeries(area, start_dt, end_dt, mode, raid_pokemon, raid_form, raid_level, raid_costume, raid_is_exclusive, raid_ex_raid_eligible)
+
+    # Retrieve data dynamically based on counter type and interval
+
+    result = await raid_timeseries.raid_retrieve_timeseries()
+
+    if response_format.lower() == "json":
+        return result
+    else:
+        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
+        return text_output
+
+
+@router.get(
     "/api/redis/get_invasion_timeseries",
     tags=["Invasion TimeSeries"],
     dependencies=[
@@ -346,7 +401,7 @@ async def get_pokemon_timeseries(
         Depends(secure_api.validate_ip),
     ]
 )
-async def get_pokemon_timeseries(
+async def get_invasion_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),

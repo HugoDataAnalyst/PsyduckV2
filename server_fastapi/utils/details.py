@@ -47,4 +47,9 @@ TAGS_METADATA = [
         "description": "Obtain Invasion TimeSeries Data from Redis.",
         "summary": "Get Invasion timeseries data.",
     },
+    {
+        "name": "Raid TimeSeries",
+        "description": "Obtain Raid TimeSeries Data from Redis.",
+        "summary": "Get Raid timeseries data.",
+    },
 ]
