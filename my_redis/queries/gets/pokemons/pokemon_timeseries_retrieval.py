@@ -17,15 +17,22 @@ class PokemonTimeSeries(CounterTransformer):
     async def retrieve_timeseries(self) -> dict:
         """
         Retrieve the Pokémon time series data for the given parameters.
-        If a specific pokemon_id (and form) is provided and area is not "global", TS.RANGE is used on each key.
-        Otherwise, TS.MRANGE is used with filters:
-        - When area is "global", we do not filter by area.
-        - When specific pokemon_id/form are provided (with a non-global area), filters could include those too.
+
+        For **sum** mode:
+          - If area is not "global" and both pokemon_id and form are specified,
+            TS.RANGE is used (which returns a flat list of [timestamp, value] pairs).
+          - Otherwise, TS.MRANGE is used with appropriate filters.
+
+        For **grouped** and **surged** modes, TS.MRANGE is always used so that
+        the same transformation approach (as in global mode) is applied even if
+        specific pokemon_id and/or form filters are provided.
+
         Supported metrics include: total, iv100, iv0, pvp_little, pvp_great, pvp_ultra, shiny.
-        The data is then transformed based on the chosen mode:
-        - "sum": Sum all values.
-        - "grouped": Group by minute (YYYYMMDDHHMM) or by "pokemon_id:form" if global.
-        - "surged": Group by hour (YYYYMMDDHH).
+        Transformation:
+          - "sum": Sum all values.
+          - "grouped": Group by minute (YYYYMMDDHHMM) or, when grouping globally,
+                        group by "pokemon_id:form".
+          - "surged": Group by hour (YYYYMMDDHH).
         """
         client = await redis_manager.check_redis_connection("retrieval_pool")
         if not client:
@@ -50,8 +57,10 @@ class PokemonTimeSeries(CounterTransformer):
 
         results = {}
 
-        # If area is not global and a specific pokemon_id and form are provided, use TS.RANGE.
-        if self.area.lower() != "global" and self.pokemon_id != "all" and self.form != "all":
+        # For sum mode, use TS.RANGE if non-global and both filters are specified.
+        # For grouped/surged mode always use TS.MRANGE.
+        if self.mode == "sum" and self.area.lower() != "global" and self.pokemon_id != "all" and self.form != "all":
+            # Use TS.RANGE – returns a flat list of [timestamp, value] pairs.
             for metric, metric_label in metrics_info.items():
                 key = f"ts:pokemon_totals:{metric}:{self.area}:{self.pokemon_id}:{self.form}"
                 logger.info(f"Querying key: {key}")
@@ -64,13 +73,13 @@ class PokemonTimeSeries(CounterTransformer):
                     logger.error(f"❌ Error retrieving TS data for key {key}: {e}")
                     results[metric] = []
         else:
-            # Otherwise, use TS.MRANGE with filters.
+            # Use TS.MRANGE with filters for both global and specific cases.
             for metric, metric_label in metrics_info.items():
                 filter_exprs = [f"metric={metric_label}"]
                 # Only add area filter if area is not global.
                 if self.area.lower() != "global":
                     filter_exprs.append(f"area={self.area}")
-                # If a specific pokemon is requested, add those filters.
+                # Add filters if provided.
                 if self.pokemon_id != "all":
                     filter_exprs.append(f"pokemon_id={self.pokemon_id}")
                 if self.form != "all":
@@ -103,74 +112,67 @@ class PokemonTimeSeries(CounterTransformer):
         transformed = {}
         if self.mode == "sum":
             for metric, data in results.items():
-                if isinstance(data, list):
-                    total = sum(float(point[1]) for point in data)
+                if isinstance(data, list) and data:
+                    # If using TS.RANGE, data is a flat list of [timestamp, value] pairs.
+                    if isinstance(data[0], list) and len(data[0]) == 2:
+                        total = sum(float(point[1]) for point in data)
+                    # If using TS.MRANGE, data is a list of series with structure: [key, points, {labels}]
+                    elif isinstance(data[0], list) and len(data[0]) == 3:
+                        total = sum(
+                            float(point[1])
+                            for series in data
+                            for point in series[2]
+                        )
+                    else:
+                        total = 0
                     transformed[metric] = total
                 else:
                     transformed[metric] = data
-        elif self.mode == "grouped":
-            grouped_data = {}
-            if self.pokemon_id == "all" and self.form == "all":
-                # When grouping globally, extract identifier (pokemon_id:form) from each series key.
-                for metric, series_list in results.items():
-                    group = {}
-                    for series in series_list:
-                        # Expected series format: [ key, <ignored>, points ]
-                        key = series[0]
-                        parts = key.split(":")
-                        # Expected key format: ts:pokemon_totals:{metric}:{area}:{pokemon_id}:{form}
-                        if len(parts) >= 6:
-                            group_key = f"{parts[4]}:{parts[5]}"
-                        else:
-                            group_key = key
-                        # Sum all values for this series (points are at index 2)
-                        total_value = sum(float(point[1]) for point in series[2])
-                        group[group_key] = group.get(group_key, 0) + total_value
 
-                    # Sort the group by pokemon_id (first part) then by form (second part) numerically.
+        elif self.mode == "grouped":
+            # For grouped mode, always use the TS.MRANGE structure and group by identifier if available.
+            grouped_data = {}
+            for metric, series_list in results.items():
+                group = {}
+                # Expect series_list to be a list of series (each series: [key, points, {labels}])
+                for series in series_list:
+                    key = series[0]
+                    parts = key.split(":")
+                    # Expected key format: ts:pokemon_totals:{metric}:{area}:{pokemon_id}:{form}
+                    if len(parts) >= 6:
+                        group_key = f"{parts[4]}:{parts[5]}"
+                    else:
+                        group_key = key
+                    total_value = sum(float(point[1]) for point in series[2])
+                    group[group_key] = group.get(group_key, 0) + total_value
+                # Sort the group by pokemon_id then by form numerically.
+                try:
                     sorted_group = dict(sorted(
                         group.items(),
                         key=lambda kv: (int(kv[0].split(":")[0]), int(kv[0].split(":")[1]))
                     ))
-                    grouped_data[metric] = sorted_group
-                transformed = grouped_data
-            else:
-                # Otherwise group by minute.
-                for metric, data in results.items():
-                    grouped = {}
-                    for ts_val in data:
-                        ts_ms, val = ts_val
-                        dt = datetime.fromtimestamp(int(ts_ms) / 1000)
-                        minute_str = dt.strftime("%Y%m%d%H%M")
-                        grouped[minute_str] = grouped.get(minute_str, 0) + float(val)
-                    grouped_data[metric] = grouped
-                transformed = grouped_data
+                except Exception as e:
+                    logger.error(f"❌ Error sorting grouped data: {e}")
+                    sorted_group = group
+                # Filter out any keys with zero total.
+                filtered_group = {k: v for k, v in sorted_group.items() if v != 0}
+                grouped_data[metric] = filtered_group
+            transformed = grouped_data
+
         elif self.mode == "surged":
+            # For surged mode, always use the TS.MRANGE structure.
             surged_data = {}
-            # When using TS.MRANGE (i.e. area is global) the result is a list of series.
-            if self.area.lower() == "global":
-                for metric, series_list in results.items():
-                    hour_group = {}
-                    for series in series_list:
-                        # series is in the form [ key, [ [timestamp, value], ... ], { labels } ]
-                        for point in series[2]:
-                            ts, val = point
-                            dt = datetime.fromtimestamp(int(ts) / 1000)
-                            hour_key = dt.strftime("%H")
-                            hour_group[hour_key] = hour_group.get(hour_key, 0) + float(val)
-                    surged_data[metric] = dict(sorted(hour_group.items(), key=lambda x: int(x[0])))
-                transformed = surged_data
-            else:
-                # Specific key mode (TS.RANGE): data is a list of [timestamp, value] pairs.
-                for metric, data in results.items():
-                    hour_group = {}
-                    for ts_val in data:
-                        ts, val = ts_val
+            for metric, series_list in results.items():
+                hour_group = {}
+                for series in series_list:
+                    for point in series[2]:
+                        ts, val = point
                         dt = datetime.fromtimestamp(int(ts) / 1000)
+                        # Group by hour in YYYYMMDDHH format.
                         hour_key = dt.strftime("%H")
                         hour_group[hour_key] = hour_group.get(hour_key, 0) + float(val)
-                    surged_data[metric] = dict(sorted(hour_group.items(), key=lambda x: int(x[0])))
-                transformed = surged_data
+                surged_data[metric] = dict(sorted(hour_group.items(), key=lambda x: int(x[0][-2:])))
+            transformed = surged_data
 
         logger.info(f"Transformed results: {transformed}")
         return {"mode": self.mode, "data": transformed}
