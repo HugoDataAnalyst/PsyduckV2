@@ -17,12 +17,14 @@ class PokemonTimeSeries(CounterTransformer):
     async def retrieve_timeseries(self) -> dict:
         """
         Retrieve the Pokémon time series data for the given parameters.
-        If a specific pokemon_id (and form) is provided, TS.RANGE is used on each metric key.
-        If "all" is provided, TS.MRANGE is used with filters on the area and metric label.
+        If a specific pokemon_id (and form) is provided, TS.RANGE is used on each key.
+        If "all" is provided, TS.MRANGE is used with filters on the metric and area (unless area is global).
         Supported metrics include: total, iv100, iv0, pvp_little, pvp_great, pvp_ultra, shiny.
         The data is then transformed based on the chosen mode:
           - "sum": Sum all values.
-          - "grouped": Group by minute (YYYYMMDDHHMM).
+          - "grouped":
+              • When a specific Pokémon is requested, group by minute (YYYYMMDDHHMM).
+              • When pokemon_id and form are "all", group by the identifier extracted from the key (i.e. "pokemon_id:form").
           - "surged": Group by hour (YYYYMMDDHH).
         """
         client = await redis_manager.check_redis_connection("retrieval_pool")
@@ -30,7 +32,7 @@ class PokemonTimeSeries(CounterTransformer):
             logger.error("❌ Redis connection not available for TimeSeries retrieval.")
             return {"mode": self.mode, "data": {}}
 
-        # Define metric information:
+        # Define metric information.
         metrics_info = {
             "total": "pokemon_total",
             "iv100": "pokemon_iv100",
@@ -41,14 +43,14 @@ class PokemonTimeSeries(CounterTransformer):
             "shiny": "pokemon_shiny",
         }
 
-        # Convert start and end datetimes to milliseconds for TS.RANGE.
+        # Convert start and end datetimes to milliseconds.
         start_ms = int(self.start.timestamp() * 1000)
         end_ms = int(self.end.timestamp() * 1000)
         logger.info(f"Querying from {start_ms} to {end_ms} for area '{self.area}' using mode '{self.mode}'")
 
         results = {}
 
-        # If a specific pokemon_id and form are provided, use TS.RANGE on each key.
+        # When a specific pokemon_id and form are provided, use TS.RANGE on each key.
         if self.pokemon_id != "all" and self.form != "all":
             for metric, metric_label in metrics_info.items():
                 key = f"ts:pokemon_totals:{metric}:{self.area}:{self.pokemon_id}:{self.form}"
@@ -64,7 +66,7 @@ class PokemonTimeSeries(CounterTransformer):
         else:
             # For "all", use TS.MRANGE with filters.
             for metric, metric_label in metrics_info.items():
-                # If area is "global", we do not filter by area.
+                # If area is "global", do not filter by area.
                 if self.area.lower() == "global":
                     filter_exprs = [f"metric={metric_label}"]
                 else:
@@ -85,8 +87,8 @@ class PokemonTimeSeries(CounterTransformer):
                         )
                         results[metric] = total
                     else:
-                        merged = self._merge_mrange_results(ts_data)
-                        results[metric] = merged
+                        # Keep the raw series for further transformation.
+                        results[metric] = ts_data
                     logger.info(f"🔑 Retrieved TS.MRANGE data for metric {metric}")
                 except Exception as e:
                     logger.error(f"❌ Error retrieving TS.MRANGE data for metric {metric}: {e}")
@@ -103,28 +105,69 @@ class PokemonTimeSeries(CounterTransformer):
                     transformed[metric] = data
         elif self.mode == "grouped":
             grouped_data = {}
-            for metric, data in results.items():
-                grouped = {}
-                for ts_val in data:
-                    ts_ms, val = ts_val
-                    dt = datetime.fromtimestamp(int(ts_ms) / 1000)
-                    minute_str = dt.strftime("%Y%m%d%H%M")
-                    grouped[minute_str] = grouped.get(minute_str, 0) + float(val)
-                grouped_data[metric] = grouped
-            transformed = grouped_data
+            # When grouping "globally" (pokemon_id and form are "all") we extract these from each series key.
+            if self.pokemon_id == "all" and self.form == "all":
+                for metric, series_list in results.items():
+                    group = {}
+                    for series in series_list:
+                        # Expected series format: [ key, <ignored>, points ]
+                        key = series[0]
+                        parts = key.split(":")
+                        # Expected key format: ts:pokemon_totals:{metric}:{area}:{pokemon_id}:{form}
+                        if len(parts) >= 6:
+                            group_key = f"{parts[4]}:{parts[5]}"
+                        else:
+                            group_key = key
+                        # Sum all values for this series (points are at index 2)
+                        total_value = sum(float(point[1]) for point in series[2])
+                        group[group_key] = group.get(group_key, 0) + total_value
+
+                    # Sort the group by pokemon_id (first part) then by form (second part) numerically.
+                    sorted_group = dict(sorted(
+                        group.items(),
+                        key=lambda kv: (int(kv[0].split(":")[0]), int(kv[0].split(":")[1]))
+                    ))
+                    grouped_data[metric] = sorted_group
+                transformed = grouped_data
+            else:
+                # Otherwise group by minute.
+                for metric, data in results.items():
+                    grouped = {}
+                    for ts_val in data:
+                        ts_ms, val = ts_val
+                        dt = datetime.fromtimestamp(int(ts_ms) / 1000)
+                        minute_str = dt.strftime("%Y%m%d%H%M")
+                        grouped[minute_str] = grouped.get(minute_str, 0) + float(val)
+                    grouped_data[metric] = grouped
+                transformed = grouped_data
         elif self.mode == "surged":
             surged_data = {}
-            for metric, data in results.items():
-                grouped = {}
-                for ts_val in data:
-                    ts_ms, val = ts_val
-                    dt = datetime.fromtimestamp(int(ts_ms) / 1000)
-                    hour_str = dt.strftime("%Y%m%d%H")
-                    grouped[hour_str] = grouped.get(hour_str, 0) + float(val)
-                surged_data[metric] = grouped
-            transformed = surged_data
-        else:
-            transformed = results
+            # Global mode (using TS.MRANGE): results is a dict where each metric contains a list of series.
+            if self.pokemon_id == "all" and self.form == "all":
+                for metric, series_list in results.items():
+                    hour_group = {}
+                    for series in series_list:
+                        # series is in the form [ key, ignored, points ]
+                        for point in series[2]:
+                            ts, val = point
+                            dt = datetime.fromtimestamp(int(ts) / 1000)
+                            # Only extract the hour (00 - 23)
+                            hour_key = dt.strftime("%H")
+                            hour_group[hour_key] = hour_group.get(hour_key, 0) + float(val)
+                    # Sort keys numerically (from "00" to "23")
+                    surged_data[metric] = dict(sorted(hour_group.items(), key=lambda x: int(x[0])))
+                transformed = surged_data
+            else:
+                # Specific key mode (using TS.RANGE): results is a list of [timestamp, value] pairs.
+                for metric, data in results.items():
+                    hour_group = {}
+                    for ts_val in data:
+                        ts, val = ts_val
+                        dt = datetime.fromtimestamp(int(ts) / 1000)
+                        hour_key = dt.strftime("%H")
+                        hour_group[hour_key] = hour_group.get(hour_key, 0) + float(val)
+                    surged_data[metric] = dict(sorted(hour_group.items(), key=lambda x: int(x[0])))
+                transformed = surged_data
 
         logger.info(f"Transformed results: {transformed}")
         return {"mode": self.mode, "data": transformed}
