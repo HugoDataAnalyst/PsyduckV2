@@ -8,8 +8,7 @@ redis_manager = RedisManager()
 
 class RaidTimeSeries(CounterTransformer):
     def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
-                 raid_pokemon: str = "all", raid_form: str = "all", raid_level: str = "all",
-                 raid_costume: str = "all", raid_is_exclusive: str = "all", raid_ex_raid_eligible: str = "all"):
+                 raid_pokemon: str = "all", raid_form: str = "all", raid_level: str = "all"):
         self.area = area
         self.start = start
         self.end = end
@@ -17,9 +16,7 @@ class RaidTimeSeries(CounterTransformer):
         self.raid_pokemon = raid_pokemon
         self.raid_form = raid_form
         self.raid_level = raid_level
-        self.raid_costume = raid_costume
-        self.raid_is_exclusive = raid_is_exclusive
-        self.raid_ex_raid_eligible = raid_ex_raid_eligible
+
 
     async def raid_retrieve_timeseries(self) -> dict:
         """

@@ -356,9 +356,6 @@ async def get_raid_timeseries(
     raid_pokemon: str = Query("all", description="all or Pokémon ID"),
     raid_form: str = Query("all", description="all or Form ID"),
     raid_level: str = Query("all", description="all or Raid Level"),
-    raid_costume: str = Query("all", description="all or Costume ID"),
-    raid_is_exclusive: str = Query("all", description="all or 0=False or 1=True"),
-    raid_ex_raid_eligible: str = Query("all", description="all or 0=False or 1=True"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
     api_secret_key: Optional[str] = secure_api.get_secret_key_param()
 ):
@@ -380,7 +377,7 @@ async def get_raid_timeseries(
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
     # Initialize the counter retrieval object
-    raid_timeseries = RaidTimeSeries(area, start_dt, end_dt, mode, raid_pokemon, raid_form, raid_level, raid_costume, raid_is_exclusive, raid_ex_raid_eligible)
+    raid_timeseries = RaidTimeSeries(area, start_dt, end_dt, mode, raid_pokemon, raid_form, raid_level)
 
     # Retrieve data dynamically based on counter type and interval
 
