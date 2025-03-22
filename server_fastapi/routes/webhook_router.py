@@ -1,5 +1,6 @@
 # webhook_routes.py
 import asyncio
+import time
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse
 from utils.logger import logger
@@ -83,9 +84,15 @@ async def receive_webhook(request: Request):
     async def process_event_group(event_type, events):
         logger.info(f"🔄 Processing {len(events)} {event_type} events...")
         results[event_type] = []
+
+        start_time = time.perf_counter()
+
         for event in events:  # Sequential processing per event type
             result = await process_single_event(event)
             results[event_type].append(result)
+
+        elapsed = time.perf_counter() - start_time  # End stopwatch
+        logger.info(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")
 
     # Run different event types **concurrently**
     await asyncio.gather(*[process_event_group(event_type, events) for event_type, events in grouped_events.items()])
