@@ -1,6 +1,7 @@
 import config as AppConfig
 from datetime import datetime
 from server_fastapi.utils import secure_api
+from sql.utils.time_parser import parse_time_input
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from typing import Optional
 from my_redis.utils import filtering_keys
@@ -12,6 +13,10 @@ from my_redis.queries.gets.pokemons.pokemon_timeseries_retrieval import PokemonT
 from my_redis.queries.gets.invasions.invasion_timeseries_retrieval import InvasionTimeSeries
 from my_redis.queries.gets.raids.raid_timeseries_retrieval import RaidTimeSeries
 from my_redis.queries.gets.quests.quest_timeseries_retrieval import QuestTimeSeries
+from sql.queries.pokemon_gets import PokemonSQLQueries
+#from sql.queries.raid_gets import RaidSQLQueries
+#from sql.queries.invasion_gets import InvasionSQLQueries
+#from sql.queries.quest_gets import QuestSQLQueries
 
 router = APIRouter()
 
@@ -303,7 +308,7 @@ async def get_pokemon_timeseries(
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter counters"),
+    area: str = Query("global", description="Area to filter"),
     pokemon_id: str = Query("all", description="Pokémon ID"),
     form: str = Query("all", description="Pokémon form"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
@@ -353,7 +358,7 @@ async def get_raid_timeseries(
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter counters"),
+    area: str = Query("global", description="Area to filter"),
     raid_pokemon: str = Query("all", description="all or Pokémon ID"),
     raid_form: str = Query("all", description="all or Form ID"),
     raid_level: str = Query("all", description="all or Raid Level"),
@@ -404,7 +409,7 @@ async def get_invasion_timeseries(
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter counters"),
+    area: str = Query("global", description="Area to filter"),
     display: str = Query("all", description="all or Invasion Display ID"),
     grunt: str = Query("all", description="all or Grunt ID"),
     confirmed: str = Query("all", description="0 or 1 (confirmed or not details)."),
@@ -455,7 +460,7 @@ async def get_quest_timeseries(
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter counters"),
+    area: str = Query("global", description="Area to filter"),
     quest_mode: str = Query("all", description="all or AR or NORMAL"),
     quest_type: str = Query("all", description="all or Quest Type ID"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
@@ -484,6 +489,54 @@ async def get_quest_timeseries(
     # Retrieve data dynamically based on counter type and interval
 
     result = await quest_timeseries.quest_retrieve_timeseries()
+
+    if response_format.lower() == "json":
+        return result
+    else:
+        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
+        return text_output
+
+# SQL section
+@router.get(
+    "/api/sql/get_pokemon_heatmap_data",
+    tags=["Pokémon HeatMap Data"],
+    dependencies=[
+        Depends(secure_api.validate_path),
+        Depends(secure_api.validate_ip),
+    ]
+)
+async def get_pokemon_heatmap_data(
+    start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
+    end_time: str = Query(..., description="End time as 202504 (2025 year month 04)"),
+    response_format: str = Query("json", description="Response format: json or text"),
+    area: str = Query("global", description="Area to filter"),
+    pokemon_id: str = Query("all", description="all or Pokémon ID"),
+    form: str = Query("all", description="all or Pokémon Form ID"),
+    iv_bucket: str = Query("all", description="all or IV specific bucket(0, 25, 50, 75, 90, 100), choose one."),
+    limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
+    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+):
+    # Validate secret parameters
+    await secure_api.check_secret_header_value(api_secret_header)
+    await secure_api.check_secret_key_value(api_secret_key)
+
+    # Normalize and validate inputs
+    if response_format.lower() not in ["json", "text"]:
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+
+    try:
+        start_dt = parse_time_input(start_time)
+        end_dt = parse_time_input(end_time)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"❌ Invalid time format: {e}")
+
+    # Initialize the counter retrieval object
+    pokemon_heatmap = PokemonSQLQueries(area, start_dt, end_dt, pokemon_id, form, iv_bucket, limit)
+
+    # Retrieve data dynamically based on counter type and interval
+
+    result = await pokemon_heatmap.pokemon_sql_heatmap()
 
     if response_format.lower() == "json":
         return result

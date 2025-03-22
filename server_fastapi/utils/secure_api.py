@@ -31,6 +31,7 @@ ALLOWED_PATHS = [
     "/api/redis/get_raid_timeseries",
     "/api/redis/get_invasion_timeseries",
     "/api/redis/get_quest_timeseries",
+    "/api/sql/get_pokemon_heatmap_data",
 ]
 
 async def validate_path(request: Request):

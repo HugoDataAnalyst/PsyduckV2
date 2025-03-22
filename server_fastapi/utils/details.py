@@ -57,4 +57,9 @@ TAGS_METADATA = [
         "description": "Obtain Quest TimeSeries Data from Redis.",
         "summary": "Get Quest timeseries data.",
     },
+    {
+        "name": "Pokémon HeatMap Data",
+        "description": "Obtain Pokémon HeatMap Data from SQL.",
+        "summary": "Get Pokémon HeatMap data.",
+    },
 ]
