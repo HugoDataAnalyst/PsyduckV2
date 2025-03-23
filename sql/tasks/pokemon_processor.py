@@ -6,100 +6,10 @@ from datetime import datetime
 
 class PokemonSQLProcessor(PokemonUpdatesQueries):
     @classmethod
-    async def bulk_upsert_aggregated(cls, buffered_events: list) -> int:
-        success_count = 0
-
-        # Step 1: Preload all known spawnpoints from the DB
-        existing_spawnpoints = await cls.preload_spawnpoints()
-        missing_spawnpoints = {}
-
-        # Step 2: First pass to collect known vs unknown spawnpoints
-        entries_to_insert = []
-        deferred_events = []
-
-        for event in buffered_events:
-            try:
-                spawnpoint_hex = event.get("spawnpoint")
-                if not spawnpoint_hex:
-                    continue
-
-                spawnpoint_id = int(spawnpoint_hex, 16)
-                latitude = event.get("latitude")
-                longitude = event.get("longitude")
-                pokemon_id = event.get("pokemon_id")
-                form = event.get("form", 0)
-                raw_iv = event.get("iv")
-                area_id = event.get("area_id")
-                first_seen_timestamp = event.get("first_seen")
-
-                if None in [latitude, longitude, pokemon_id, raw_iv, area_id, first_seen_timestamp]:
-                    continue
-
-                bucket_iv = get_iv_bucket(raw_iv)
-                if bucket_iv is None:
-                    continue
-
-                dt = datetime.fromtimestamp(first_seen_timestamp)
-                month_year = int(dt.strftime("%y%m"))
-
-                if spawnpoint_id not in existing_spawnpoints:
-                    missing_spawnpoints[spawnpoint_id] = (latitude, longitude)
-                    deferred_events.append((spawnpoint_id, latitude, longitude, pokemon_id, form, bucket_iv, area_id, month_year))
-                    continue
-
-                entries_to_insert.append((existing_spawnpoints[spawnpoint_id], pokemon_id, form, bucket_iv, area_id, month_year))
-            except Exception as e:
-                logger.error(f"❌ Failed to pre-process Pokémon event: {e}")
-
-        # Step 3: Insert missing spawnpoints and update cache
-        if missing_spawnpoints:
-            inserted = await cls.bulk_insert_spawnpoints(missing_spawnpoints)
-            existing_spawnpoints.update(inserted)
-        else:
-            inserted = {}
-
-        # Step 4: Retry deferred entries with newly inserted spawnpoints
-        for spawnpoint_id, lat, lon, pid, form, bucket_iv, area_id, month_year in deferred_events:
-            if spawnpoint_id not in existing_spawnpoints:
-                continue
-            entries_to_insert.append((existing_spawnpoints[spawnpoint_id], pid, form, bucket_iv, area_id, month_year))
-
-        logger.info(f"🧩 {len(missing_spawnpoints)} missing spawnpoints attempted. Got back {len(inserted)} new entries.")
-
-        # Step 5: Upsert AggregatedPokemonIVMonthly
-        logger.info(f"📥 Ready to insert {len(entries_to_insert)} Aggregated rows after processing {len(buffered_events)} events.")
-
-        if len(entries_to_insert) == 0:
-            logger.warning("⚠️ No entries to insert. All events may have been skipped or invalid.")
-            return 0
-
-        for spawn_fk_id, pid, form, bucket_iv, area_id, month_year in entries_to_insert:
-            try:
-                obj, created = await AggregatedPokemonIVMonthly.get_or_create(
-                    spawnpoint_id=spawn_fk_id,
-                    pokemon_id=pid,
-                    form=form,
-                    iv=bucket_iv,
-                    area_id=area_id,
-                    month_year=month_year,
-                    defaults={"total_count": 1}
-                )
-                if not created:
-                    obj.total_count += 1
-                    await obj.save()
-                    logger.debug(f"🔁 Updated: {pid} | {form} | IV {bucket_iv} | Area {area_id}")
-                else:
-                    logger.debug(f"🆕 Created: {pid} | {form} | IV {bucket_iv} | Area {area_id}")
-                success_count += 1
-            except Exception as e:
-                logger.error(f"❌ Failed to insert Aggregated row: {e}")
-
-        return success_count
-
-    @classmethod
     async def bulk_upsert_aggregated_aggregated(cls, aggregated_data: dict) -> int:
         total_upsert_count = 0
         records = []
+        spawnpoints_to_insert = {}
         # Step 1: Parse the aggregated data into a list of records.
         for composite_key, count in aggregated_data.items():
             try:
@@ -110,8 +20,9 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
                 (spawnpoint_hex, pokemon_id_str, form_str, bucket_iv_str,
                 area_id_str, month_year_str, latitude_str, longitude_str) = parts
 
+                spawnpoint_value = int(spawnpoint_hex, 16)
                 record = {
-                    "spawnpoint": int(spawnpoint_hex, 16),  # Use "spawnpoint" as the field name.
+                    "spawnpoint": spawnpoint_value,  # Use "spawnpoint" as the field name.
                     "pokemon_id": int(pokemon_id_str),
                     "form": int(form_str) if form_str.isdigit() else form_str,
                     "iv": int(bucket_iv_str),
@@ -120,12 +31,20 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
                     "total_count": count,
                 }
                 records.append(record)
+                # Build mapping for spawnpoints to insert.
+                if spawnpoint_value not in spawnpoints_to_insert:
+                    spawnpoints_to_insert[spawnpoint_value] = (float(latitude_str), float(longitude_str))
             except Exception as e:
                 logger.error(f"❌ Failed to pre-process aggregated event {composite_key}: {e}", exc_info=True)
 
         if not records:
             logger.warning("⚠️ No valid aggregated records to upsert.")
             return 0
+
+        #  Bulk Insert the spawnpoints.
+        await cls.bulk_insert_spawnpoints(spawnpoints_to_insert)
+        logger.info(f"🔂 ✅ Bulk inserted spawnpoints for {len(spawnpoints_to_insert)} unique spawnpoint values.")
+
 
         # Step 2: Build a set of unique keys (tuples) for each record.
         unique_keys = {
@@ -185,55 +104,23 @@ class PokemonSQLProcessor(PokemonUpdatesQueries):
 
 
     @staticmethod
-    async def preload_spawnpoints() -> dict:
-        spawnpoints = await Spawnpoint.all()
-        return {s.spawnpoint: s.id for s in spawnpoints}
-
-    @staticmethod
     async def bulk_insert_spawnpoints(spawn_dict: dict) -> dict:
-        inserted = {}
         try:
-            objs = [Spawnpoint(spawnpoint=spid, latitude=lat, longitude=lon)
-                    for spid, (lat, lon) in spawn_dict.items()]
+            objs = [
+                Spawnpoint(spawnpoint=spid, latitude=lat, longitude=lon)
+                for spid, (lat, lon) in spawn_dict.items()
+            ]
             await Spawnpoint.bulk_create(objs, ignore_conflicts=True)
-            # Reload inserted IDs
-            refreshed = await Spawnpoint.filter(spawnpoint__in=spawn_dict.keys())
-            for sp in refreshed:
-                inserted[sp.spawnpoint] = sp.id
             logger.info(f"🆕 Attempted to insert {len(objs)} new spawnpoints (ignore_conflicts=True).")
         except Exception as e:
-            logger.error(f"❌ Error during bulk insert of spawnpoints: {e}")
-        return inserted
+            # If the error is due to duplicate entries, ignore it.
+            if "Duplicate entry" in str(e):
+                logger.debug("Duplicate entry error ignored during bulk insert of spawnpoints.")
+            else:
+                logger.error(f"❌ Error during bulk insert of spawnpoints: {e}")
+        # Return the original mapping, as the spawnpoint value is used directly.
+        return spawn_dict
 
-    @classmethod
-    async def bulk_upsert_shiny_rates(cls, buffered_events: list) -> int:
-        # Existing non-aggregated approach for shiny rates remains available
-        success_count = 0
-        for event in buffered_events:
-            try:
-                username = event.get("username")
-                pokemon_id = event.get("pokemon_id")
-                form = event.get("form", 0)
-                shiny = int(event.get("shiny", 0))
-                area_id = event.get("area_id")
-                first_seen_timestamp = event.get("first_seen")
-                if None in [username, pokemon_id, area_id, first_seen_timestamp]:
-                    continue
-
-                result = await cls.upsert_shiny_username_rate(
-                    username=username,
-                    pokemon_id=pokemon_id,
-                    form=form,
-                    shiny=shiny,
-                    area_id=area_id,
-                    first_seen_timestamp=first_seen_timestamp,
-                    increment=1
-                )
-                if result:
-                    success_count += 1
-            except Exception as e:
-                logger.error(f"❌ Failed to upsert shiny rate event: {e}")
-        return success_count
 
     @classmethod
     async def bulk_upsert_shiny_rates_aggregated(cls, aggregated_data: dict) -> int:
