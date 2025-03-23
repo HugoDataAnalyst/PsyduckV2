@@ -51,5 +51,9 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
             level=log_lvl,
             format=log_fmt
         )
+
+    # Set aiomysql logging to only show errors
+    import logging
+    logging.getLogger("aiomysql").setLevel(logging.ERROR)
 # ✅ Make logger globally available
 __all__ = ["logger", "setup_logging"]

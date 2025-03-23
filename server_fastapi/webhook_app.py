@@ -13,7 +13,8 @@ from server_fastapi.utils import (
     secure_api,
 )
 from fastapi.openapi.docs import get_swagger_ui_html
-
+from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
+from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
 
 redis_manager = RedisManager()
 
@@ -70,6 +71,11 @@ async def lifespan(app: FastAPI):
         await retry_call(koji_instance.refresh_geofences)
     # Start the background refresh task
     asyncio.create_task(safe_refresh())
+
+    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=60)
+    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=60)
+    asyncio.create_task(pokemon_buffer_flusher.flush_loop())
+    asyncio.create_task(shiny_rate_buffer_flusher.flush_loop())
 
     yield
     logger.info("👋 Shutting down Webhook Receiver application.")
