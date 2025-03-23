@@ -14,7 +14,7 @@ class ShinyRateBufferFlusher:
         logger.info(f"⏳ Starting Aggregated Shiny Rate buffer flusher every {self.flush_interval}s")
         while True:
             try:
-                redis = await RedisManager.check_redis_connection("pokemon_pool")
+                redis = await RedisManager.check_redis_connection("flush_shiny_pool")
                 if not redis:
                     logger.warning("⚠️ Redis not ready. Skipping flush cycle.")
                     await asyncio.sleep(self.flush_interval)

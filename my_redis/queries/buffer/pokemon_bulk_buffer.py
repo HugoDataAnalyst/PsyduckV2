@@ -50,35 +50,54 @@ class PokemonIVRedisBuffer:
     @classmethod
     async def flush_if_ready(cls, redis_client: Redis):
         try:
-            # Check if there's any data to flush
+            # Check if there's any data to flush.
             if not await redis_client.exists(cls.redis_key):
                 logger.debug("📭 No aggregated data to flush.")
                 return
 
-            # Atomically rename the current hash to a temporary key.
-            temp_key = cls.redis_key + ":flushing"
-            await redis_client.rename(cls.redis_key, temp_key)
-            logger.info(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
-
-            # Retrieve all aggregated data from the temporary key.
-            aggregated_data = await redis_client.hgetall(temp_key)
-            if not aggregated_data:
-                logger.debug("📭 No aggregated data to flush from temporary key.")
+            # Try to acquire a lock for flushing.
+            lock = redis_client.lock(f"{cls.redis_key}:lock", timeout=60)
+            if not await lock.acquire(blocking=False):
+                logger.warning("⏳ Another flush is already in progress. Exiting flush.")
                 return
 
-            # Convert the data from bytes to proper types.
-            formatted_data = { (key.decode("utf-8") if isinstance(key, bytes) else key): int(count)
-                            for key, count in aggregated_data.items() }
-            logger.info(f"📤 Flushing {len(formatted_data)} unique aggregated events from temporary key.")
+            try:
+                # Atomically rename the current hash to a temporary key.
+                temp_key = cls.redis_key + ":flushing"
+                try:
+                    await redis_client.rename(cls.redis_key, temp_key)
+                    logger.info(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
+                except Exception as rename_err:
+                    if "no such key" in str(rename_err).lower():
+                        logger.debug("No such key found during rename. Nothing to flush.")
+                        return
+                    else:
+                        raise
 
-            # Upsert the aggregated data into SQL.
-            inserted_count = await PokemonSQLProcessor.bulk_upsert_aggregated_aggregated(formatted_data)
-            logger.success(f"📬 Inserted {inserted_count} aggregated Pokémon IV rows.")
+                # Retrieve all aggregated data from the temporary key.
+                aggregated_data = await redis_client.hgetall(temp_key)
+                if not aggregated_data:
+                    logger.debug("📭 No aggregated data to flush from temporary key.")
+                    return
 
-            # Delete the temporary key.
-            await redis_client.delete(temp_key)
+                # Convert the data from bytes to proper types.
+                formatted_data = {
+                    (key.decode("utf-8") if isinstance(key, bytes) else key): int(count)
+                    for key, count in aggregated_data.items()
+                }
+                logger.info(f"📤 Flushing {len(formatted_data)} unique aggregated events from temporary key.")
+
+                # Upsert the aggregated data into SQL.
+                inserted_count = await PokemonSQLProcessor.bulk_upsert_aggregated_aggregated(formatted_data)
+                logger.success(f"📬 Inserted {inserted_count} aggregated Pokémon IV rows.")
+
+                # Delete the temporary key.
+                await redis_client.delete(temp_key)
+            finally:
+                await lock.release()
         except Exception as e:
             logger.error(f"❌ Error during aggregated buffer flush: {e}", exc_info=True)
+
 
 
 class ShinyRateRedisBuffer:
@@ -130,8 +149,15 @@ class ShinyRateRedisBuffer:
 
             # Atomically rename the current hash to a temporary key.
             temp_key = cls.redis_key + ":flushing"
-            await redis_client.rename(cls.redis_key, temp_key)
-            logger.info(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
+            try:
+                await redis_client.rename(cls.redis_key, temp_key)
+                logger.info(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
+            except Exception as rename_err:
+                if "no such key" in str(rename_err).lower():
+                    logger.debug("No such key found during rename. Nothing to flush.")
+                    return
+                else:
+                    raise
 
             # Retrieve all aggregated data from the temporary key.
             aggregated_data = await redis_client.hgetall(temp_key)

@@ -14,7 +14,7 @@ class PokemonIVBufferFlusher:
         logger.info(f"⏳ Starting Pokémon IV aggregated buffer flusher every {self.flush_interval}s")
         while True:
             try:
-                redis = await RedisManager.check_redis_connection("pokemon_pool")
+                redis = await RedisManager.check_redis_connection("flush_heatmap_pool")
                 if not redis:
                     logger.warning("⚠️ Redis not ready. Skipping flush cycle.")
                     await asyncio.sleep(self.flush_interval)

@@ -17,6 +17,8 @@ class RedisManager:
             "invasion_pool": AppConfig.redis_invasion_pool,
             "koji_geofence_pool": AppConfig.redis_geofence_pool,
             "retrieval_pool": AppConfig.redis_retrieval_pool,
+            "flush_heatmap_pool": AppConfig.redis_heatmap_pool,
+            "flush_shiny_pool": AppConfig.redis_shiny_pool,
         }
         max_conn = pool_config.get(pool_name, 5)  # Default to 5 connections if not found
         logger.success(f"🔎 Using {max_conn} connections for {pool_name} pool.")
