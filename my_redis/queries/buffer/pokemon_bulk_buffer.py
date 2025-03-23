@@ -1,4 +1,5 @@
 import json
+import asyncio
 from redis.asyncio.client import Redis
 from utils.logger import logger
 from utils.calc_iv_bucket import get_iv_bucket
@@ -38,11 +39,11 @@ class PokemonIVRedisBuffer:
 
             # Check total unique keys in the hash
             current_unique_count = await redis_client.hlen(cls.redis_key)
-            logger.info(f"📊 👻 Current total unique aggregated IV keys: {current_unique_count}")
+            logger.debug(f"📊 👻 Current total unique aggregated IV keys: {current_unique_count}")
 
             # Flush if the number of unique combinations exceeds the threshold
             if current_unique_count >= cls.aggregation_threshold:
-                logger.info(f"Aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
+                logger.info(f"📊 👻 Aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
                 await cls.flush_if_ready(redis_client)
         except Exception as e:
             logger.error(f"❌ Error incrementing aggregated event: {e}")
@@ -55,46 +56,58 @@ class PokemonIVRedisBuffer:
                 logger.debug("📭 No aggregated data to flush.")
                 return
 
-            # Try to acquire a lock for flushing.
-            lock = redis_client.lock(f"{cls.redis_key}:lock", timeout=60)
-            if not await lock.acquire(blocking=False):
-                logger.warning("⏳ Another flush is already in progress. Exiting flush.")
+            # Atomically rename the current hash to a temporary key.
+            temp_key = cls.redis_key + ":flushing"
+            try:
+                await redis_client.rename(cls.redis_key, temp_key)
+                logger.debug(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
+            except Exception as rename_err:
+                if "no such key" in str(rename_err).lower():
+                    logger.debug("No such key found during rename. Nothing to flush.")
+                    return
+                else:
+                    raise
+
+            # Retrieve all aggregated data from the temporary key.
+            aggregated_data = await redis_client.hgetall(temp_key)
+            if not aggregated_data:
+                logger.debug("📭 No aggregated data to flush from temporary key.")
                 return
 
-            try:
-                # Atomically rename the current hash to a temporary key.
-                temp_key = cls.redis_key + ":flushing"
-                try:
-                    await redis_client.rename(cls.redis_key, temp_key)
-                    logger.info(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
-                except Exception as rename_err:
-                    if "no such key" in str(rename_err).lower():
-                        logger.debug("No such key found during rename. Nothing to flush.")
-                        return
-                    else:
-                        raise
+            # Convert the data from bytes to proper types.
+            formatted_data = {
+                (key.decode("utf-8") if isinstance(key, bytes) else key): int(count)
+                for key, count in aggregated_data.items()
+            }
 
-                # Retrieve all aggregated data from the temporary key.
-                aggregated_data = await redis_client.hgetall(temp_key)
-                if not aggregated_data:
-                    logger.debug("📭 No aggregated data to flush from temporary key.")
-                    return
+            data_batch = []
+            for composite_key, count in formatted_data.items():
+                parts = composite_key.split("_")
+                if len(parts) != 8:
+                    logger.warning(f"Invalid composite key format: {composite_key}")
+                    continue
+                (spawnpoint_hex, pokemon_id_str, form_str, bucket_iv_str,
+                area_id_str, month_year_str, latitude_str, longitude_str) = parts
+                data_batch.append({
+                    "spawnpoint": spawnpoint_hex,  # The upsert function will convert via int(..., 16)
+                    "latitude": float(latitude_str),
+                    "longitude": float(longitude_str),
+                    "pokemon_id": int(pokemon_id_str),
+                    "form": form_str,
+                    "iv": int(bucket_iv_str),
+                    "area_id": int(area_id_str),
+                    "first_seen": int(datetime.strptime(month_year_str, "%y%m").timestamp()),
+                    "increment": count
+                })
 
-                # Convert the data from bytes to proper types.
-                formatted_data = {
-                    (key.decode("utf-8") if isinstance(key, bytes) else key): int(count)
-                    for key, count in aggregated_data.items()
-                }
-                logger.info(f"📤 Flushing {len(formatted_data)} unique aggregated events from temporary key.")
+            logger.info(f"📤 Flushing {len(formatted_data)} unique aggregated 👻 Pokémon events from temporary key.")
 
-                # Upsert the aggregated data into SQL.
-                inserted_count = await PokemonSQLProcessor.bulk_upsert_aggregated_aggregated(formatted_data)
-                logger.success(f"📬 Inserted {inserted_count} aggregated Pokémon IV rows.")
+            # Upsert the aggregated data into SQL.
+            inserted_count = await PokemonSQLProcessor.bulk_upsert_aggregated_pokemon_iv_monthly_batch(data_batch)
+            logger.success(f"📬 Inserted {inserted_count} aggregated Pokémon IV rows.")
 
-                # Delete the temporary key.
-                await redis_client.delete(temp_key)
-            finally:
-                await lock.release()
+            # Delete the temporary key.
+            await redis_client.delete(temp_key)
         except Exception as e:
             logger.error(f"❌ Error during aggregated buffer flush: {e}", exc_info=True)
 
@@ -130,7 +143,7 @@ class ShinyRateRedisBuffer:
 
             # Check total unique keys in the hash
             current_unique_count = await redis_client.hlen(cls.redis_key)
-            logger.info(f"📊 🌟 Current total unique aggregated shiny keys: {current_unique_count}")
+            logger.debug(f"📊 🌟 Current total unique aggregated shiny keys: {current_unique_count}")
 
             # Flush if threshold is reached
             if current_unique_count >= cls.aggregation_threshold:
@@ -151,7 +164,7 @@ class ShinyRateRedisBuffer:
             temp_key = cls.redis_key + ":flushing"
             try:
                 await redis_client.rename(cls.redis_key, temp_key)
-                logger.info(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
+                logger.debug(f"Renamed {cls.redis_key} to {temp_key} for flushing.")
             except Exception as rename_err:
                 if "no such key" in str(rename_err).lower():
                     logger.debug("No such key found during rename. Nothing to flush.")
@@ -170,10 +183,29 @@ class ShinyRateRedisBuffer:
                 (key.decode("utf-8") if isinstance(key, bytes) else key): int(count)
                 for key, count in aggregated_data.items()
             }
-            logger.info(f"📤 Flushing {len(formatted_data)} unique aggregated shiny events from temporary key.")
+            logger.info(f"📤 Flushing {len(formatted_data)} unique aggregated 🌟 shiny events from temporary key.")
+
+            # Convert formatted_data into a data batch list.
+            data_batch = []
+            for composite_key, count in formatted_data.items():
+                parts = composite_key.split("_")
+                if len(parts) != 6:
+                    logger.warning(f"Invalid aggregated key format: {composite_key}")
+                    continue
+                username, pokemon_id_str, form_str, shiny_str, area_id_str, month_year_str = parts
+
+                data_batch.append({
+                    "username": username,
+                    "pokemon_id": int(pokemon_id_str),
+                    "form": form_str,
+                    "shiny": int(shiny_str),  # Bulk upsert function will convert this to int.
+                    "area_id": int(area_id_str),
+                    "first_seen": int(datetime.strptime(month_year_str, "%y%m").timestamp()),
+                    "increment": count
+                })
 
             # Upsert the aggregated shiny rates into SQL.
-            inserted_count = await PokemonSQLProcessor.bulk_upsert_shiny_rates_aggregated(formatted_data)
+            inserted_count = await PokemonSQLProcessor.bulk_upsert_shiny_username_rate_batch(data_batch)
             logger.success(f"✨ Inserted {inserted_count} aggregated shiny rate rows.")
 
             # Delete the temporary key after successful flush.

@@ -1,3 +1,4 @@
+from socket import timeout
 import redis.asyncio as redis
 import config as AppConfig
 from utils.logger import logger
@@ -19,6 +20,7 @@ class RedisManager:
             "retrieval_pool": AppConfig.redis_retrieval_pool,
             "flush_heatmap_pool": AppConfig.redis_heatmap_pool,
             "flush_shiny_pool": AppConfig.redis_shiny_pool,
+            "sql_pokemon_pool": AppConfig.redis_sql_pokemon_pool,
         }
         max_conn = pool_config.get(pool_name, 5)  # Default to 5 connections if not found
         logger.success(f"🔎 Using {max_conn} connections for {pool_name} pool.")
@@ -32,7 +34,14 @@ class RedisManager:
 
         try:
             logger.info(f"🔃 Connecting Redis ({pool_name}) with a pool of {max_connections} connections...")
-            pool = redis.ConnectionPool.from_url(cls.redis_url, max_connections=max_connections, encoding="utf-8", decode_responses=True)
+            pool = redis.ConnectionPool.from_url(
+                cls.redis_url,
+                max_connections=max_connections,
+                encoding="utf-8",
+                decode_responses=True,
+                timeout=30,
+                max_idle_time=30
+            )
             client = redis.Redis(connection_pool=pool)
 
             if await client.ping():
@@ -73,3 +82,8 @@ class RedisManager:
         max_connections = cls.get_max_connections_for_pool(pool_name)
         return await cls.init_pool(pool_name, max_connections=max_connections)
 
+
+    @classmethod
+    async def get_client(cls, pool_name):
+        """Get a Redis client for the specified pool."""
+        return await cls.check_redis_connection(pool_name)
