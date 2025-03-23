@@ -36,8 +36,7 @@ class PokemonSQLQueries():
                 "form",
                 "iv",
                 "area__name",
-                "spawnpoint__latitude",
-                "spawnpoint__longitude",
+                "spawnpoint",
                 "month_year"
             )
 
@@ -50,13 +49,22 @@ class PokemonSQLQueries():
                 "form",
                 "iv",
                 "area__name",
-                "spawnpoint__latitude",
-                "spawnpoint__longitude",
+                "spawnpoint",
                 "total_count",
                 "month_year"
             )
 
-            results = await query
+            # Obtain spawnpoint details
+            spawnpoint_values = {r["spawnpoint"] for r in results}
+            spawnpoints = await models.Spawnpoint.filter(spawnpoint__in=list(spawnpoint_values)).values("spawnpoint", "latitude", "longitude")
+            spawnpoint_map = {sp["spawnpoint"]: sp for sp in spawnpoints}
+
+            # Attach the results with latitude and longitude.
+            for record in results:
+                sp_data = spawnpoint_map.get(record["spawnpoint"])
+                record["latitude"] = sp_data["latitude"] if sp_data else None
+                record["longitude"] = sp_data["longitude"] if sp_data else None
+
             logger.info(f"✅ Retrieved {len(results)} heatmap rows (limit={self.limit}).")
             return {"results": results}
         except Exception as e:
