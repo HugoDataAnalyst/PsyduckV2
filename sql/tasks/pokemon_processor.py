@@ -1,10 +1,8 @@
-from sql.queries.pokemon_updates import PokemonUpdatesQueries
 from utils.logger import logger
-from utils.calc_iv_bucket import get_iv_bucket
 from sql.models import Spawnpoint, AggregatedPokemonIVMonthly, ShinyUsernameRates, Spawnpoint, AreaNames
 from datetime import datetime
 
-class PokemonSQLProcessor(PokemonUpdatesQueries):
+class PokemonSQLProcessor:
     @classmethod
     async def bulk_upsert_aggregated_aggregated(cls, aggregated_data: dict) -> int:
         total_upsert_count = 0
