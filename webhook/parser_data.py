@@ -39,6 +39,7 @@ invasion_sql = InvasionSQLProcessor()
 quest_sql = QuestSQLProcessor()
 pokemon_buffer = PokemonIVRedisBuffer()
 shiny_buffer = ShinyRateRedisBuffer()
+
 async def process_pokemon_data(filtered_data):
     """
     Process the filtered Pokémon event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
@@ -66,16 +67,19 @@ async def process_pokemon_data(filtered_data):
             # Execute all Redis commands in a single batch
             await pipe.execute()
 
+
         # Execute SQL commands if Enabled
         if AppConfig.store_sql_pokemon_aggregation:
+            get_client = await RedisManager.get_client("sql_pokemon_pool")
             logger.info("🔃 Processing Pokémon Aggregation...")
-            await pokemon_buffer.increment_event(client, filtered_data)
+            await pokemon_buffer.increment_event(get_client, filtered_data)
         else:
             logger.info("⚠️ SQL Pokémon Aggregation is disabled.")
 
         if AppConfig.store_sql_pokemon_shiny:
+            get_client = await RedisManager.get_client("sql_pokemon_pool")
             logger.info("🔃 Processing Pokémon Shiny Rates...")
-            await shiny_buffer.increment_event(client, filtered_data)
+            await shiny_buffer.increment_event(get_client, filtered_data)
         else:
             logger.info("⚠️ SQL Pokémon Shiny Rates is disabled.")
 

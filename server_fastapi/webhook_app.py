@@ -59,7 +59,10 @@ async def lifespan(app: FastAPI):
         raise Exception("❌ No geofences available at startup, stopping application.")
 
     """Initialize all Redis pools on startup."""
-    pool_names = ["pokemon_pool", "quest_pool", "raid_pool", "invasion_pool", "retrieval_pool"]
+    pool_names = ["pokemon_pool", "quest_pool", "raid_pool",
+                  "invasion_pool", "retrieval_pool", "koji_geofence_pool",
+                  "flush_heatmap_pool", "flush_shiny_pool", "sql_pokemon_pool"
+                ]
 
     for pool_name in pool_names:
         max_conn = RedisManager.get_max_connections_for_pool(pool_name)
@@ -70,15 +73,35 @@ async def lifespan(app: FastAPI):
         # This will retry refresh_geofences if it raises an exception.
         await retry_call(koji_instance.refresh_geofences)
     # Start the background refresh task
-    asyncio.create_task(safe_refresh())
+    refresh_task = asyncio.create_task(safe_refresh())
 
-    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=60)
-    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=60)
-    asyncio.create_task(pokemon_buffer_flusher.flush_loop())
-    asyncio.create_task(shiny_rate_buffer_flusher.flush_loop())
+    # Initialize and start buffer flushers
+    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=60)  # 1 minute
+    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=60)  # 1 minute
 
+    # Start the flusher tasks
+    await pokemon_buffer_flusher.start()
+    await shiny_rate_buffer_flusher.start()
+
+    # Yield control back to FastAPI
     yield
+
+    # Shutdown logic
     logger.info("👋 Shutting down Webhook Receiver application.")
+
+    # Cancel and await the refresh task
+    refresh_task.cancel()
+    try:
+        await refresh_task
+    except asyncio.CancelledError:
+        logger.info("🛑 Geofence refresh task cancelled.")
+
+    # Stop the flusher tasks
+    await pokemon_buffer_flusher.stop()
+    await shiny_rate_buffer_flusher.stop()
+
+    # Close Redis pools
+    await RedisManager.close_all_pools()
 
 # Custom Swagger UI HTML template
 def custom_swagger_ui_html(*args, **kwargs) -> Response:
