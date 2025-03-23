@@ -6,6 +6,8 @@ from sql.connect_db import init_db, close_db
 from utils.logger import setup_logging, logger
 from utils.koji_geofences import KojiGeofences
 from my_redis.connect_redis import RedisManager
+import warnings
+warnings.filterwarnings("ignore", message="Duplicate entry")
 
 # Initialize logging
 setup_logging(AppConfig.log_level, {"file": AppConfig.log_file, "function": True})
