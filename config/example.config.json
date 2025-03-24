@@ -11,10 +11,10 @@
         "refresh_cache_seconds": 3500
     },
     "retention_hours": {
-        "timeseries_pokemon": 720,
-        "tth_timeseries_pokemon": 720,
-        "timeseries_raid": 720,
-        "timeseries_invasion": 720,
-        "timeseries_quest": 720
+        "timeseries_pokemon": 72,
+        "tth_timeseries_pokemon": 72,
+        "timeseries_raid": 72,
+        "timeseries_invasion": 72,
+        "timeseries_quest": 72
     }
 }
