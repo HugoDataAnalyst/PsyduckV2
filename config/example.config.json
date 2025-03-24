@@ -6,6 +6,12 @@
         "store_sql_quest_aggregation": true,
         "store_sql_invasion_aggregation": true
     },
+    "flusher": {
+        "pokemon_max_threshold": 15000,
+        "shiny_max_threshold": 15000,
+        "shiny_flush_interval": 60,
+        "pokemon_flush_interval": 60
+    },
     "geofences": {
         "expire_cache_seconds": 3600,
         "refresh_cache_seconds": 3500

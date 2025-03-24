@@ -5,10 +5,11 @@ from utils.logger import logger
 from utils.calc_iv_bucket import get_iv_bucket
 from datetime import datetime
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
+import config as AppConfig
 
 class PokemonIVRedisBuffer:
     redis_key = "buffer:agg_pokemon_iv"
-    aggregation_threshold = 10000
+    aggregation_threshold = int(AppConfig.pokemon_max_threshold)
 
     @classmethod
     async def increment_event(cls, redis_client: Redis, event_data: dict):
@@ -115,7 +116,7 @@ class PokemonIVRedisBuffer:
 
 class ShinyRateRedisBuffer:
     redis_key = "buffer:agg_shiny_rates_hash"
-    aggregation_threshold = 10000  # adjust as needed
+    aggregation_threshold = int(AppConfig.shiny_max_threshold)  # adjust as needed
 
     @classmethod
     async def increment_event(cls, redis_client: Redis, event_data: dict):

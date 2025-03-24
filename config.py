@@ -95,6 +95,12 @@ redis_shiny_pool = 2
 redis_sql_pokemon_pool = 2000
 redis_cleanup_pool = 2
 
+# Flusher settings
+pokemon_max_threshold = config.get("flusher", {}).get("pokemon_max_threshold", 10000)
+shiny_max_threshold = config.get("flusher", {}).get("shiny_max_threshold", 10000)
+shiny_flush_interval = config.get("flusher", {}).get("shiny_flush_interval", 60)
+pokemon_flush_interval = config.get("flusher", {}).get("pokemon_flush_interval", 60)
+
 # Redis retention settings
 timeseries_pokemon_retention_ms  = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 720))
 tth_timeseries_retention_ms      = retention_ms(config.get("retention_hours", {}).get("tth_timeseries_pokemon", 720))

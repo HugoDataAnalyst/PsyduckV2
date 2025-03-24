@@ -83,8 +83,8 @@ async def lifespan(app: FastAPI):
     refresh_task = asyncio.create_task(safe_refresh())
 
     # Initialize and start buffer flushers
-    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=60)  # 1 minute
-    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=60)  # 1 minute
+    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)  # 1 minute
+    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)  # 1 minute
 
     # Start the flusher tasks
     await pokemon_buffer_flusher.start()
