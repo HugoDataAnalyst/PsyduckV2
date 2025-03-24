@@ -98,5 +98,5 @@ async def update_total_pokemon_counter(data, pipe=None):
                 updated_fields["shiny"] = "OK"
             await pipe.execute()  # Execute pipeline
 
-    logger.info(f"✅ Bulk updated Pokémon counters in hash {hash_key}")
+    logger.debug(f"✅ Bulk updated Pokémon counters in hash {hash_key}")
     return updated_fields

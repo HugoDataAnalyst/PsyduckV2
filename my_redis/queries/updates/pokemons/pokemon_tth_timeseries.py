@@ -67,5 +67,5 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
 
         updated_fields[tth_bucket] = "OK"
 
-    logger.info(f"✅ Added Pokémon TTH event to TimeSeries: {key}")
+    logger.debug(f"✅ Added Pokémon TTH event to TimeSeries: {key}")
     return updated_fields

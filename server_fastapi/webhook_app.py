@@ -61,12 +61,19 @@ async def lifespan(app: FastAPI):
     """Initialize all Redis pools on startup."""
     pool_names = ["pokemon_pool", "quest_pool", "raid_pool",
                   "invasion_pool", "retrieval_pool", "koji_geofence_pool",
-                  "flush_heatmap_pool", "flush_shiny_pool", "sql_pokemon_pool"
+                  "flush_heatmap_pool", "flush_shiny_pool", "sql_pokemon_pool",
+                  "redis_cleanup_pool"
                 ]
 
     for pool_name in pool_names:
         max_conn = RedisManager.get_max_connections_for_pool(pool_name)
         await RedisManager.init_pool(pool_name, max_connections=max_conn)
+
+    redis_client = await redis_manager.get_client("redis_cleanup_pool")
+
+    cleanup_task = asyncio.create_task(
+        redis_manager.idle_client_cleanup(redis_client)
+    )
 
     # Wrap the refresh task in a safe retry wrapper
     async def safe_refresh():
@@ -88,6 +95,13 @@ async def lifespan(app: FastAPI):
 
     # Shutdown logic
     logger.info("👋 Shutting down Webhook Receiver application.")
+
+    # Cancel and await the cleanup task
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        logger.info("🛑 Idle client cleanup task cancelled.")
 
     # Cancel and await the refresh task
     refresh_task.cancel()

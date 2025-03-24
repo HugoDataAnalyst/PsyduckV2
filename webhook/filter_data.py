@@ -89,7 +89,7 @@ class WebhookFilter:
             }
             logger.debug(f"☑️ Extracted reward: {reward_data}")
             extracted.append(reward_data)
-        logger.info(f"✅ Extracted {len(extracted)} rewards.")
+        logger.debug(f"✅ Extracted {len(extracted)} rewards.")
         return extracted
 
     @staticmethod

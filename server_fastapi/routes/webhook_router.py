@@ -33,25 +33,25 @@ async def process_single_event(event: dict):
         return {"status": "ignored"}
 
     if data_type == "pokemon":
-        logger.info("✅ Processing 👻 Pokémon data.")
+        logger.debug("✅ Processing 👻 Pokémon data.")
         result = await process_pokemon_data(filtered_data)
         if result:
             logger.debug(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
             return {"status": "success", "processed_data": result}
     #elif data_type == "raid":
-    #    logger.info("✅ Processing 👹 Raid data.")
+    #    logger.debug("✅ Processing 👹 Raid data.")
     #    result = await process_raid_data(filtered_data)
     #    if result:
     #        logger.debug(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
     #        return {"status": "success", "processed_data": result}
     #elif data_type == "quest":
-    #    logger.info("✅ Processing 🔎 Quest data.")
+    #    logger.debug("✅ Processing 🔎 Quest data.")
     #    result = await process_quest_data(filtered_data)
     #    if result:
     #        logger.debug(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
     #        return {"status": "success", "processed_data": result}
     #elif data_type == "invasion":
-    #    logger.info("✅ Processing 🕴️ Invasion data.")
+    #    logger.debug("✅ Processing 🕴️ Invasion data.")
     #    result = await process_invasion_data(filtered_data)
     #    if result:
     #        logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
