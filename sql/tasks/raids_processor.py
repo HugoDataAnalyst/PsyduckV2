@@ -105,6 +105,7 @@ class RaidSQLProcessor:
         """
         Helper method to handle the actual upsert operation with retry logic.
         """
+        increment = raid_data.get('increment', 1)
         for attempt in range(raid_data['max_retries']):
             try:
                 async with pool.acquire() as conn:
@@ -154,7 +155,7 @@ class RaidSQLProcessor:
                                 raid_data['raid_ex_raid_eligible'],
                                 raid_data['area_id'],
                                 raid_data['month_year'],
-                                raid_data['increment'],
+                                increment,
                                 raid_data['gym_id']
                             )
                         )

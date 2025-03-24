@@ -99,6 +99,7 @@ class InvasionSQLProcessor:
         """
         Helper method to handle the actual upsert operation with retry logic.
         """
+        increment = invasion_data.get('increment', 1)
         for attempt in range(invasion_data['max_retries']):
             try:
                 async with pool.acquire() as conn:
@@ -144,7 +145,7 @@ class InvasionSQLProcessor:
                                 invasion_data['confirmed'],
                                 invasion_data['area_id'],
                                 invasion_data['month_year'],
-                                invasion_data['increment'],
+                                increment,
                                 invasion_data['pokestop_id']
                             )
                         )

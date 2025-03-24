@@ -101,6 +101,7 @@ class QuestSQLProcessor:
         """
         Helper method to handle the actual upsert operation with retry logic.
         """
+        increment = quest_data.get('increment', 1)
         for attempt in range(quest_data['max_retries']):
             try:
                 async with pool.acquire() as conn:
@@ -156,7 +157,7 @@ class QuestSQLProcessor:
                                 quest_data['reward_normal_poke_form'],
                                 quest_data['area_id'],
                                 quest_data['month_year'],
-                                quest_data['increment'],
+                                increment,
                                 quest_data['pokestop_id']
                             )
                         )
