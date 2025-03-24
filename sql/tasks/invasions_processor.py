@@ -29,7 +29,7 @@ class InvasionSQLProcessor(InvasionsSQLProcessor):
                 first_seen_timestamp=first_seen_timestamp,
                 increment=increment
             )
-            logger.info(f"✅ Upserted Aggregated Invasion for pokestop {pokestop} in area {area_id} - Updates: {result}")
+            logger.debug(f"✅ Upserted Aggregated Invasion for pokestop {pokestop} in area {area_id} - Updates: {result}")
             return result
         except Exception as e:
             logger.error(f"❌ Error in upsert_aggregated_invasion_from_filtered: {e}")

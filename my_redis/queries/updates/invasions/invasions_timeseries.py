@@ -56,5 +56,5 @@ async def add_timeseries_invasion_event(data, pipe=None):
             await pipe.execute()
 
 
-    logger.info(f"✅ Added Invasion event to TimeSeries for display {display_type} with grunt: {grunt} in the Area: {area}")
+    logger.debug(f"✅ Added Invasion event to TimeSeries for display {display_type} with grunt: {grunt} in the Area: {area}")
     return updated_fields

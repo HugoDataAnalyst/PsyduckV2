@@ -44,5 +44,5 @@ async def update_invasion_hourly_counter(data, pipe=None):
             await pipe.execute()
         updated_fields[field_name] = "OK"
 
-    logger.info(f"✅ Updated Invasion hourly counter in hash '{hash_key}' for field '{field_name}'")
+    logger.debug(f"✅ Updated Invasion hourly counter in hash '{hash_key}' for field '{field_name}'")
     return updated_fields

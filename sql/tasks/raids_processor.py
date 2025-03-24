@@ -54,7 +54,7 @@ class RaidSQLProcessor(RaidsSQLProcessor):
                 first_seen_timestamp=first_seen_timestamp,
                 increment=increment
             )
-            logger.info(f"✅ Upserted Aggregated Raid for gym {gym} in area {area_id} - Updates: {result}")
+            logger.debug(f"✅ Upserted Aggregated Raid for gym {gym} in area {area_id} - Updates: {result}")
             return result
 
         except Exception as e:

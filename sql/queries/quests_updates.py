@@ -26,9 +26,9 @@ class QuestsSQLProcessor:
                 updated = True
             if updated:
                 await obj.save()
-            logger.info(f"⏭️ Pokestop exists: id={obj.id}, pokestop={obj.pokestop}, name={obj.pokestop_name}, lat={obj.latitude}, lon={obj.longitude}")
+            logger.debug(f"⏭️ Pokestop exists: id={obj.id}, pokestop={obj.pokestop}, name={obj.pokestop_name}, lat={obj.latitude}, lon={obj.longitude}")
         else:
-            logger.info(f"✅ Created new Pokestop: id={obj.id}, pokestop={obj.pokestop}, name={obj.pokestop_name}, lat={obj.latitude}, lon={obj.longitude}")
+            logger.debug(f"✅ Created new Pokestop: id={obj.id}, pokestop={obj.pokestop}, name={obj.pokestop_name}, lat={obj.latitude}, lon={obj.longitude}")
         return obj
 
     @classmethod

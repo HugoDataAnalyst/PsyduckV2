@@ -49,5 +49,5 @@ async def update_raid_counter(raid_data, pipe=None):
             await pipe.execute()
         updated_fields[field_name] = "OK"
 
-    logger.info(f"✅ Updated Daily Raid counter in hash '{hash_key}' with fields: {updated_fields}")
+    logger.debug(f"✅ Updated Daily Raid counter in hash '{hash_key}' with fields: {updated_fields}")
     return updated_fields

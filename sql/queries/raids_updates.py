@@ -25,9 +25,9 @@ class RaidsSQLProcessor:
                 updated = True
             if updated:
                 await obj.save()
-            logger.info(f"⏭️ Gym exists: id={obj.id}, gym={obj.gym}, gym_name={obj.gym_name}")
+            logger.debug(f"⏭️ Gym exists: id={obj.id}, gym={obj.gym}, gym_name={obj.gym_name}")
         else:
-            logger.info(f"✅ Created new gym: id={obj.id}, gym={obj.gym}, gym_name={obj.gym_name}")
+            logger.debug(f"✅ Created new gym: id={obj.id}, gym={obj.gym}, gym_name={obj.gym_name}")
         return obj
 
     @classmethod
