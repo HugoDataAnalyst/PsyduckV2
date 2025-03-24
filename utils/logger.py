@@ -43,17 +43,13 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
 
     # ✅ File Logging (If Enabled)
     if file:
-        log_filename = f"logs/psyduck_{datetime.now().strftime('%Y-%m-%d')}.log"
+        log_filename = f"logs/psyduckv2.log"
         logger.add(
             log_filename,
-            rotation="10MB",  # Create a new log file every 10MB
+            rotation="5MB",  # Create a new log file every 10MB
             retention=5,  # ✅ Keep only the last 5 log files
             level=log_lvl,
             format=log_fmt
         )
-
-    # Set aiomysql logging to only show errors
-    import logging
-    logging.getLogger("aiomysql").setLevel(logging.ERROR)
 # ✅ Make logger globally available
 __all__ = ["logger", "setup_logging"]
