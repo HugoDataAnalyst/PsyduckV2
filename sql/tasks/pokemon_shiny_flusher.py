@@ -51,17 +51,32 @@ class ShinyRateBufferFlusher:
         logger.info("🚀 Started shiny rate buffer flusher.")
 
     async def stop(self):
-        """Stop the flush loop."""
+        """Stop the flusher and perform one final forced flush."""
         if not self._running:
-            logger.warning("⚠️ Shiny rate buffer flusher is not running.")
+            logger.warning("⚠️ Shiny rate flusher already stopped")
             return
 
         self._running = False
+
+        # Final flush
+        try:
+            client = await RedisManager.get_client("flush_shiny_pool")
+            if client:
+                start = time.perf_counter()
+                count = await ShinyRateRedisBuffer.force_flush(client)
+                logger.success(
+                    f"🔚 Final shiny ✨ flush completed "
+                    f"({count} records in {time.perf_counter()-start:.2f}s)"
+                )
+        except Exception as e:
+            logger.error(f"❌ Final shiny flush failed: {e}")
+
+        # Cancel task
         if self._task:
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
-                logger.info("🛑 Shiny rate buffer flusher stopped.")
+                logger.info("🛑 Shiny rate flusher stopped")
             except Exception as e:
-                logger.error(f"❌ Error stopping shiny rate buffer flusher: {e}")
+                logger.error(f"❌ Error stopping shiny flusher: {e}")

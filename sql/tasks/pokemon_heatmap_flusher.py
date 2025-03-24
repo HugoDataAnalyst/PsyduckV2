@@ -48,17 +48,32 @@ class PokemonIVBufferFlusher:
         logger.info("🚀 Started Pokémon IV buffer flusher.")
 
     async def stop(self):
-        """Stop the flush loop."""
+        """Stop the flusher and perform one final forced flush."""
         if not self._running:
-            logger.warning("⚠️ Pokémon IV buffer flusher is not running.")
+            logger.warning("⚠️ Pokémon IV flusher already stopped")
             return
 
         self._running = False
+
+        # Final flush
+        try:
+            redis = await RedisManager.check_redis_connection("flush_heatmap_pool")
+            if redis:
+                start = time.perf_counter()
+                count = await PokemonIVRedisBuffer.force_flush(redis)
+                logger.success(
+                    f"🔚 Final Pokémon 👻 IV flush completed "
+                    f"({count} records in {time.perf_counter()-start:.2f}s)"
+                )
+        except Exception as e:
+            logger.error(f"❌ Final Pokémon IV flush failed: {e}")
+
+        # Cancel task
         if self._task:
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
-                logger.info("🛑 Pokémon IV buffer flusher stopped.")
+                logger.info("🛑 Pokémon IV flusher stopped")
             except Exception as e:
-                logger.error(f"❌ Error stopping Pokémon IV buffer flusher: {e}")
+                logger.error(f"❌ Error stopping Pokémon IV flusher: {e}")
