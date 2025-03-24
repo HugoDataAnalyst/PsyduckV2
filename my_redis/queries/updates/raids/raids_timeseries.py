@@ -93,5 +93,5 @@ async def add_raid_timeseries_event(data, pipe=None):
             await pipe.execute()
 
 
-    logger.info(f"✅ Added Raid event to Timeseries for Pokémon ID: {raid_pokemon} in area {area}")
+    logger.debug(f"✅ Added Raid event to Timeseries for Pokémon ID: {raid_pokemon} in area {area}")
     return updated_fields

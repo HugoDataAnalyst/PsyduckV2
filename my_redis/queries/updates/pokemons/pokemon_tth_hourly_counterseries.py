@@ -64,5 +64,5 @@ async def update_tth_pokemon_hourly_counter(data, pipe=None):
 
         updated_fields[tth_bucket] = "OK"
 
-    logger.info(f"✅ Incremented TTH counter {field_name} for area {area}.")
+    logger.debug(f"✅ Incremented TTH counter {field_name} for area {area}.")
     return updated_fields

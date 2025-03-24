@@ -67,5 +67,5 @@ async def update_pokemon_weather_iv(data, pipe=None):
             await pipe.execute()
         updated_fields[iv_range] = "OK"
 
-    logger.info(f"✅ Incremented weather IV counter '{field_name}' for area '{area}' with weather boost {weather_boost}.")
+    logger.debug(f"✅ Incremented weather IV counter '{field_name}' for area '{area}' with weather boost {weather_boost}.")
     return updated_fields

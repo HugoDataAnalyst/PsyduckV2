@@ -29,6 +29,7 @@ from sql.tasks.raids_processor import RaidSQLProcessor
 from sql.tasks.invasions_processor import InvasionSQLProcessor
 from sql.tasks.quests_processor import QuestSQLProcessor
 from my_redis.connect_redis import RedisManager
+from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer, ShinyRateRedisBuffer
 from utils.logger import logger
 
 redis_manager = RedisManager()
@@ -36,6 +37,8 @@ pokemon_sql = PokemonSQLProcessor()
 raid_sql = RaidSQLProcessor()
 invasion_sql = InvasionSQLProcessor()
 quest_sql = QuestSQLProcessor()
+pokemon_buffer = PokemonIVRedisBuffer()
+shiny_buffer = ShinyRateRedisBuffer()
 
 async def process_pokemon_data(filtered_data):
     """
@@ -64,18 +67,21 @@ async def process_pokemon_data(filtered_data):
             # Execute all Redis commands in a single batch
             await pipe.execute()
 
+
         # Execute SQL commands if Enabled
         if AppConfig.store_sql_pokemon_aggregation:
-            logger.info("🔃 Processing Pokémon Aggregation...")
-            await pokemon_sql.upsert_aggregated_from_filtered(filtered_data)
+            get_client = await RedisManager.get_client("sql_pokemon_pool")
+            logger.debug("🔃 Processing Pokémon Aggregation...")
+            await pokemon_buffer.increment_event(get_client, filtered_data)
         else:
-            logger.info("⚠️ SQL Pokémon Aggregation is disabled.")
+            logger.debug("⚠️ SQL Pokémon Aggregation is disabled.")
 
         if AppConfig.store_sql_pokemon_shiny:
-            logger.info("🔃 Processing Pokémon Shiny Rates...")
-            await pokemon_sql.upsert_shiny_rate_from_filtered(filtered_data)
+            get_client = await RedisManager.get_client("sql_pokemon_pool")
+            logger.debug("🔃 Processing Pokémon Shiny Rates...")
+            await shiny_buffer.increment_event(get_client, filtered_data)
         else:
-            logger.info("⚠️ SQL Pokémon Shiny Rates is disabled.")
+            logger.debug("⚠️ SQL Pokémon Shiny Rates is disabled.")
 
         # Map results to Meaningful Information.
         structured_result = (
@@ -124,10 +130,10 @@ async def process_raid_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_raid_aggregation:
-            logger.info("🔃 Processing Raid Aggregation...")
+            logger.debug("🔃 Processing Raid Aggregation...")
             await raid_sql.upsert_aggregated_raid_from_filtered(filtered_data)
         else:
-            logger.info("⚠️ SQL Raid Aggregation is disabled.")
+            logger.debug("⚠️ SQL Raid Aggregation is disabled.")
 
                 # Map results to Meaningful Information.
         structured_result = (
@@ -173,10 +179,10 @@ async def process_quest_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_quest_aggregation:
-            logger.info("🔃 Processing Quest Aggregation...")
+            logger.debug("🔃 Processing Quest Aggregation...")
             await quest_sql.upsert_aggregated_quest_from_filtered(filtered_data)
         else:
-            logger.info("⚠️ SQL Quest Aggregation is disabled.")
+            logger.debug("⚠️ SQL Quest Aggregation is disabled.")
 
         with_ar = filtered_data.get("ar_type") is not None
         if with_ar:
@@ -228,10 +234,10 @@ async def process_invasion_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_invasion_aggregation:
-            logger.info("🔃 Processing Invasion Aggregation...")
+            logger.debug("🔃 Processing Invasion Aggregation...")
             await invasion_sql.upsert_aggregated_invasion_from_filtered(filtered_data)
         else:
-            logger.info("⚠️ SQL Invasion Aggregation is disabled.")
+            logger.debug("⚠️ SQL Invasion Aggregation is disabled.")
 
                 # Map results to Meaningful Information.
         structured_result = (

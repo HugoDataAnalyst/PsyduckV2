@@ -102,5 +102,5 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
                 updated_fields["shiny"] = "OK"
             await pipe.execute()
 
-    logger.info(f"✅ Added Pokémon event to time series for Pokémon ID {pokemon_id} in area {area}")
+    logger.debug(f"✅ Added Pokémon event to time series for Pokémon ID {pokemon_id} in area {area}")
     return updated_fields

@@ -84,18 +84,29 @@ redis_db = get_env_int("REDIS_DB", 1)
 # Build Redis url connection
 redis_url = f"redis://:{redis_encoded_password}@{redis_host}:{redis_server_port}/{redis_db}"
 # Redis max connections per pool
-redis_pokemon_pool = 100
-redis_quest_pool = 25
-redis_raid_pool = 20
-redis_invasion_pool = 20
-redis_geofence_pool = 1
-redis_retrieval_pool = 10
+redis_pokemon_pool = 2000
+redis_quest_pool = 1000
+redis_raid_pool = 500
+redis_invasion_pool = 500
+redis_geofence_pool = 2
+redis_retrieval_pool = 50
+redis_heatmap_pool = 2
+redis_shiny_pool = 2
+redis_sql_pokemon_pool = 2000
+redis_cleanup_pool = 2
+
+# Flusher settings
+pokemon_max_threshold = config.get("flusher", {}).get("pokemon_max_threshold", 10000)
+shiny_max_threshold = config.get("flusher", {}).get("shiny_max_threshold", 10000)
+shiny_flush_interval = config.get("flusher", {}).get("shiny_flush_interval", 60)
+pokemon_flush_interval = config.get("flusher", {}).get("pokemon_flush_interval", 60)
+
 # Redis retention settings
-timeseries_pokemon_retention_ms  = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 720))
-tth_timeseries_retention_ms      = retention_ms(config.get("retention_hours", {}).get("tth_timeseries_pokemon", 720))
-raid_timeseries_retention_ms     = retention_ms(config.get("retention_hours", {}).get("timeseries_raid", 720))
-invasion_timeseries_retention_ms = retention_ms(config.get("retention_hours", {}).get("timeseries_invasion", 720))
-quests_timeseries_retention_ms   = retention_ms(config.get("retention_hours", {}).get("timeseries_quest", 720))
+timeseries_pokemon_retention_ms  = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 72))
+tth_timeseries_retention_ms      = retention_ms(config.get("retention_hours", {}).get("tth_timeseries_pokemon", 72))
+raid_timeseries_retention_ms     = retention_ms(config.get("retention_hours", {}).get("timeseries_raid", 72))
+invasion_timeseries_retention_ms = retention_ms(config.get("retention_hours", {}).get("timeseries_invasion", 72))
+quests_timeseries_retention_ms   = retention_ms(config.get("retention_hours", {}).get("timeseries_quest", 72))
 # Log Level
 log_level = get_env_var("LOG_LEVEL", "INFO").upper()
 log_file = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"

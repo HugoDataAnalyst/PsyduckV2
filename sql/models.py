@@ -118,7 +118,7 @@ class AggregatedRaids(Model):
 class AggregatedPokemonIVMonthly(Model):
     """Stores aggregated IV data per spawnpoint, monthly."""
     id = fields.BigIntField(pk=True)
-    spawnpoint = fields.ForeignKeyField("models.Spawnpoint", related_name="aggregated_stats")
+    spawnpoint = fields.BigIntField()
     pokemon_id = fields.SmallIntField()
     form = fields.CharField(max_length=15)
     iv = fields.SmallIntField()

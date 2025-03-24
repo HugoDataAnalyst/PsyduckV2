@@ -105,5 +105,5 @@ async def update_pokemon_hourly_counter(data, pipe=None):
                 updated_fields["shiny"] = "OK"
             await pipe.execute()  # Execute pipeline
 
-    logger.info(f"✅ Bulk updated Pokémon Hourly counters in hash {hash_key} with fields: {updated_fields}")
+    logger.debug(f"✅ Bulk updated Pokémon Hourly counters in hash {hash_key} with fields: {updated_fields}")
     return updated_fields

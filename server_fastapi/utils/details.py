@@ -43,14 +43,14 @@ TAGS_METADATA = [
         "summary": "Get Pokémon timeseries data.",
     },
     {
-        "name": "Invasion TimeSeries",
-        "description": "Obtain Invasion TimeSeries Data from Redis.",
-        "summary": "Get Invasion timeseries data.",
-    },
-    {
         "name": "Raid TimeSeries",
         "description": "Obtain Raid TimeSeries Data from Redis.",
         "summary": "Get Raid timeseries data.",
+    },
+    {
+        "name": "Invasion TimeSeries",
+        "description": "Obtain Invasion TimeSeries Data from Redis.",
+        "summary": "Get Invasion timeseries data.",
     },
     {
         "name": "Quest TimeSeries",
@@ -61,5 +61,25 @@ TAGS_METADATA = [
         "name": "Pokémon HeatMap Data",
         "description": "Obtain Pokémon HeatMap Data from SQL.",
         "summary": "Get Pokémon HeatMap data.",
+    },
+    {
+        "name": "Shiny Rate Data",
+        "description": "Obtain Shiny Rate Data from SQL.",
+        "summary": "Get Shiny Rate data.",
+    },
+    {
+        "name": "Raid SQL Data",
+        "description": "Obtain Raid Data from SQL.",
+        "summary": "Get Raid data.",
+    },
+    {
+        "name": "Invasion SQL Data",
+        "description": "Obtain Invasion Data from SQL.",
+        "summary": "Get Invasion data.",
+    },
+    {
+        "name": "Quest SQL Data",
+        "description": "Obtain Quest Data from SQL.",
+        "summary": "Get Quest data.",
     },
 ]
