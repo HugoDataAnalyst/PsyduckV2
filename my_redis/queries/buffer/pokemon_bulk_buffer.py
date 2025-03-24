@@ -8,7 +8,7 @@ from sql.tasks.pokemon_processor import PokemonSQLProcessor
 
 class PokemonIVRedisBuffer:
     redis_key = "buffer:agg_pokemon_iv"
-    aggregation_threshold = 2000
+    aggregation_threshold = 10000
 
     @classmethod
     async def increment_event(cls, redis_client: Redis, event_data: dict):
@@ -115,7 +115,7 @@ class PokemonIVRedisBuffer:
 
 class ShinyRateRedisBuffer:
     redis_key = "buffer:agg_shiny_rates_hash"
-    aggregation_threshold = 2000  # adjust as needed
+    aggregation_threshold = 10000  # adjust as needed
 
     @classmethod
     async def increment_event(cls, redis_client: Redis, event_data: dict):

@@ -82,12 +82,12 @@ class QuestSQLProcessor:
                 area_id=area_id,
                 month_year=month_year,
                 increment=increment,
-                max_retries=5
+                max_retries=10
             )
             processing_time = time.perf_counter() - start_time
 
             if success:
-                logger.info(f"✅ Processed quest for pokestop {pokestop_id} in area {area_id} in {processing_time:.4f}s")
+                logger.debug(f"✅ Processed quest for pokestop {pokestop_id} in area {area_id} in {processing_time:.4f}s")
                 return 1
             logger.warning(f"⚠️ Failed to process quest for pokestop {pokestop_id} after {processing_time:.4f}s")
             return 0

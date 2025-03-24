@@ -5,7 +5,7 @@ from my_redis.connect_redis import RedisManager
 from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer
 
 class PokemonIVBufferFlusher:
-    def __init__(self, flush_interval: int = 300):  # 5 minutes
+    def __init__(self, flush_interval: int = 300):
         self.flush_interval = flush_interval
         self._running = False
         self._task = None
