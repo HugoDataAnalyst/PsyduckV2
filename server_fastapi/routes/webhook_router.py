@@ -38,23 +38,23 @@ async def process_single_event(event: dict):
         if result:
             logger.debug(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
             return {"status": "success", "processed_data": result}
-    #elif data_type == "raid":
-    #    logger.debug("✅ Processing 👹 Raid data.")
-    #    result = await process_raid_data(filtered_data)
-    #    if result:
-    #        logger.debug(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
-    #        return {"status": "success", "processed_data": result}
-    #elif data_type == "quest":
-    #    logger.debug("✅ Processing 🔎 Quest data.")
-    #    result = await process_quest_data(filtered_data)
-    #    if result:
-    #        logger.debug(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
-    #        return {"status": "success", "processed_data": result}
-    #elif data_type == "invasion":
-    #    logger.debug("✅ Processing 🕴️ Invasion data.")
-    #    result = await process_invasion_data(filtered_data)
-    #    if result:
-    #        logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
+    elif data_type == "raid":
+        logger.debug("✅ Processing 👹 Raid data.")
+        result = await process_raid_data(filtered_data)
+        if result:
+            logger.debug(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
+            return {"status": "success", "processed_data": result}
+    elif data_type == "quest":
+        logger.debug("✅ Processing 🔎 Quest data.")
+        result = await process_quest_data(filtered_data)
+        if result:
+            logger.debug(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
+            return {"status": "success", "processed_data": result}
+    elif data_type == "invasion":
+        logger.debug("✅ Processing 🕴️ Invasion data.")
+        result = await process_invasion_data(filtered_data)
+        if result:
+            logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
             return {"status": "success", "processed_data": result}
     else:
         logger.debug(f"⚠️ Webhook type '{data_type}' not handled by parser yet.")
@@ -86,13 +86,19 @@ async def receive_webhook(request: Request):
         results[event_type] = []
 
         start_time = time.perf_counter()
+        valid_count = 0
 
         for event in events:  # Sequential processing per event type
             result = await process_single_event(event)
             results[event_type].append(result)
+            if result.get("status") != "ignored":
+                valid_count += 1
 
         elapsed = time.perf_counter() - start_time  # End stopwatch
-        logger.info(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")
+        if valid_count:
+            logger.success(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")
+        else:
+            logger.debug(f"⏱️ No valid {event_type} events processed in {elapsed:.2f} seconds.")
 
     # Run different event types **concurrently**
     await asyncio.gather(*[process_event_group(event_type, events) for event_type, events in grouped_events.items()])
