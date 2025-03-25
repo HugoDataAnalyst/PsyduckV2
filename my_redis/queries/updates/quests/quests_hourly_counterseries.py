@@ -58,5 +58,5 @@ async def update_quest_hourly_counter(data, pipe=None):
             await pipe.execute()
         updated_fields[field_name] = "OK"
 
-    logger.info(f"✅ Updated Quest hourly counter in hash '{hash_key}' for field '{field_name}'")
+    logger.debug(f"✅ Updated Quest hourly counter in hash '{hash_key}' for field '{field_name}'")
     return updated_fields

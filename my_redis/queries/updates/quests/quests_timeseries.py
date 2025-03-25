@@ -101,10 +101,10 @@ async def add_timeseries_quest_event(data, pipe=None):
         updated_fields["total"] = "OK"
 
 
-    logger.info(f"✅ Added Quest event to timeseries: overall key {key_overall} at timestamp {ts}")
+    logger.debug(f"✅ Added Quest event to timeseries: overall key {key_overall} at timestamp {ts}")
     if with_ar:
-        logger.info(f"✅ Added Quest event to AR key with reward: {reward_ar_type} at timestamp {ts}")
+        logger.debug(f"✅ Added Quest event to AR key with reward: {reward_ar_type} at timestamp {ts}")
     else:
-        logger.info(f"✅ Added Quest event to Normal key with reward: {reward_normal_type} at timestamp {ts}")
+        logger.debug(f"✅ Added Quest event to Normal key with reward: {reward_normal_type} at timestamp {ts}")
 
     return updated_fields
