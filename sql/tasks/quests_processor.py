@@ -137,7 +137,22 @@ class QuestSQLProcessor:
                                 area_id, month_year, total_count
                             )
                             SELECT
-                                p.id, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                p.id,
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, ''),
+                                COALESCE(%s, 0),
+                                COALESCE(%s, ''),
+                                %s,
+                                %s,
+                                %s
                             FROM pokestops p
                             WHERE p.pokestop = %s
                             ON DUPLICATE KEY UPDATE total_count = total_count + VALUES(total_count)
@@ -164,7 +179,7 @@ class QuestSQLProcessor:
                         quest_time = time.perf_counter() - quest_start
 
                         await conn.commit()
-                        logger.debug(f"⏱️ DB ops timing - Pokestop: {pokestop_time:.4f}s, Quest: {quest_time:.4f}s")
+                        logger.info(f"⏱️ DB ops timing - Pokestop: {pokestop_time:.4f}s, Quest: {quest_time:.4f}s")
                         return True
 
             except aiomysql.Error as e:
