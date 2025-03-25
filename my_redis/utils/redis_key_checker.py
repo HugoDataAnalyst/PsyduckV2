@@ -83,16 +83,24 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
                     "form", str(form)
                 ]
 
-            if pipe:
-                pipe.execute_command(*command)  # Add to Redis pipeline
-                pipe.execute_command("EXPIRE", key, int(retention_ms / 1000))  # Set TTL with seconds for EXPIRE
-            else:
-                await client.execute_command(*command)  # Execute immediately if no pipeline
-                await client.execute_command("EXPIRE", key, int(retention_ms / 1000))  # Set TTL with seconds for EXPIRE
+            try:
+                if pipe:
+                    pipe.execute_command(*command)  # Add to Redis pipeline
+                    pipe.execute_command("EXPIRE", key, int(retention_ms / 1000))  # Set TTL with seconds for EXPIRE
+                else:
+                    await client.execute_command(*command)  # Execute immediately if no pipeline
+                    await client.execute_command("EXPIRE", key, int(retention_ms / 1000))  # Set TTL with seconds for EXPIRE
 
-            logger.debug(
-                f"✅ Time series key {key} created with TTL set to {int(retention_ms/1000)} seconds."
-            )
+                logger.debug(
+                    f"✅ Time series key {key} created with TTL set to {int(retention_ms/1000)} seconds."
+                )
+
+            except Exception as create_error:
+                if "key already exists" in str(create_error).lower():
+                    logger.debug(f"⚠️ Time series key {key} was created by another process.")
+                else:
+                    raise create_error
+
         else:
             logger.debug(f"🚨 Time series key {key} already exists.")
 
