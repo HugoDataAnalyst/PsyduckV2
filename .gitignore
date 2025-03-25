@@ -19,9 +19,11 @@ node_modules/
 # Python rubbish
 __pycache__/
 
+# Data & Configs
 data/*
 logs/
 config/config.json
+docker-compose.yml
 
 # Database rubbish
 database/
