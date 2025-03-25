@@ -46,7 +46,7 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
         log_filename = f"logs/psyduckv2.log"
         logger.add(
             log_filename,
-            rotation="5MB",  # Create a new log file every 10MB
+            rotation="5MB",  # Create a new log file every 5MB
             retention=5,  # ✅ Keep only the last 5 log files
             level=log_lvl,
             format=log_fmt

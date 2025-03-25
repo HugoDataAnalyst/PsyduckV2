@@ -7,10 +7,10 @@
         "store_sql_invasion_aggregation": true
     },
     "flusher": {
-        "pokemon_max_threshold": 15000,
-        "shiny_max_threshold": 15000,
-        "shiny_flush_interval": 60,
-        "pokemon_flush_interval": 60
+        "pokemon_max_threshold": 10000,
+        "shiny_max_threshold": 10000,
+        "shiny_flush_interval": 20,
+        "pokemon_flush_interval": 20
     },
     "geofences": {
         "expire_cache_seconds": 3600,

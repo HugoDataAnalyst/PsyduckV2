@@ -9,13 +9,9 @@ This API provides endpoints for processing webhooks and retrieving Redis/SQL dat
 For support or further information, please contact: hugogomes@databyhugo.com.
 """
 
-VERSION = "0.0.1"
+VERSION = "1.0.0"
 
 TAGS_METADATA = [
-    {
-        "name": "Total Hourly Pokémon",
-        "description": "Obtain Total Hourly Pokémon Data from Redis."
-    },
     {
         "name": "Pokémon Counter Series",
         "description": "Obtain Pokémon Counter Series Data from Redis.",
