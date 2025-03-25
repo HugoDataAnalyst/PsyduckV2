@@ -138,28 +138,39 @@ class PokemonSQLProcessor:
     @classmethod
     async def _bulk_upsert_with_retry(cls, pool, table_name, sql, values, max_retries, operation_name):
         """
-        Helper method to perform bulk upsert with deadlock retries.
+        Helper method to perform bulk upsert with deadlock and lock timeout retries.
+        Handles both deadlocks (1213) and lock wait timeouts (1205).
         """
         for attempt in range(max_retries):
             try:
                 async with pool.acquire() as conn:
                     async with conn.cursor() as cursor:
+                        # Set a more aggressive timeout for this transaction
+                        await cursor.execute("SET SESSION innodb_lock_wait_timeout = 10")
+
+                        # Execute the main operation
                         await cursor.executemany(sql, values)
                         await conn.commit()
                         logger.debug(f"✅ Bulk upserted {len(values)} {operation_name} rows.")
                         return True
+
             except aiomysql.Error as e:
-                if e.args[0] == 1213:  # Deadlock error code
-                    logger.warning(f"⚠️ Deadlock detected for {table_name}. 🚨 Retrying ({attempt + 1}/{max_retries})...")
-                    await asyncio.sleep(random.uniform(0.1, 0.5))  # Add a small random delay before retrying
+                if e.args[0] in (1213, 1205):  # Deadlock (1213) or Lock timeout (1205)
+                    wait_time = random.uniform(0.5, 2.0) * (attempt + 1)  # Exponential backoff
+                    logger.warning(
+                        f"⚠️ {'Deadlock' if e.args[0] == 1213 else 'Lock timeout'} detected for {table_name}. "
+                        f"Retrying ({attempt + 1}/{max_retries}) in {wait_time:.2f}s..."
+                    )
+                    await asyncio.sleep(wait_time)
                 else:
                     logger.error(f"❌ Error during {table_name} bulk upsert: {e}", exc_info=True)
                     return False
+
             except Exception as e:
                 logger.error(f"❌ Unexpected error during {table_name} bulk upsert: {e}", exc_info=True)
                 return False
 
-        logger.error(f"❌ Max retries reached for {table_name}. Failed to upsert data due to deadlocks.")
+        logger.error(f"❌ Max retries reached for {table_name}. Failed to upsert data.")
         return False
 
     @classmethod

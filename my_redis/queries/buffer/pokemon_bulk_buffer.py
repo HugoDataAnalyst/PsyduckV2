@@ -44,7 +44,7 @@ class PokemonIVRedisBuffer:
 
             # Flush if the number of unique combinations exceeds the threshold
             if current_unique_count >= cls.aggregation_threshold:
-                logger.info(f"📊 👻 Aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
+                logger.warning(f"📊 👻 Aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
                 await cls.flush_if_ready(redis_client)
         except Exception as e:
             logger.error(f"❌ Error incrementing aggregated event: {e}")
@@ -199,7 +199,7 @@ class ShinyRateRedisBuffer:
 
             # Flush if threshold is reached
             if current_unique_count >= cls.aggregation_threshold:
-                logger.info(f"📊 🌟 Shiny aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
+                logger.warning(f"📊 🌟 Shiny aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
                 await cls.flush_if_ready(redis_client)
         except Exception as e:
             logger.error(f"❌ Error incrementing aggregated shiny event: {e}")
