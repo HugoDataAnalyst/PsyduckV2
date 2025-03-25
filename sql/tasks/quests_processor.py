@@ -179,7 +179,7 @@ class QuestSQLProcessor:
                         quest_time = time.perf_counter() - quest_start
 
                         await conn.commit()
-                        logger.info(f"⏱️ DB ops timing - Pokestop: {pokestop_time:.4f}s, Quest: {quest_time:.4f}s")
+                        logger.debug(f"⏱️ DB ops timing - Pokestop: {pokestop_time:.4f}s, Quest: {quest_time:.4f}s")
                         return True
 
             except aiomysql.Error as e:
