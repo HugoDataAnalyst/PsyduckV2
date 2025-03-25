@@ -21,7 +21,7 @@ async def add_raid_timeseries_event(data, pipe=None):
       - "raid_is_exclusive": whether the raid is exclusive (boolean/int; converted to 0 or 1)
       - "raid_ex_raid_eligible": whether the raid is eligible for EX (boolean/int; converted to 0 or 1)
     """
-    client = await redis_manager.check_redis_connection("raid_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot add Raid event to time series.")
         return "ERROR"

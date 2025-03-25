@@ -97,7 +97,7 @@ async def ensure_timeseries_key(client, key, metric, area, identifier, form, ret
 
             except Exception as create_error:
                 if "key already exists" in str(create_error).lower():
-                    logger.debug(f"⚠️ Time series key {key} was created by another process.")
+                    logger.success(f"⚠️ Time series key {key} was created by another process.")
                 else:
                     raise create_error
 

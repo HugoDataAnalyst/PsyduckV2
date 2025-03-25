@@ -24,7 +24,7 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
     Add a Pokémon event into Redis TimeSeries for TTH-based tracking.
     Supports an optional Redis pipeline for batch processing.
     """
-    client = await redis_manager.check_redis_connection("pokemon_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot add Pokémon TTH event to time series.")
         return "ERROR"

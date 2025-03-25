@@ -25,7 +25,7 @@ class QuestCounterRetrieval(CounterTransformer):
         In "grouped" mode, it combines data from all keys into one dictionary keyed by the full field,
         then sorts the result by the numeric value of the first component.
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}

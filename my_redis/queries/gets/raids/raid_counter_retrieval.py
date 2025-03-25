@@ -24,7 +24,7 @@ class RaidCounterRetrieval(CounterTransformer):
         In "grouped" mode, it combines data from all keys into one dictionary keyed by the full field,
         then sorts the result by the numeric value of the first component.
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}
@@ -64,7 +64,7 @@ class RaidCounterRetrieval(CounterTransformer):
         In "surged" mode (if desired), you could implement similar logic to group by the actual hour across days.
         Here, for demonstration, we'll support "sum" and "grouped".
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}

@@ -17,7 +17,7 @@ class PokemonCounterRetrieval(CounterTransformer):
 
     async def retrieve_totals_hourly(self) -> dict:
         time_format = "%Y%m%d%H"
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}
@@ -49,7 +49,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         keyed by the full field (e.g., "1:163:total") summing counts across keys, then sorts
         the final result by pokemon_id (the first component).
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}
@@ -81,7 +81,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         In "surged" mode, data is grouped by the actual hour of day (e.g. "18") across all keys (regardless of date).
         """
         time_format = "%Y%m%d%H"
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}
@@ -116,7 +116,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         Always returns a complete timeline (each day in the requested range).
         """
         time_format = "%Y%m%d"
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}
@@ -148,7 +148,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         Returns a dictionary with aggregated data.
         """
         time_format = "%Y%m"
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Retrieval pool connection not available")
             return {"mode": self.mode, "data": {}}

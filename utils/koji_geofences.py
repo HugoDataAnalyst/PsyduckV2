@@ -36,8 +36,20 @@ class KojiGeofences:
 
     @classmethod
     async def get_redis_client(cls):
-        """Retrieve a dedicated Redis connection for geofences."""
-        return await RedisManager.check_redis_connection("koji_geofence_pool")
+        """Retrieve a validated Redis connection with smart reconnection handling."""
+
+        # Check and maintain connection health
+        if not await cls.redis_manager.check_redis_connection():
+            logger.error("❌ Redis connection unavailable after retries")
+            return None
+
+        # Return the active client if healthy
+        if cls.redis_manager.redis_client:
+            logger.debug("✅ Using existing Redis connection")
+            return cls.redis_manager.redis_client
+
+        logger.error("❌ No Redis client instance available")
+        return None
 
     @classmethod
     async def get_koji_geofences(cls):

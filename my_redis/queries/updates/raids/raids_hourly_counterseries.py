@@ -15,7 +15,7 @@ async def update_raid_hourly_counter(raid_data, pipe=None):
     The field name is constructed as:
       "{raid_pokemon}:{raid_level}:{raid_form}:{raid_costume}:{raid_is_exclusive}:{raid_ex_raid_eligible}:total"
     """
-    client = await redis_manager.check_redis_connection("raid_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot update Raid hourly counter.")
         return None

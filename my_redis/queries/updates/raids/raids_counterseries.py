@@ -9,7 +9,7 @@ async def update_raid_counter(raid_data, pipe=None):
     Update daily counters for Raids events using a single Redis hash per area per day.
     Supports Redis pipelines for batch processing.
     """
-    client = await redis_manager.check_redis_connection("raid_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot update Raid counters.")
         return None
