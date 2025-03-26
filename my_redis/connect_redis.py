@@ -3,6 +3,7 @@ import config as AppConfig
 from utils.logger import logger
 import asyncio
 from typing import Optional
+from contextlib import asynccontextmanager
 from time import monotonic
 
 class RedisManager:
@@ -16,17 +17,18 @@ class RedisManager:
 
     def __new__(cls):
         if cls._instance is None:
-            logger.success("🆕 Creating new RedisManager instance")
             cls._instance = super().__new__(cls)
             cls._instance.redis_client = None
             cls._instance._connection_lock = asyncio.Lock()
-        else:
-            logger.warning("♻️ Reusing existing RedisManager instance")
+            cls._instance._connection_state = "disconnected"
         return cls._instance
 
     async def init_redis(self) -> bool:
         """Initialize Redis connection with thread-safe locking."""
         async with self._connection_lock:
+            if self._connection_state == "connected" and await self._quick_ping():
+                return True
+
             if self.redis_client and await self._quick_ping():
                 return True
 
@@ -47,20 +49,24 @@ class RedisManager:
                     self._connection_attempts = 0
                     self._last_successful_ping = monotonic()
                     logger.success("✅ Redis connection established")
+                    self._connection_state = "connected"
                     return True
 
                 await self._cleanup_failed_connection()
+                self._connection_state = "disconnected"
                 return False
 
             except Exception as e:
                 logger.error(f"❌ Redis connection failed: {str(e)}")
                 await self._cleanup_failed_connection()
+                self._connection_state = "disconnected"
                 return False
 
     async def check_redis_connection(self) -> bool:
         """Smart connection checker with exponential backoff."""
         # Fast path - recently verified connection
-        if (monotonic() - self._last_successful_ping) < self.HEALTH_CHECK_INTERVAL:
+        if self._connection_state == "connected" and \
+        (monotonic() - self._last_successful_ping) < self.HEALTH_CHECK_INTERVAL:
             return self.redis_client
 
         try:
@@ -90,12 +96,17 @@ class RedisManager:
             return False
 
         try:
-            # Force reconnect if connection is older than 5 minutes
-            if (monotonic() - self._last_successful_ping) > 300:
+            # Only force reconnect if connection is stale AND ping fails
+            is_stale = (monotonic() - self._last_successful_ping) > 300
+            if not is_stale:
+                return await asyncio.wait_for(self.redis_client.ping(), timeout=2)
+
+            # Only proceed with cleanup if ping fails
+            if not await asyncio.wait_for(self.redis_client.ping(), timeout=2):
                 await self._cleanup_failed_connection()
                 return False
+            return True
 
-            return await asyncio.wait_for(self.redis_client.ping(), timeout=2)
         except Exception:
             await self._cleanup_failed_connection()
             return False
@@ -107,13 +118,21 @@ class RedisManager:
         except Exception:
             return False
 
+    @asynccontextmanager
     async def get_connection(self):
-        """Yields a connection from the pool that auto-releases when done"""
+        """Provides a Redis connection from the pool as a context manager.
+
+        The connection is automatically released when the context is exited.
+        """
         client = await self.check_redis_connection()
         if not client:
             raise ConnectionError("Redis connection not available")
         async with client.client() as conn:
-            yield conn
+            try:
+                yield conn
+            finally:
+                # The context manager from client.client() handles the release
+                pass
 
     async def _cleanup_failed_connection(self):
         """Safely clean up after failed connection attempts."""
