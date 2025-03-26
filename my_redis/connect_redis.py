@@ -1,6 +1,4 @@
-import socket
 import redis.asyncio as redis
-from tenacity import retry
 import config as AppConfig
 from utils.logger import logger
 import asyncio
@@ -108,6 +106,14 @@ class RedisManager:
             return await self.redis_client.ping()
         except Exception:
             return False
+
+    async def get_connection(self):
+        """Yields a connection from the pool that auto-releases when done"""
+        client = await self.check_redis_connection()
+        if not client:
+            raise ConnectionError("Redis connection not available")
+        async with client.client() as conn:
+            yield conn
 
     async def _cleanup_failed_connection(self):
         """Safely clean up after failed connection attempts."""
