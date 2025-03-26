@@ -1,4 +1,3 @@
-from colorama import init
 import redis.asyncio as redis
 import config as AppConfig
 from utils.logger import logger

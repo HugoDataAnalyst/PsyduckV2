@@ -55,7 +55,7 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
     # Ensure the time series key exists
     retention_ms = AppConfig.tth_timeseries_retention_ms
     logger.debug(f"🚨 Set PokémonTTH retention timer: {AppConfig.tth_timeseries_retention_ms}")
-    await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", retention_ms, pipe)
+    await ensure_timeseries_key(client, key, "tth", area, tth_bucket, "", retention_ms)
 
     if pipe:
         pipe.execute_command("TS.ADD", key, ts, 1, "DUPLICATE_POLICY", "SUM")  # Add to pipeline

@@ -41,7 +41,7 @@ async def add_timeseries_invasion_event(data, pipe=None):
     # Ensure the time series key exists
     retention_ms = AppConfig.invasion_timeseries_retention_ms
     logger.debug(f"🚨 Set Invasion retention timer: {retention_ms}")
-    await ensure_timeseries_key(client, key_total, "invasion_total", area, display_type, f"{grunt}:{confirmed}", retention_ms, pipe)
+    await ensure_timeseries_key(client, key_total, "invasion_total", area, display_type, f"{grunt}:{confirmed}", retention_ms)
 
     # Determine metric increments
     inc_total      = 1  # Always add 1 for total

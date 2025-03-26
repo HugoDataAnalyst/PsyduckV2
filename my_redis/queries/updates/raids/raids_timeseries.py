@@ -52,10 +52,10 @@ async def add_raid_timeseries_event(data, pipe=None):
     logger.debug(f"🚨 Set Raid TimeSeries retention timer: {retention_ms}")
 
     # Ensure the timeseries key exists.
-    await ensure_timeseries_key(client, key_total, "raid_total", area, raid_pokemon, raid_form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_costume, "raid_costume", area, raid_pokemon, raid_form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_exclusive, "raid_exclusive", area, raid_pokemon, raid_form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_ex_raid_eligible, "raid_ex_raid_eligible", area, raid_pokemon, raid_form, retention_ms, pipe)
+    await ensure_timeseries_key(client, key_total, "raid_total", area, raid_pokemon, raid_form, retention_ms)
+    await ensure_timeseries_key(client, key_costume, "raid_costume", area, raid_pokemon, raid_form, retention_ms)
+    await ensure_timeseries_key(client, key_exclusive, "raid_exclusive", area, raid_pokemon, raid_form, retention_ms)
+    await ensure_timeseries_key(client, key_ex_raid_eligible, "raid_ex_raid_eligible", area, raid_pokemon, raid_form, retention_ms)
 
 
     # Determine metric increments
