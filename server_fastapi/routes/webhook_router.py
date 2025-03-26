@@ -90,9 +90,10 @@ async def receive_webhook(request: Request):
 
         for event in events:  # Sequential processing per event type
             result = await process_single_event(event)
-            results[event_type].append(result)
-            if result.get("status") != "ignored":
-                valid_count += 1
+            if result:
+                results[event_type].append(result)
+                if result.get("status") != "ignored":
+                    valid_count += 1
 
         elapsed = time.perf_counter() - start_time  # End stopwatch
         if valid_count:
