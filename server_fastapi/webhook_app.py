@@ -75,8 +75,10 @@ async def lifespan(app: FastAPI):
     shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)  # 1 minute
 
     # Start the flusher tasks
-    await pokemon_buffer_flusher.start()
-    await shiny_rate_buffer_flusher.start()
+    if AppConfig.store_sql_pokemon_aggregation:
+        await pokemon_buffer_flusher.start()
+    if AppConfig.store_sql_pokemon_shiny:
+        await shiny_rate_buffer_flusher.start()
 
     # Yield control back to FastAPI
     yield
@@ -92,8 +94,10 @@ async def lifespan(app: FastAPI):
         logger.info("🛑 Geofence refresh task cancelled.")
 
     # Stop the flusher tasks
-    await pokemon_buffer_flusher.stop()
-    await shiny_rate_buffer_flusher.stop()
+    if AppConfig.store_sql_pokemon_aggregation:
+        await pokemon_buffer_flusher.stop()
+    if AppConfig.store_sql_pokemon_shiny:
+        await shiny_rate_buffer_flusher.stop()
 
     # Close Redis pools
     await redis_manager.close_redis()
