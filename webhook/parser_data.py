@@ -68,7 +68,7 @@ async def process_pokemon_data(filtered_data):
         results = await pipe.execute()
         for res in results:
             if isinstance(res, Exception) and "key already exists" in str(res).lower():
-                logger.success(f"⚠️ Duplicate key error: FUCK YOU")
+                logger.debug(f"⚠️ Duplicate key error: FUCK YOU")
                 # Ignore duplicate key errors.
                 continue
             elif isinstance(res, Exception):
