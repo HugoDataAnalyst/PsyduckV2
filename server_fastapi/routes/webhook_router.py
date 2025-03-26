@@ -64,47 +64,48 @@ async def process_single_event(event: dict):
 @router.post("/webhook", dependencies=[Depends(secure_api.validate_remote_addr)], include_in_schema=False)
 async def receive_webhook(request: Request):
     """Receives and processes incoming webhooks."""
-    try:
-        data = await request.json()  # Parse incoming webhook JSON
-        logger.debug(f"📥 Received Webhook: {data}")
+    #try:
+    data = await request.json()  # Parse incoming webhook JSON
+    logger.debug(f"📥 Received Webhook: {data}")
 
-        if not isinstance(data, list):
-            return await process_single_event(data)  # Handle single webhook
+    if not isinstance(data, list):
+        return await process_single_event(data)  # Handle single webhook
 
-        # Group events by type
-        grouped_events = {}
-        for event in data:
-            event_type = event.get("type")
-            if event_type:
-                grouped_events.setdefault(event_type, []).append(event)
+    # Group events by type
+    grouped_events = {}
+    for event in data:
+        event_type = event.get("type")
+        if event_type:
+            grouped_events.setdefault(event_type, []).append(event)
 
-        results = {}
+    results = {}
 
-        # Process each event type **concurrently**, but handle each type sequentially
-        async def process_event_group(event_type, events):
-            logger.info(f"🔄 Processing {len(events)} {event_type} events...")
-            results[event_type] = []
+    # Process each event type **concurrently**, but handle each type sequentially
+    async def process_event_group(event_type, events):
+        logger.info(f"🔄 Processing {len(events)} {event_type} events...")
+        results[event_type] = []
 
-            start_time = time.perf_counter()
-            valid_count = 0
+        start_time = time.perf_counter()
+        valid_count = 0
 
-            for event in events:  # Sequential processing per event type
-                result = await process_single_event(event)
+        for event in events:  # Sequential processing per event type
+            result = await process_single_event(event)
+            if result:
                 results[event_type].append(result)
                 if result.get("status") != "ignored":
                     valid_count += 1
 
-            elapsed = time.perf_counter() - start_time  # End stopwatch
-            if valid_count:
-                logger.success(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")
-            else:
-                logger.debug(f"⏱️ No valid {event_type} events processed in {elapsed:.2f} seconds.")
+        elapsed = time.perf_counter() - start_time  # End stopwatch
+        if valid_count:
+            logger.success(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")
+        else:
+            logger.debug(f"⏱️ No valid {event_type} events processed in {elapsed:.2f} seconds.")
 
-        # Run different event types **concurrently**
-        await asyncio.gather(*[process_event_group(event_type, events) for event_type, events in grouped_events.items()])
+    # Run different event types **concurrently**
+    await asyncio.gather(*[process_event_group(event_type, events) for event_type, events in grouped_events.items()])
 
-        return {"status": "success", "processed_data": results}
+    return {"status": "success", "processed_data": results}
 
-    except Exception as e:
-        logger.error(f"❌ Error processing webhook: {e}")
-        return {"status": "error", "message": str(e)}
+    #except Exception as e:
+    #    logger.error(f"❌ Error processing webhook: {e}")
+    #    return {"status": "error", "message": str(e)}

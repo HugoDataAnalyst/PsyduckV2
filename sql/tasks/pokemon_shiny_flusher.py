@@ -18,7 +18,7 @@ class ShinyRateBufferFlusher:
 
         while self._running:
             try:
-                client = await redis_manager.get_client("flush_shiny_pool")
+                client = await redis_manager.check_redis_connection()
                 if not client:
                     logger.error("❌ Redis is not connected. Skipping flush.")
                     await asyncio.sleep(self.flush_interval)
@@ -60,7 +60,7 @@ class ShinyRateBufferFlusher:
 
         # Final flush
         try:
-            client = await RedisManager.get_client("flush_shiny_pool")
+            client = await RedisManager().check_redis_connection()
             if client:
                 start = time.perf_counter()
                 count = await ShinyRateRedisBuffer.force_flush(client)

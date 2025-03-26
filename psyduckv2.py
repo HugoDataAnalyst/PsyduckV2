@@ -61,7 +61,7 @@ async def main():
         logger.info("🫣 Shutting down...")
     finally:
         await close_db()
-        await redis_manager.close_all_pools()
+        await redis_manager.close_redis()
 
 if __name__ == "__main__":
     try:

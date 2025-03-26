@@ -34,7 +34,7 @@ class PokemonTimeSeries(CounterTransformer):
                         group by "pokemon_id:form".
           - "surged": Group by hour (YYYYMMDDHH).
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection not available for TimeSeries retrieval.")
             return {"mode": self.mode, "data": {}}

@@ -32,7 +32,7 @@ class RaidTimeSeries(CounterTransformer):
           - "grouped": groups by the identifier “raid_pokemon:raid_form:raid_level”. (Only non‑zero totals are returned.)
           - "surged": for each metric, groups by hour (using YYYYMMDDHH) per identifier.
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection not available for Raid TimeSeries retrieval.")
             return {"mode": self.mode, "data": {}}

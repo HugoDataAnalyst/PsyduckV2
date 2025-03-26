@@ -32,7 +32,7 @@ class InvasionTimeSeries(CounterTransformer):
           - "grouped": Groups by the key identifier (display:grunt:confirmed) and excludes groups with 0 total.
           - "surged": Groups by hour (YYYYMMDDHH).
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection not available for TimeSeries retrieval.")
             return {"mode": self.mode, "data": {}}

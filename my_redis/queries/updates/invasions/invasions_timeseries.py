@@ -17,7 +17,7 @@ async def add_timeseries_invasion_event(data, pipe=None):
       - "invasion_grunt_type": invasion grunt (int)
       - "invasion_confirmed": invasion confirmed flag (int or boolean)
     """
-    client = await redis_manager.check_redis_connection("invasion_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot add Pokémon TTH event to time series.")
         return "ERROR"
@@ -41,7 +41,7 @@ async def add_timeseries_invasion_event(data, pipe=None):
     # Ensure the time series key exists
     retention_ms = AppConfig.invasion_timeseries_retention_ms
     logger.debug(f"🚨 Set Invasion retention timer: {retention_ms}")
-    await ensure_timeseries_key(client, key_total, "invasion_total", area, display_type, f"{grunt}:{confirmed}", retention_ms, pipe)
+    await ensure_timeseries_key(client, key_total, "invasion_total", area, display_type, f"{grunt}:{confirmed}", retention_ms)
 
     # Determine metric increments
     inc_total      = 1  # Always add 1 for total

@@ -15,7 +15,7 @@ async def add_timeseries_quest_event(data, pipe=None):
       - "pokestop": pokestop ID
       - "quest_type": a field indicating the quest type (e.g., "ar" or "normal")
     """
-    client = await redis_manager.check_redis_connection("quest_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot add Quest event to timeseries.")
         return "ERROR"
@@ -66,12 +66,12 @@ async def add_timeseries_quest_event(data, pipe=None):
     updated_fields = {}
 
     # Ensure overall series key exists.
-    await ensure_timeseries_key(client, key_overall, "quest_total", area, mode, "", retention_ms, pipe)
+    await ensure_timeseries_key(client, key_overall, "quest_total", area, mode, "", retention_ms)
     # Ensure mode-specific series key exists.
     if with_ar:
-        await ensure_timeseries_key(client, key_ar_detailed, "quest_ar_detailed", area, mode, reward_ar_type, retention_ms, pipe)
+        await ensure_timeseries_key(client, key_ar_detailed, "quest_ar_detailed", area, mode, reward_ar_type, retention_ms)
     else:
-        await ensure_timeseries_key(client, key_normal_detailed, "quest_normal_detailed", area, mode, reward_normal_type, retention_ms, pipe)
+        await ensure_timeseries_key(client, key_normal_detailed, "quest_normal_detailed", area, mode, reward_normal_type, retention_ms)
 
 
     # Determine metric increments

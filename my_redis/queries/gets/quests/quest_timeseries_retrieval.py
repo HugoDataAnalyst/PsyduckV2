@@ -44,7 +44,7 @@ class QuestTimeSeries(CounterTransformer):
                        and detailed series are grouped by their full field‐details identifier.
           - "surged": (not shown here) would group by hour.
         """
-        client = await redis_manager.check_redis_connection("retrieval_pool")
+        client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection not available for Quest TimeSeries retrieval.")
             return {"mode": self.mode, "data": {}}

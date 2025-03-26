@@ -10,7 +10,7 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
     Add a Pokémon event into Redis TimeSeries.
     Supports Redis pipelines for batch processing.
     """
-    client = await redis_manager.check_redis_connection("pokemon_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot add Pokémon event to time series.")
         return "ERROR"
@@ -38,13 +38,13 @@ async def add_timeseries_total_pokemon_event(data, pipe=None):
     # Ensure keys exist
     retention_ms = AppConfig.timeseries_pokemon_retention_ms
     logger.debug(f"🚨 Set PokémonTotal retention timer: {AppConfig.timeseries_pokemon_retention_ms}")
-    await ensure_timeseries_key(client, key_total, "pokemon_total", area, pokemon_id, form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_iv100, "pokemon_iv100", area, pokemon_id, form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_iv0, "pokemon_iv0", area, pokemon_id, form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_pvp_little, "pokemon_pvp_little", area, pokemon_id, form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_pvp_great, "pokemon_pvp_great", area, pokemon_id, form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_pvp_ultra, "pokemon_pvp_ultra", area, pokemon_id, form, retention_ms, pipe)
-    await ensure_timeseries_key(client, key_shiny, "pokemon_shiny", area, pokemon_id, form, retention_ms, pipe)
+    await ensure_timeseries_key(client, key_total, "pokemon_total", area, pokemon_id, form, retention_ms)
+    await ensure_timeseries_key(client, key_iv100, "pokemon_iv100", area, pokemon_id, form, retention_ms)
+    await ensure_timeseries_key(client, key_iv0, "pokemon_iv0", area, pokemon_id, form, retention_ms)
+    await ensure_timeseries_key(client, key_pvp_little, "pokemon_pvp_little", area, pokemon_id, form, retention_ms)
+    await ensure_timeseries_key(client, key_pvp_great, "pokemon_pvp_great", area, pokemon_id, form, retention_ms)
+    await ensure_timeseries_key(client, key_pvp_ultra, "pokemon_pvp_ultra", area, pokemon_id, form, retention_ms)
+    await ensure_timeseries_key(client, key_shiny, "pokemon_shiny", area, pokemon_id, form, retention_ms)
 
     # Determine metric increments
     inc_total      = 1  # Always add 1 for total

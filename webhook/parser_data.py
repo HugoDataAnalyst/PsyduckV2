@@ -48,62 +48,69 @@ async def process_pokemon_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    client = await redis_manager.check_redis_connection("pokemon_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
 
-    try:
-        async with client.pipeline() as pipe:
-            # Add all Redis operations to the pipeline
-            pokemon_timeseries_update = await pokemon_timeseries.add_timeseries_total_pokemon_event(filtered_data, pipe)
-            pokemon_counterseries_update = await pokemon_counterseries.update_total_pokemon_counter(filtered_data, pipe)
-            pokemon_hourly_counterseries_update = await pokemon_hourly_counterseries.update_pokemon_hourly_counter(filtered_data, pipe)
-            pokemon_tth_timeseries_update = await pokemon_tth_timeseries.add_tth_timeseries_pokemon_event(filtered_data, pipe)
-            pokemon_tth_counterseries_update = await pokemon_tth_counterseries.update_tth_pokemon_counter(filtered_data, pipe)
-            pokemon_tth_hourly_counterseries_update = await pokemon_tth_hourly_counterseries.update_tth_pokemon_hourly_counter(filtered_data, pipe)
-            pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
+    #try:
+    async with client.pipeline(transaction=False) as pipe:
+        # Add all Redis operations to the pipeline
+        pokemon_timeseries_update = await pokemon_timeseries.add_timeseries_total_pokemon_event(filtered_data, pipe)
+        pokemon_counterseries_update = await pokemon_counterseries.update_total_pokemon_counter(filtered_data, pipe)
+        pokemon_hourly_counterseries_update = await pokemon_hourly_counterseries.update_pokemon_hourly_counter(filtered_data, pipe)
+        pokemon_tth_timeseries_update = await pokemon_tth_timeseries.add_tth_timeseries_pokemon_event(filtered_data, pipe)
+        pokemon_tth_counterseries_update = await pokemon_tth_counterseries.update_tth_pokemon_counter(filtered_data, pipe)
+        pokemon_tth_hourly_counterseries_update = await pokemon_tth_hourly_counterseries.update_tth_pokemon_hourly_counter(filtered_data, pipe)
+        pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
 
-            # Execute all Redis commands in a single batch
-            await pipe.execute()
+        # Execute all Redis commands in a single batch
+        results = await pipe.execute()
+        for res in results:
+            if isinstance(res, Exception) and "key already exists" in str(res).lower():
+                logger.debug(f"⚠️ Duplicate key error: FUCK YOU")
+                # Ignore duplicate key errors.
+                continue
+            elif isinstance(res, Exception):
+                raise res
 
 
-        # Execute SQL commands if Enabled
-        if AppConfig.store_sql_pokemon_aggregation:
-            get_client = await RedisManager.get_client("sql_pokemon_pool")
-            logger.debug("🔃 Processing Pokémon Aggregation...")
-            await pokemon_buffer.increment_event(get_client, filtered_data)
-        else:
-            logger.debug("⚠️ SQL Pokémon Aggregation is disabled.")
+    # Execute SQL commands if Enabled
+    if AppConfig.store_sql_pokemon_aggregation:
+        get_client = await redis_manager.check_redis_connection()
+        logger.debug("🔃 Processing Pokémon Aggregation...")
+        await pokemon_buffer.increment_event(get_client, filtered_data)
+    else:
+        logger.debug("⚠️ SQL Pokémon Aggregation is disabled.")
 
-        if AppConfig.store_sql_pokemon_shiny:
-            get_client = await RedisManager.get_client("sql_pokemon_pool")
-            logger.debug("🔃 Processing Pokémon Shiny Rates...")
-            await shiny_buffer.increment_event(get_client, filtered_data)
-        else:
-            logger.debug("⚠️ SQL Pokémon Shiny Rates is disabled.")
+    if AppConfig.store_sql_pokemon_shiny:
+        get_client = await redis_manager.check_redis_connection()
+        logger.debug("🔃 Processing Pokémon Shiny Rates...")
+        await shiny_buffer.increment_event(get_client, filtered_data)
+    else:
+        logger.debug("⚠️ SQL Pokémon Shiny Rates is disabled.")
 
-        # Map results to Meaningful Information.
-        structured_result = (
-            f"Pokémon ID: {filtered_data['pokemon_id']}\n"
-            f"Form: {filtered_data['form']}\n"
-            f"Area: {filtered_data['area_name']}\n"
-            "Updates:\n"
-            f"  - Timeseries Total: {json.dumps(pokemon_timeseries_update, indent=2)}\n"
-            f"  - Counter Weekly Total: {json.dumps(pokemon_counterseries_update, indent=2)}\n"
-            f"  - Counter Hourly Total: {json.dumps(pokemon_hourly_counterseries_update, indent=2)}\n"
-            f"  - TTH Timeseries: {json.dumps(pokemon_tth_timeseries_update, indent=2)}\n"
-            f"  - TTH Weekly Counter: {json.dumps(pokemon_tth_counterseries_update, indent=2)}\n"
-            f"  - TTH Hourly Counter: {json.dumps(pokemon_tth_hourly_counterseries_update, indent=2)}\n"
-            f"  - Counter Weather: {json.dumps(pokemon_weather_counterseries_update, indent=2)}\n"
-        )
+    # Map results to Meaningful Information.
+    structured_result = (
+        f"Pokémon ID: {filtered_data['pokemon_id']}\n"
+        f"Form: {filtered_data['form']}\n"
+        f"Area: {filtered_data['area_name']}\n"
+        "Updates:\n"
+        f"  - Timeseries Total: {json.dumps(pokemon_timeseries_update, indent=2)}\n"
+        f"  - Counter Weekly Total: {json.dumps(pokemon_counterseries_update, indent=2)}\n"
+        f"  - Counter Hourly Total: {json.dumps(pokemon_hourly_counterseries_update, indent=2)}\n"
+        f"  - TTH Timeseries: {json.dumps(pokemon_tth_timeseries_update, indent=2)}\n"
+        f"  - TTH Weekly Counter: {json.dumps(pokemon_tth_counterseries_update, indent=2)}\n"
+        f"  - TTH Hourly Counter: {json.dumps(pokemon_tth_hourly_counterseries_update, indent=2)}\n"
+        f"  - Counter Weather: {json.dumps(pokemon_weather_counterseries_update, indent=2)}\n"
+    )
 
-        logger.debug(f"✅ Processed Pokémon {filtered_data['pokemon_id']} in area {filtered_data['area_name']} - Updates: {structured_result}")
-        return structured_result
+    logger.debug(f"✅ Processed Pokémon {filtered_data['pokemon_id']} in area {filtered_data['area_name']} - Updates: {structured_result}")
+    return structured_result
 
-    except Exception as e:
-        logger.error(f"❌ Error processing Pokémon event data in parser_data: {e}")
-        return None
+    #except Exception as e:
+    #    logger.error(f"❌ Error processing Pokémon event data in parser_data: {e}")
+    #    return None
 
 async def process_raid_data(filtered_data):
     """
@@ -113,7 +120,7 @@ async def process_raid_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    client = await redis_manager.check_redis_connection("raid_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
@@ -162,7 +169,7 @@ async def process_quest_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    client = await redis_manager.check_redis_connection("quest_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None
@@ -217,7 +224,7 @@ async def process_invasion_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    client = await redis_manager.check_redis_connection("invasion_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
         return None

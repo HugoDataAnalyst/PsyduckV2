@@ -11,7 +11,7 @@ async def aggregate_keys(keys: list, mode: str) -> dict:
     For "sum" mode, sums all field values (assuming integer values).
     For "grouped" mode, returns a dictionary mapping each key to its hash data.
     """
-    client = await redis_manager.check_redis_connection("retrieval_pool")
+    client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Retrieval pool connection not available")
         return {"mode": mode, "data": {}}
