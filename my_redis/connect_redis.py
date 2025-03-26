@@ -1,4 +1,6 @@
+import socket
 import redis.asyncio as redis
+from tenacity import retry
 import config as AppConfig
 from utils.logger import logger
 import asyncio
@@ -16,9 +18,12 @@ class RedisManager:
 
     def __new__(cls):
         if cls._instance is None:
+            logger.success("🆕 Creating new RedisManager instance")
             cls._instance = super().__new__(cls)
             cls._instance.redis_client = None
             cls._instance._connection_lock = asyncio.Lock()
+        else:
+            logger.warning("♻️ Reusing existing RedisManager instance")
         return cls._instance
 
     async def init_redis(self) -> bool:
@@ -34,7 +39,10 @@ class RedisManager:
                     decode_responses=True,
                     socket_keepalive=True,
                     socket_timeout=5,
-                    max_connections=10
+                    max_connections=AppConfig.redis_max_connections,
+                    health_check_interval=30,
+                    retry_on_timeout=True,
+                    socket_connect_timeout=5,
                 )
 
                 if await self._verified_ping():
@@ -80,14 +88,18 @@ class RedisManager:
         return None
 
     async def _verified_ping(self) -> bool:
-        """Thorough connection verification with timeout."""
         if not self.redis_client:
             return False
 
         try:
-            # Use a short timeout for the ping
+            # Force reconnect if connection is older than 5 minutes
+            if (monotonic() - self._last_successful_ping) > 300:
+                await self._cleanup_failed_connection()
+                return False
+
             return await asyncio.wait_for(self.redis_client.ping(), timeout=2)
-        except (asyncio.TimeoutError, redis.RedisError):
+        except Exception:
+            await self._cleanup_failed_connection()
             return False
 
     async def _quick_ping(self) -> bool:

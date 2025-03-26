@@ -6,6 +6,9 @@
         "store_sql_quest_aggregation": true,
         "store_sql_invasion_aggregation": true
     },
+    "REDIS": {
+        "redis_connections": 30
+    },
     "flusher": {
         "pokemon_max_threshold": 10000,
         "shiny_max_threshold": 10000,
