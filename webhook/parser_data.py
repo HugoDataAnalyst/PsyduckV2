@@ -56,10 +56,13 @@ async def process_pokemon_data(filtered_data):
     #try:
     async with client.pipeline(transaction=False) as pipe:
         # Add all Redis operations to the pipeline
-        pokemon_timeseries_update = await pokemon_timeseries.add_timeseries_total_pokemon_event(filtered_data, pipe)
+        # Binary Time Series with Hash
+        if AppConfig.store_pokemon_timeseries:
+            pokemon_timeseries_update = await pokemon_timeseries.add_pokemon_timeseries_event(filtered_data, pipe)
         pokemon_counterseries_update = await pokemon_counterseries.update_total_pokemon_counter(filtered_data, pipe)
         pokemon_hourly_counterseries_update = await pokemon_hourly_counterseries.update_pokemon_hourly_counter(filtered_data, pipe)
-        pokemon_tth_timeseries_update = await pokemon_tth_timeseries.add_tth_timeseries_pokemon_event(filtered_data, pipe)
+        if AppConfig.store_pokemon_tth_timeseries:
+            pokemon_tth_timeseries_update = await pokemon_tth_timeseries.add_tth_timeseries_pokemon_event(filtered_data, pipe)
         pokemon_tth_counterseries_update = await pokemon_tth_counterseries.update_tth_pokemon_counter(filtered_data, pipe)
         pokemon_tth_hourly_counterseries_update = await pokemon_tth_hourly_counterseries.update_tth_pokemon_hourly_counter(filtered_data, pipe)
         pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
@@ -128,7 +131,8 @@ async def process_raid_data(filtered_data):
     try:
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
-            raid_timeseries_update = await raids_timeseries.add_raid_timeseries_event(filtered_data, pipe)
+            if AppConfig.store_raids_timeseries:
+                raid_timeseries_update = await raids_timeseries.add_raid_timeseries_event(filtered_data, pipe)
             raid_counterseries_update = await raids_counterseries.update_raid_counter(filtered_data, pipe)
             raid_hourly_counterseries_update = await raids_hourly_counterseries.update_raid_hourly_counter(filtered_data, pipe)
 
@@ -177,7 +181,8 @@ async def process_quest_data(filtered_data):
     try:
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
-            quest_timeseries_update = await quests_timeseries.add_timeseries_quest_event(filtered_data, pipe)
+            if AppConfig.store_quests_timeseries:
+                quest_timeseries_update = await quests_timeseries.add_timeseries_quest_event(filtered_data, pipe)
             quest_counterseries_update = await quests_counterseries.update_quest_counter(filtered_data, pipe)
             quest_hourly_counterseries_update = await quests_hourly_counterseries.update_quest_hourly_counter(filtered_data, pipe)
 
@@ -232,7 +237,8 @@ async def process_invasion_data(filtered_data):
     try:
         async with client.pipeline() as pipe:
             # Add all Redis operations to the pipeline
-            invasion_timeseries_update = await invasions_timeseries.add_timeseries_invasion_event(filtered_data, pipe)
+            if AppConfig.store_invasions_timeseries:
+                invasion_timeseries_update = await invasions_timeseries.add_timeseries_invasion_event(filtered_data, pipe)
             invasion_counterseries_update = await invasions_counterseries.update_invasion_counter(filtered_data, pipe)
             invasion_hourly_counterseries_update = await invasions_hourly_counterseries.update_invasion_hourly_counter(filtered_data, pipe)
 

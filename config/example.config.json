@@ -6,6 +6,13 @@
         "store_sql_quest_aggregation": true,
         "store_sql_invasion_aggregation": true
     },
+    "IN-MEMORY":{
+        "store_pokemon_timeseries": true,
+        "store_pokemon_tth_timeseries": true,
+        "store_raids_timeseries": true,
+        "store_invasions_timeseries": true,
+        "store_quests_timeseries": true
+    },
     "REDIS": {
         "redis_connections": 30
     },
