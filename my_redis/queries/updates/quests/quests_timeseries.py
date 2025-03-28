@@ -17,7 +17,7 @@ def get_time_bucket(first_seen: int) -> str:
     bucket = (first_seen // 60) * 60
     return str(bucket)
 
-async def add_quest_event(data: Dict[str, Any], pipe=None) -> Dict[str, Any]:
+async def add_timeseries_quest_event(data: Dict[str, Any], pipe=None) -> Dict[str, Any]:
     """
     Add a Quest event using plain text hash keys.
 
