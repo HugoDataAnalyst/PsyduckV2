@@ -98,6 +98,14 @@ tth_timeseries_retention_ms      = retention_ms(config.get("retention_hours", {}
 raid_timeseries_retention_ms     = retention_ms(config.get("retention_hours", {}).get("timeseries_raid", 72))
 invasion_timeseries_retention_ms = retention_ms(config.get("retention_hours", {}).get("timeseries_invasion", 72))
 quests_timeseries_retention_ms   = retention_ms(config.get("retention_hours", {}).get("timeseries_quest", 72))
+
+#Store in Redis
+store_pokemon_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemon_timeseries', True)).upper() == "TRUE"
+store_pokemon_tth_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemon_tth_timeseries', True)).upper() == "TRUE"
+store_raids_timeseries = str(config.get('IN-MEMORY', {}).get('store_raids_timeseries', True)).upper() == "TRUE"
+store_invasions_timeseries = str(config.get('IN-MEMORY', {}).get('store_invasions_timeseries', True)).upper() == "TRUE"
+store_quests_timeseries = str(config.get('IN-MEMORY', {}).get('store_quests_timeseries', True)).upper() == "TRUE"
+
 # Log Level
 log_level = get_env_var("LOG_LEVEL", "INFO").upper()
 log_file = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
