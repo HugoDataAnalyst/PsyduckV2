@@ -15,6 +15,7 @@ from server_fastapi.utils import (
 from fastapi.openapi.docs import get_swagger_ui_html
 from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
+from my_redis.utils.expire_timeseries import periodic_cleanup
 
 redis_manager = RedisManager()
 
@@ -70,9 +71,12 @@ async def lifespan(app: FastAPI):
     # Start the background refresh task
     refresh_task = asyncio.create_task(safe_refresh())
 
+    # Start the background cleanup task
+    cleanup_timeseries_task = asyncio.create_task(periodic_cleanup())
+
     # Initialize and start buffer flushers
-    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)  # 1 minute
-    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)  # 1 minute
+    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)
+    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)
 
     # Start the flusher tasks
     if AppConfig.store_sql_pokemon_aggregation:
@@ -92,6 +96,13 @@ async def lifespan(app: FastAPI):
         await refresh_task
     except asyncio.CancelledError:
         logger.info("🛑 Geofence refresh task cancelled.")
+
+    # Cancel and await the cleanup task.
+    cleanup_timeseries_task.cancel()
+    try:
+        await cleanup_timeseries_task
+    except asyncio.CancelledError:
+        logger.info("🛑 Periodic cleanup task cancelled.")
 
     # Stop the flusher tasks
     if AppConfig.store_sql_pokemon_aggregation:
