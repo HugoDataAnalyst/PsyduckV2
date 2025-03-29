@@ -185,15 +185,22 @@ class PokemonTimeSeries:
                         )
                     )
                 logger.info(f"Formatted 'grouped' data: {formatted_data}")
-            elif self.mode == "surged" and isinstance(raw_data, dict) and "surged" in raw_data:
-                for metric, hours in raw_data["surged"].items():
-                    if isinstance(hours, dict):
-                        formatted_data[metric] = dict(
-                            sorted(
-                                {f"hour {int(h)}": v for h, v in hours.items()}.items(),
-                                key=lambda x: int(x[0].split()[1])
-                            )
+            elif self.mode == "surged":
+                formatted_data = {}
+                # raw_data is expected to be a dict mapping metric -> flat list [hour, count, hour, count, ...]
+                for metric, inner in raw_data.items():
+                    if isinstance(inner, list):
+                        # Convert the flat list into a dictionary: { hour: count, ... }
+                        hours = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
+                    else:
+                        hours = inner
+                    # Re-label each hour (if desired) and sort by hour (numeric order)
+                    formatted_data[metric] = dict(
+                        sorted(
+                            {f"hour {int(h)}": v for h, v in hours.items()}.items(),
+                            key=lambda x: int(x[0].split()[1])
                         )
+                    )
                 logger.info(f"Formatted 'surged' data: {formatted_data}")
 
             logger.info(f"Finished processing timeseries data for pattern: {pattern}")
