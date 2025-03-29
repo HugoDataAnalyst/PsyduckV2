@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, Union
 from my_redis.connect_redis import RedisManager
@@ -155,6 +156,9 @@ class PokemonTimeSeries:
             end_ts = int(self.end.timestamp())
             logger.info(f"Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
+            # Start timing right before loading/executing the script
+            request_start = time.monotonic()
+
             # Load and execute Lua script.
             script_sha = await self._load_script(client)
             logger.info("Executing Lua script with evalsha...")
@@ -202,6 +206,11 @@ class PokemonTimeSeries:
                         )
                     )
                 logger.info(f"Formatted 'surged' data: {formatted_data}")
+
+            # End timing after script execution
+            request_end = time.monotonic()
+            elapsed_time = request_end - request_start
+            logger.info(f"Pokémon retrieval execution took {elapsed_time:.3f} seconds")
 
             logger.info(f"Finished processing timeseries data for pattern: {pattern}")
             return {"mode": self.mode, "data": formatted_data}

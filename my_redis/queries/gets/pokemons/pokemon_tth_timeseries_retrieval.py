@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime
 from typing import Dict
 from my_redis.connect_redis import RedisManager
@@ -147,6 +148,9 @@ class PokemonTTHTimeSeries:
             end_ts = int(self.end.timestamp())
             logger.info(f"TTH Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
+            # Start timing right before loading/executing the script
+            request_start = time.monotonic()
+
             script_sha = await self._load_script(client)
             logger.info("Executing TTH Lua script with evalsha...")
             raw_data = await client.evalsha(
@@ -201,6 +205,11 @@ class PokemonTTHTimeSeries:
                     sorted(formatted_data.items(), key=lambda item: int(item[0].split('_')[0]))
                 )
                 logger.info(f"Formatted TTH 'surged' data: {formatted_data}")
+
+            # End timing after script execution
+            request_end = time.monotonic()
+            elapsed_time = request_end - request_start
+            logger.info(f"Pokémon TTH retrieval execution took {elapsed_time:.3f} seconds")
 
             logger.info(f"Finished processing TTH timeseries data for pattern: {pattern}")
             return {"mode": self.mode, "data": formatted_data}

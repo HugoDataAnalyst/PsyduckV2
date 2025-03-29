@@ -1,205 +1,215 @@
+import asyncio
+import time
 from datetime import datetime
+from typing import Dict, Any
 from my_redis.connect_redis import RedisManager
-from my_redis.utils.counter_transformer import CounterTransformer
 from utils.logger import logger
 
 redis_manager = RedisManager()
 
-class InvasionTimeSeries(CounterTransformer):
+INVASION_TIMESERIES_SCRIPT = """
+local pattern = ARGV[1]
+local start_ts = tonumber(ARGV[2])
+local end_ts = tonumber(ARGV[3])
+local mode = ARGV[4]
+local batch_size = 1000
+
+local sum_results = {}
+local grouped_results = {}
+local surged_results = {}
+
+local cursor = '0'
+repeat
+  local reply = redis.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', batch_size)
+  cursor = reply[1]
+  local keys = reply[2]
+  for _, key in ipairs(keys) do
+    local hash_data = redis.call('HGETALL', key)
+    -- Key format: ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}
+    local key_parts = {}
+    for part in string.gmatch(key, "([^:]+)") do
+      table.insert(key_parts, part)
+    end
+    local group_key = key_parts[5] .. ":" .. key_parts[6] .. ":" .. key_parts[7]
+    for i = 1, #hash_data, 2 do
+      local ts = tonumber(hash_data[i])
+      local count = tonumber(hash_data[i+1])
+      if ts and count and ts >= start_ts and ts <= end_ts then
+         sum_results[group_key] = (sum_results[group_key] or 0) + count
+         if not grouped_results[group_key] then
+           grouped_results[group_key] = {}
+         end
+         local bucket_str = tostring(ts)
+         grouped_results[group_key][bucket_str] = (grouped_results[group_key][bucket_str] or 0) + count
+         if not surged_results[group_key] then
+           surged_results[group_key] = {}
+         end
+         local hour = tostring(math.floor((ts % 86400) / 3600))
+         surged_results[group_key][hour] = (surged_results[group_key][hour] or 0) + count
+      end
+    end
+  end
+until cursor == '0'
+
+if mode == 'sum' then
+  local arr = {}
+  for k, v in pairs(sum_results) do
+    table.insert(arr, k)
+    table.insert(arr, v)
+  end
+  return arr
+elseif mode == 'grouped' then
+  local arr = {}
+  for group_key, groups in pairs(grouped_results) do
+    local inner = {}
+    for bucket, count in pairs(groups) do
+      table.insert(inner, bucket)
+      table.insert(inner, count)
+    end
+    table.insert(arr, group_key)
+    table.insert(arr, inner)
+  end
+  return arr
+elseif mode == 'surged' then
+  local arr = {}
+  for group_key, hours in pairs(surged_results) do
+    local inner = {}
+    for hour, count in pairs(hours) do
+      table.insert(inner, hour)
+      table.insert(inner, count)
+    end
+    table.insert(arr, group_key)
+    table.insert(arr, inner)
+  end
+  return arr
+else
+  return {}
+end
+"""
+
+class InvasionTimeSeries:
     def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
-                 display: str = "all", grunt: str = "all", confirmed: str = "all"):
+                 display_type: str = "all", grunt: str = "all", confirmed: str = "all"):
+        """
+        Parameters:
+          - area: Area name filter. Use "all" or "global" to match every area.
+          - display_type: Invasion display type (e.g., a numeric value or "all").
+          - grunt: Invasion grunt filter (numeric or "all").
+          - confirmed: Invasion confirmed flag filter (numeric or "all").
+          - mode: Aggregation mode: "sum", "grouped", or "surged".
+        """
         self.area = area
         self.start = start
         self.end = end
         self.mode = mode.lower()
-        self.display = display
+        self.display_type = display_type
         self.grunt = grunt
         self.confirmed = confirmed
+        self.script_sha = None
 
-    async def invasion_retrieve_timeseries(self) -> dict:
-        """
-        Retrieve the Invasion time series data.
+        logger.info(
+            f"Initialized InvasionTimeSeries with area: {self.area}, mode: {self.mode}, "
+            f"display_type: {self.display_type}, grunt: {self.grunt}, confirmed: {self.confirmed}, "
+            f"start: {self.start}, end: {self.end}"
+        )
 
-        - When area is not global and specific display, grunt and confirmed are provided, we use TS.RANGE.
-        - Otherwise, we use TS.MRANGE with filters.
-        Since TS.MRANGE only supports exact filtering, if confirmed is "all" but grunt (or display) is set,
-        we post-filter the returned series by parsing the key (expected format:
-          ts:invasion:total:{area}:{display}:{grunt}:{confirmed})
-        and only summing series that match the provided display/grunt/confirmed values.
+    async def _load_script(self, client):
+        if not self.script_sha:
+            logger.debug("Loading Invasion Lua script into Redis...")
+            self.script_sha = await client.script_load(INVASION_TIMESERIES_SCRIPT)
+            logger.debug(f"Invasion Lua script loaded with SHA: {self.script_sha}")
+        else:
+            logger.debug("Invasion Lua script already loaded, reusing cached SHA.")
+        return self.script_sha
 
-        Supported modes:
-          - "sum": Sums all values (applying the above post-filtering).
-          - "grouped": Groups by the key identifier (display:grunt:confirmed) and excludes groups with 0 total.
-          - "surged": Groups by hour (YYYYMMDDHH).
-        """
+    def _build_key_pattern(self) -> str:
+        # Key format: ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}
+        area = "*" if self.area.lower() in ["all", "global"] else self.area
+        display_type = "*" if self.display_type.lower() in ["all"] else self.display_type
+        grunt = "*" if self.grunt.lower() in ["all"] else self.grunt
+        confirmed = "*" if self.confirmed.lower() in ["all"] else self.confirmed
+        pattern = f"ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}"
+        logger.debug(f"Built Invasion key pattern: {pattern}")
+        return pattern
+
+    async def invasion_retrieve_timeseries(self) -> Dict[str, Any]:
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("❌ Redis connection not available for TimeSeries retrieval.")
+            logger.error("Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
-        metric_label = "invasion_total"  # Only one metric for invasions.
+        def convert_redis_result(res):
+            if isinstance(res, list):
+                if len(res) % 2 == 0:
+                    return {res[i]: convert_redis_result(res[i+1]) for i in range(0, len(res), 2)}
+                else:
+                    return [convert_redis_result(item) for item in res]
+            return res
 
-        # Convert start and end to milliseconds.
-        start_ms = int(self.start.timestamp() * 1000)
-        end_ms = int(self.end.timestamp() * 1000)
-        logger.info(f"Querying from {start_ms} to {end_ms} for area '{self.area}' using mode '{self.mode}'")
+        try:
+            pattern = self._build_key_pattern()
+            start_ts = int(self.start.timestamp())
+            end_ts = int(self.end.timestamp())
+            logger.info(f"Invasion Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
-        results = {}
+            # Start timing right before loading/executing the script
+            request_start = time.monotonic()
 
-        # If area is not global and all filters are specified (i.e. none are "all"),
-        # we can query a single key with TS.RANGE.
-        if (self.area.lower() != "global" and
-            self.display != "all" and
-            self.grunt != "all" and
-            self.confirmed != "all"):
-            key = f"ts:invasion:total:{self.area}:{self.display}:{self.grunt}:{self.confirmed}"
-            logger.info(f"Querying key: {key}")
-            try:
-                ts_data = await client.execute_command("TS.RANGE", key, start_ms, end_ms)
-                logger.info(f"Raw data for key {key}: {ts_data}")
-                results["total"] = ts_data
-                logger.info(f"🔑 Retrieved {len(ts_data)} points for key {key}")
-            except Exception as e:
-                logger.error(f"❌ Error retrieving TS data for key {key}: {e}")
-                results["total"] = []
-        else:
-            # Otherwise, use TS.MRANGE with filters.
-            filter_exprs = [f"metric={metric_label}"]
-            # Only add area filter if area is not global.
-            if self.area.lower() != "global":
-                filter_exprs.append(f"area={self.area}")
-            if self.display != "all":
-                filter_exprs.append(f"invasion={self.display}")
-            # Note: If grunt is specified but confirmed is "all", we do not add a filter here.
-            if self.grunt != "all" and self.confirmed != "all":
-                filter_exprs.append(f"grunt={self.grunt}:{self.confirmed}")
-            logger.info(f"Querying TS.MRANGE for invasion with filters: {filter_exprs}")
-            try:
-                ts_data = await client.execute_command(
-                    "TS.MRANGE", start_ms, end_ms,
-                    "FILTER", *filter_exprs
+            script_sha = await self._load_script(client)
+            logger.debug("Executing Invasion Lua script with evalsha...")
+            raw_data = await client.evalsha(
+                script_sha,
+                0,  # No keys, only ARGV
+                pattern,
+                str(start_ts),
+                str(end_ts),
+                self.mode
+            )
+
+            logger.debug(f"Raw Invasion data from Lua script (pre-conversion): {raw_data}")
+            raw_data = convert_redis_result(raw_data)
+            logger.debug(f"Converted Invasion raw data: {raw_data}")
+
+            formatted_data = {}
+            if self.mode == "sum":
+                # Order by the composite key (display_type:grunt:confirmed) by splitting and converting numeric parts.
+                formatted_data = dict(
+                    sorted(raw_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
                 )
-                logger.info(f"Raw TS.MRANGE data for invasion: {ts_data}")
-                if self.mode == "sum":
-                    # We may need to post-filter series if grunt or confirmed is "all"
-                    total = 0
-                    for series in ts_data:
-                        key = series[0]
-                        parts = key.split(":")
-                        # Expected: ts, invasion, total, area, display, grunt, confirmed
-                        if len(parts) >= 7:
-                            # Apply post-filtering if a specific display/grunt/confirmed is desired.
-                            if self.display != "all" and parts[4] != self.display:
-                                continue
-                            if self.grunt != "all" and parts[5] != self.grunt:
-                                continue
-                            if self.confirmed != "all" and parts[6] != self.confirmed:
-                                continue
-                        total += sum(float(point[1]) for point in series[2])
-                    results["total"] = total
-                else:
-                    # For grouped/surged, keep the raw series for later transformation.
-                    results["total"] = ts_data
-                logger.info("🔑 Retrieved TS.MRANGE data for invasion")
-            except Exception as e:
-                logger.error(f"❌ Error retrieving TS.MRANGE data for invasion: {e}")
-                results["total"] = 0 if self.mode == "sum" else []
+                logger.debug(f"Formatted Invasion 'sum' data: {formatted_data}")
+            elif self.mode == "grouped":
+                formatted_data = {}
+                for group_key, groups in raw_data.items():
+                    if isinstance(groups, list):
+                        groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
+                    # Order inner dictionary by timestamp (as integer)
+                    ordered_groups = dict(sorted(groups.items(), key=lambda x: int(x[0])))
+                    formatted_data[group_key] = ordered_groups
+                formatted_data = dict(
+                    sorted(formatted_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
+                )
+                logger.debug(f"Formatted Invasion 'grouped' data: {formatted_data}")
+            elif self.mode == "surged":
+                formatted_data = {}
+                for group_key, inner in raw_data.items():
+                    if isinstance(inner, list):
+                        hours = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
+                    else:
+                        hours = inner
+                    formatted_data[group_key] = dict(
+                        sorted({f"hour {int(h)}": v for h, v in hours.items()}.items(), key=lambda x: int(x[0].split()[1]))
+                    )
+                formatted_data = dict(
+                    sorted(formatted_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
+                )
+                logger.debug(f"Formatted Invasion 'surged' data: {formatted_data}")
 
-        # Transformation
-        transformed = {}
-        if self.mode == "sum":
-            # If TS.RANGE was used, data is a flat list.
-            data = results["total"]
-            if isinstance(data, list) and data:
-                if isinstance(data[0], list) and len(data[0]) == 2:
-                    total = sum(float(point[1]) for point in data)
-                else:
-                    total = data  # Already computed sum.
-                transformed["total"] = total
-            else:
-                transformed["total"] = data
+            # End timing after script execution
+            request_end = time.monotonic()
+            elapsed_time = request_end - request_start
+            logger.info(f"Invasion retrieval execution took {elapsed_time:.3f} seconds")
 
-        elif self.mode == "grouped":
-            # Group by the key’s identifier: display:grunt:confirmed.
-            # We post-filter series as needed.
-            grouped = {}
-            data = results["total"]
-            for series in data:
-                key = series[0]
-                parts = key.split(":")
-                if len(parts) < 7:
-                    continue
-                disp, gr, conf = parts[4], parts[5], parts[6]
-                # Apply post-filtering: if a specific value is desired and not "all", skip mismatches.
-                if self.display != "all" and disp != self.display:
-                    continue
-                if self.grunt != "all" and gr != self.grunt:
-                    continue
-                if self.confirmed != "all" and conf != self.confirmed:
-                    continue
-                group_key = f"{disp}:{gr}:{conf}"
-                total_value = sum(float(point[1]) for point in series[2])
-                grouped[group_key] = grouped.get(group_key, 0) + total_value
-            # Sort lexicographically (or apply a custom sort if needed) and filter out groups with a 0 total.
-            sorted_group = dict(sorted(grouped.items()))
-            filtered_group = {k: v for k, v in sorted_group.items() if v != 0}
-            transformed["total"] = filtered_group
-
-        elif self.mode == "surged":
-            # Group by hour (YYYYMMDDHH) using TS.MRANGE series.
-            surged = {}
-            # For both TS.MRANGE and TS.RANGE (if used) we post-filter by key if needed.
-            data = results["total"]
-            # If data comes as series (list of series)...
-            if data and isinstance(data[0], list) and len(data[0]) >= 3:
-                for series in data:
-                    key = series[0]
-                    parts = key.split(":")
-                    if len(parts) >= 7:
-                        if self.display != "all" and parts[4] != self.display:
-                            continue
-                        if self.grunt != "all" and parts[5] != self.grunt:
-                            continue
-                        if self.confirmed != "all" and parts[6] != self.confirmed:
-                            continue
-                    for point in series[2]:
-                        ts, val = point
-                        dt = datetime.fromtimestamp(int(ts) / 1000)
-                        hour_key = dt.strftime("%H")
-                        surged[hour_key] = surged.get(hour_key, 0) + float(val)
-                transformed["total"] = dict(sorted(surged.items(), key=lambda x: int(x[0])))
-            else:
-                # If data is a flat list (TS.RANGE result)
-                for ts_val in data:
-                    ts, val = ts_val
-                    dt = datetime.fromtimestamp(int(ts) / 1000)
-                    hour_key = dt.strftime("%H")
-                    surged[hour_key] = surged.get(hour_key, 0) + float(val)
-                transformed["total"] = dict(sorted(surged.items(), key=lambda x: int(x[0])))
-        else:
-            transformed = results
-
-        logger.info(f"Transformed results: {transformed}")
-        return {"mode": self.mode, "data": transformed}
-
-    def _merge_mrange_results(self, mrange_results: list) -> list:
-        """
-        Given a TS.MRANGE result (a list of series, each in the form:
-            [ key, [ [timestamp, value], ... ], { labels } ]),
-        merge them into a single time series by summing values with matching timestamps.
-        Returns a sorted list of [timestamp, value] pairs.
-        """
-        merged = {}
-        for series in mrange_results:
-            try:
-                series_points = series[1]
-                for point in series_points:
-                    ts, val = point
-                    ts = int(ts)
-                    val = float(val)
-                    merged[ts] = merged.get(ts, 0) + val
-            except Exception as e:
-                logger.error(f"❌ Error merging series: {e}")
-        merged_list = [[ts, merged[ts]] for ts in sorted(merged.keys())]
-        logger.info(f"Merged series: {merged_list}")
-        return merged_list
+            return {"mode": self.mode, "data": formatted_data}
+        except Exception as e:
+            logger.error(f"Invasion Lua script execution failed: {e}")
+            return {"mode": self.mode, "data": {}}
