@@ -1,202 +1,221 @@
-from datetime import datetime
+import asyncio
+import re
+from datetime import datetime, timedelta
+from typing import Dict, Any, Union
 from my_redis.connect_redis import RedisManager
-from my_redis.utils.counter_transformer import CounterTransformer
 from utils.logger import logger
+try:
+    from dateutil.relativedelta import relativedelta
+except ImportError:
+    relativedelta = None
 
 redis_manager = RedisManager()
 
-class PokemonTimeSeries(CounterTransformer):
-    def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum", pokemon_id="all", form="all"):
+# Optimized Lua script for timeseries retrieval
+TIMESERIES_SCRIPT = """
+local pattern = ARGV[1]
+local start_ts = tonumber(ARGV[2])
+local end_ts = tonumber(ARGV[3])
+local mode = ARGV[4]
+local batch_size = 1000
+
+local sum_results = {}
+local grouped_results = {}
+local surged_results = {}
+
+local cursor = '0'
+repeat
+    local reply = redis.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', batch_size)
+    cursor = reply[1]
+    local keys = reply[2]
+
+    for _, key in ipairs(keys) do
+        local hash_data = redis.call('HGETALL', key)
+
+        -- Extract key parts (ts:pokemon:metric:area:pokemon_id:form)
+        local key_parts = {}
+        for part in string.gmatch(key, '([^:]+)') do
+            table.insert(key_parts, part)
+        end
+
+        for i = 1, #hash_data, 2 do
+            local ts = tonumber(hash_data[i])
+            local count = tonumber(hash_data[i+1])
+            if ts and count and ts >= start_ts and ts <= end_ts then
+                local metric = key_parts[3] or 'unknown'
+                local pokemon_id = key_parts[5] or 'all'
+                local form = key_parts[6] or '0'
+
+                -- Sum mode aggregation
+                sum_results[metric] = (sum_results[metric] or 0) + count
+
+                -- Grouped mode aggregation
+                local group_key = pokemon_id .. ':' .. form
+                if not grouped_results[metric] then
+                    grouped_results[metric] = {}
+                end
+                grouped_results[metric][group_key] = (grouped_results[metric][group_key] or 0) + count
+
+                -- Surged mode aggregation
+                local hour = tostring(math.floor((ts % 86400) / 3600))
+                if not surged_results[metric] then
+                    surged_results[metric] = {}
+                end
+                surged_results[metric][hour] = (surged_results[metric][hour] or 0) + count
+            end
+        end
+    end
+until cursor == '0'
+
+if mode == 'sum' then
+    local arr = {}
+    for k, v in pairs(sum_results) do
+        table.insert(arr, k)
+        table.insert(arr, v)
+    end
+    return arr
+elseif mode == 'grouped' then
+    local arr = {}
+    for metric, groups in pairs(grouped_results) do
+        local inner = {}
+        for group_key, count in pairs(groups) do
+            table.insert(inner, group_key)
+            table.insert(inner, count)
+        end
+        table.insert(arr, metric)
+        table.insert(arr, inner)
+    end
+    return arr
+elseif mode == 'surged' then
+    local arr = {}
+    for metric, hours in pairs(surged_results) do
+        local inner = {}
+        for hour, count in pairs(hours) do
+            table.insert(inner, hour)
+            table.insert(inner, count)
+        end
+        table.insert(arr, metric)
+        table.insert(arr, inner)
+    end
+    return arr
+else
+    return {}
+end
+"""
+
+class PokemonTimeSeries:
+    def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
+                 pokemon_id: str = "all", form: str = "all"):
+        # Ensure that the provided area exactly matches the stored key convention.
         self.area = area
         self.start = start
         self.end = end
         self.mode = mode.lower()
         self.pokemon_id = pokemon_id
         self.form = form
+        self.script_sha = None
 
-    async def retrieve_timeseries(self) -> dict:
-        """
-        Retrieve the Pokémon time series data for the given parameters.
+        logger.info(f"Initialized PokemonTimeSeries with area: {self.area}, "
+                     f"start: {self.start}, end: {self.end}, mode: {self.mode}, "
+                     f"pokemon_id: {self.pokemon_id}, form: {self.form}")
 
-        For **sum** mode:
-          - If area is not "global" and both pokemon_id and form are specified,
-            TS.RANGE is used (which returns a flat list of [timestamp, value] pairs).
-          - Otherwise, TS.MRANGE is used with appropriate filters.
+    async def _load_script(self, client):
+        """Load Lua script into Redis if not already cached"""
+        if not self.script_sha:
+            logger.info("Loading Lua script into Redis...")
+            self.script_sha = await client.script_load(TIMESERIES_SCRIPT)
+            logger.info(f"Lua script loaded with SHA: {self.script_sha}")
+        else:
+            logger.info("Lua script already loaded, reusing cached SHA.")
+        return self.script_sha
 
-        For **grouped** and **surged** modes, TS.MRANGE is always used so that
-        the same transformation approach (as in global mode) is applied even if
-        specific pokemon_id and/or form filters are provided.
-
-        Supported metrics include: total, iv100, iv0, pvp_little, pvp_great, pvp_ultra, shiny.
-        Transformation:
-          - "sum": Sum all values.
-          - "grouped": Group by minute (YYYYMMDDHHMM) or, when grouping globally,
-                        group by "pokemon_id:form".
-          - "surged": Group by hour (YYYYMMDDHH).
-        """
+    async def retrieve_timeseries(self) -> Dict:
+        """Retrieve timeseries data using optimized Lua script"""
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("❌ Redis connection not available for TimeSeries retrieval.")
+            logger.error("Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
-        # Define metric information.
-        metrics_info = {
-            "total": "pokemon_total",
-            "iv100": "pokemon_iv100",
-            "iv0": "pokemon_iv0",
-            "pvp_little": "pokemon_pvp_little",
-            "pvp_great": "pokemon_pvp_great",
-            "pvp_ultra": "pokemon_pvp_ultra",
-            "shiny": "pokemon_shiny",
-        }
-
-        # Convert start and end datetimes to milliseconds.
-        start_ms = int(self.start.timestamp() * 1000)
-        end_ms = int(self.end.timestamp() * 1000)
-        logger.info(f"Querying from {start_ms} to {end_ms} for area '{self.area}' using mode '{self.mode}'")
-
-        results = {}
-
-        # For sum mode, use TS.RANGE if non-global and both filters are specified.
-        # For grouped/surged mode always use TS.MRANGE.
-        if self.mode == "sum" and self.area.lower() != "global" and self.pokemon_id != "all" and self.form != "all":
-            # Use TS.RANGE – returns a flat list of [timestamp, value] pairs.
-            for metric, metric_label in metrics_info.items():
-                key = f"ts:pokemon_totals:{metric}:{self.area}:{self.pokemon_id}:{self.form}"
-                logger.info(f"Querying key: {key}")
-                try:
-                    ts_data = await client.execute_command("TS.RANGE", key, start_ms, end_ms)
-                    logger.info(f"Raw data for key {key}: {ts_data}")
-                    results[metric] = ts_data
-                    logger.info(f"🔑 Retrieved {len(ts_data)} points for key {key}")
-                except Exception as e:
-                    logger.error(f"❌ Error retrieving TS data for key {key}: {e}")
-                    results[metric] = []
-        else:
-            # Use TS.MRANGE with filters for both global and specific cases.
-            for metric, metric_label in metrics_info.items():
-                filter_exprs = [f"metric={metric_label}"]
-                # Only add area filter if area is not global.
-                if self.area.lower() != "global":
-                    filter_exprs.append(f"area={self.area}")
-                # Add filters if provided.
-                if self.pokemon_id != "all":
-                    filter_exprs.append(f"pokemon_id={self.pokemon_id}")
-                if self.form != "all":
-                    filter_exprs.append(f"form={self.form}")
-
-                logger.info(f"Querying TS.MRANGE for metric '{metric}' with filters: {filter_exprs}")
-                try:
-                    ts_data = await client.execute_command(
-                        "TS.MRANGE", start_ms, end_ms,
-                        "FILTER", *filter_exprs
-                    )
-                    logger.info(f"Raw TS.MRANGE data for metric {metric}: {ts_data}")
-                    if self.mode == "sum":
-                        # Sum every value directly across all series.
-                        total = sum(
-                            float(point[1])
-                            for series in ts_data
-                            for point in series[2]
-                        )
-                        results[metric] = total
-                    else:
-                        # Keep the raw series for further transformation.
-                        results[metric] = ts_data
-                    logger.info(f"🔑 Retrieved TS.MRANGE data for metric {metric}")
-                except Exception as e:
-                    logger.error(f"❌ Error retrieving TS.MRANGE data for metric {metric}: {e}")
-                    results[metric] = 0 if self.mode == "sum" else []
-
-        # Transform results based on mode.
-        transformed = {}
-        if self.mode == "sum":
-            for metric, data in results.items():
-                if isinstance(data, list) and data:
-                    # If using TS.RANGE, data is a flat list of [timestamp, value] pairs.
-                    if isinstance(data[0], list) and len(data[0]) == 2:
-                        total = sum(float(point[1]) for point in data)
-                    # If using TS.MRANGE, data is a list of series with structure: [key, points, {labels}]
-                    elif isinstance(data[0], list) and len(data[0]) == 3:
-                        total = sum(
-                            float(point[1])
-                            for series in data
-                            for point in series[2]
-                        )
-                    else:
-                        total = 0
-                    transformed[metric] = total
+        # Helper: convert a Redis Lua table (list) into a dictionary.
+        def convert_redis_result(res):
+            if isinstance(res, list):
+                if len(res) % 2 == 0:
+                    return {res[i]: convert_redis_result(res[i + 1]) for i in range(0, len(res), 2)}
                 else:
-                    transformed[metric] = data
+                    return [convert_redis_result(item) for item in res]
+            return res
 
-        elif self.mode == "grouped":
-            # For grouped mode, always use the TS.MRANGE structure and group by identifier if available.
-            grouped_data = {}
-            for metric, series_list in results.items():
-                group = {}
-                # Expect series_list to be a list of series (each series: [key, points, {labels}])
-                for series in series_list:
-                    key = series[0]
-                    parts = key.split(":")
-                    # Expected key format: ts:pokemon_totals:{metric}:{area}:{pokemon_id}:{form}
-                    if len(parts) >= 6:
-                        group_key = f"{parts[4]}:{parts[5]}"
-                    else:
-                        group_key = key
-                    total_value = sum(float(point[1]) for point in series[2])
-                    group[group_key] = group.get(group_key, 0) + total_value
-                # Sort the group by pokemon_id then by form numerically.
-                try:
-                    sorted_group = dict(sorted(
-                        group.items(),
-                        key=lambda kv: (int(kv[0].split(":")[0]), int(kv[0].split(":")[1]))
-                    ))
-                except Exception as e:
-                    logger.error(f"❌ Error sorting grouped data: {e}")
-                    sorted_group = group
-                # Filter out any keys with zero total.
-                filtered_group = {k: v for k, v in sorted_group.items() if v != 0}
-                grouped_data[metric] = filtered_group
-            transformed = grouped_data
+        try:
+            # Build the key pattern based on filters.
+            pattern = self._build_key_pattern()
+            logger.info(f"Key pattern built: {pattern}")
 
-        elif self.mode == "surged":
-            # For surged mode, always use the TS.MRANGE structure.
-            surged_data = {}
-            for metric, series_list in results.items():
-                hour_group = {}
-                for series in series_list:
-                    for point in series[2]:
-                        ts, val = point
-                        dt = datetime.fromtimestamp(int(ts) / 1000)
-                        # Group by hour in YYYYMMDDHH format.
-                        hour_key = dt.strftime("%H")
-                        hour_group[hour_key] = hour_group.get(hour_key, 0) + float(val)
-                surged_data[metric] = dict(sorted(hour_group.items(), key=lambda x: int(x[0][-2:])))
-            transformed = surged_data
+            # Convert datetime objects to Unix timestamps.
+            start_ts = int(self.start.timestamp())
+            end_ts = int(self.end.timestamp())
+            logger.info(f"Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
-        logger.info(f"Transformed results: {transformed}")
-        return {"mode": self.mode, "data": transformed}
+            # Load and execute Lua script.
+            script_sha = await self._load_script(client)
+            logger.info("Executing Lua script with evalsha...")
+            raw_data = await client.evalsha(
+                script_sha,
+                0,  # No keys, only ARGV
+                pattern,
+                str(start_ts),
+                str(end_ts),
+                self.mode
+            )
+            logger.info(f"Raw data from Lua script (pre-conversion): {raw_data}")
 
+            raw_data = convert_redis_result(raw_data)
+            logger.info(f"Converted raw data: {raw_data}")
 
-    def _merge_mrange_results(self, mrange_results: list) -> list:
+            # Format results based on mode.
+            formatted_data = {}
+            if self.mode == "sum":
+                formatted_data = {k: v for k, v in raw_data.items()}
+                logger.info(f"Formatted 'sum' data: {formatted_data}")
+            elif self.mode == "grouped":
+                for metric, groups in raw_data.items():
+                    formatted_data[metric] = dict(
+                        sorted(
+                            groups.items(),
+                            key=lambda x: (int(x[0].split(':')[0]), int(x[0].split(':')[1]))
+                        )
+                    )
+                logger.info(f"Formatted 'grouped' data: {formatted_data}")
+            elif self.mode == "surged" and isinstance(raw_data, dict) and "surged" in raw_data:
+                for metric, hours in raw_data["surged"].items():
+                    if isinstance(hours, dict):
+                        formatted_data[metric] = dict(
+                            sorted(
+                                {f"hour {int(h)}": v for h, v in hours.items()}.items(),
+                                key=lambda x: int(x[0].split()[1])
+                            )
+                        )
+                logger.info(f"Formatted 'surged' data: {formatted_data}")
+
+            logger.info(f"Finished processing timeseries data for pattern: {pattern}")
+            return {"mode": self.mode, "data": formatted_data}
+
+        except Exception as e:
+            logger.error(f"Lua script execution failed: {e}")
+            return {"mode": self.mode, "data": {}}
+
+    def _build_key_pattern(self) -> str:
         """
-        Given the result from TS.MRANGE (a list of series), merge them into a single time series.
-        The result of TS.MRANGE is a list of items where each item is in the form:
-          [ key, [ [timestamp, value], ... ], { labels } ]
-        We merge them by summing the values for matching timestamps.
-        Returns a sorted list of [timestamp, value] pairs.
+        Build Redis key pattern based on filters.
+        When area is not "all", the pattern is built from area, pokemon_id, and form.
         """
-        merged = {}
-        for series in mrange_results:
-            try:
-                series_points = series[1]
-                for point in series_points:
-                    ts, val = point
-                    ts = int(ts)
-                    val = float(val)
-                    merged[ts] = merged.get(ts, 0) + val
-            except Exception as e:
-                logger.error(f"❌ Error merging series: {e}")
-        merged_list = [[ts, merged[ts]] for ts in sorted(merged.keys())]
-        logger.info(f"Merged series: {merged_list}")
-        return merged_list
+        if self.area.lower() in ["global", "all"]:
+            # Scan across all areas.
+            pattern = "ts:pokemon:*:*:*:*"
+        elif self.pokemon_id == "all":
+            pattern = f"ts:pokemon:*:{self.area}:*"
+        elif self.form == "all":
+            pattern = f"ts:pokemon:*:{self.area}:{self.pokemon_id}:*"
+        else:
+            pattern = f"ts:pokemon:*:{self.area}:{self.pokemon_id}:{self.form}"
+        logger.info(f"Built key pattern: {pattern}")
+        return pattern
