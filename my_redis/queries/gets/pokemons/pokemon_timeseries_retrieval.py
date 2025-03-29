@@ -215,14 +215,12 @@ class PokemonTimeSeries:
         Build Redis key pattern based on filters.
         When area is not "all", the pattern is built from area, pokemon_id, and form.
         """
-        if self.area.lower() in ["global", "all"]:
-            # Scan across all areas.
-            pattern = "ts:pokemon:*:*:*:*"
-        elif self.pokemon_id == "all":
-            pattern = f"ts:pokemon:*:{self.area}:*"
-        elif self.form == "all":
-            pattern = f"ts:pokemon:*:{self.area}:{self.pokemon_id}:*"
-        else:
-            pattern = f"ts:pokemon:*:{self.area}:{self.pokemon_id}:{self.form}"
+        # For the metric we always want to match all, so it's always "*"
+        metric = "*"
+        # For each filter, if the user set it to "all" or "global", substitute with the wildcard "*"
+        area = "*" if self.area.lower() in ["all", "global"] else self.area
+        pokemon_id = "*" if self.pokemon_id.lower() in ["all"] else self.pokemon_id
+        form = "*" if self.form.lower() in ["all"] else self.form
+        pattern = f"ts:pokemon:{metric}:{area}:{pokemon_id}:{form}"
         logger.info(f"Built key pattern: {pattern}")
         return pattern
