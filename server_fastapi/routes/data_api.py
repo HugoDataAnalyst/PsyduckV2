@@ -10,6 +10,7 @@ from my_redis.queries.gets.raids.raid_counter_retrieval import RaidCounterRetrie
 from my_redis.queries.gets.invasions.invasion_counter_retrieval import InvasionCounterRetrieval
 from my_redis.queries.gets.quests.quest_counter_retrieval import QuestCounterRetrieval
 from my_redis.queries.gets.pokemons.pokemon_timeseries_retrieval import PokemonTimeSeries
+from my_redis.queries.gets.pokemons.pokemon_tth_timeseries_retrieval import PokemonTTHTimeSeries
 from my_redis.queries.gets.invasions.invasion_timeseries_retrieval import InvasionTimeSeries
 from my_redis.queries.gets.raids.raid_timeseries_retrieval import RaidTimeSeries
 from my_redis.queries.gets.quests.quest_timeseries_retrieval import QuestTimeSeries
@@ -319,6 +320,50 @@ async def get_pokemon_timeseries(
     # Retrieve data dynamically based on counter type and interval
 
     result = await pokemon_timeseries.retrieve_timeseries()
+
+    if response_format.lower() == "json":
+        return result
+    else:
+        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
+        return text_output
+
+
+@router.get(
+    "/api/redis/get_pokemon_tth_timeseries",
+    tags=["Pokémon TTH TimeSeries"],
+    dependencies=[
+        Depends(secure_api.validate_path),
+        Depends(secure_api.validate_ip),
+    ]
+)
+async def get_pokemon_tth_timeseries(
+    start_time: str = Query(..., description="Start time as ISO format or relative (e.g., '1 month')"),
+    end_time: str = Query(..., description="End time as ISO format or relative (e.g., 'now')"),
+    mode: str = Query("sum", description="Aggregation mode: 'sum', 'grouped', or 'surged'"),
+    response_format: str = Query("json", description="Response format: json or text"),
+    area: str = Query("global", description="Area to filter"),
+    tth_bucket: str = Query("all", description="TTH bucket filter (e.g., '10_15'; use 'all' to match any)"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
+    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+):
+    await secure_api.check_secret_header_value(api_secret_header)
+    await secure_api.check_secret_key_value(api_secret_key)
+
+    mode = mode.lower()
+    if mode not in ["sum", "grouped", "surged"]:
+        raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be 'sum', 'grouped', or 'surged'.")
+    if response_format.lower() not in ["json", "text"]:
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+
+    try:
+        start_dt = filtering_keys.parse_time_input(start_time)
+        end_dt = filtering_keys.parse_time_input(end_time)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+
+    # Initialize TTH retrieval object.
+    pokemon_tth_timeseries = PokemonTTHTimeSeries(area, start_dt, end_dt, tth_bucket, mode)
+    result = await pokemon_tth_timeseries.retrieve_timeseries()
 
     if response_format.lower() == "json":
         return result
