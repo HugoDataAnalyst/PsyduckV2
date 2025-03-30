@@ -83,29 +83,35 @@ end
 
 class QuestTimeSeries:
     def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
-                 quest_variant: str = "overall", quest_mode: str = "normal", field_details: str = "all"):
+                 quest_mode: str = "normal", field_details: str = "all"):
         """
         Parameters:
           - area: Area name filter. Use "all" or "global" to match every area.
           - start, end: Datetime objects for the time range.
           - mode: Aggregation mode: "sum", "grouped", or "surged".
-          - quest_variant: Either "overall" (for overall quest counts) or "detailed" (for detailed AR/normal quests).
-          - quest_mode: For both overall and detailed, indicates quest mode ("ar" or "normal"). If set to "all", wildcard is used.
-          - field_details: Only applicable when quest_variant is "detailed". If "all", a wildcard is used; otherwise, provide the colon‑separated field details.
+          - quest_mode: Quest mode—either "ar" or "normal". If set to "all", a wildcard is used.
+          - field_details: The quest type to filter for (i.e. the first field in field_details).
+                         If "all", no filtering on quest type is done.
+
+        The keys are stored in the new format:
+            ts:quests_total:{quest_mode}:{area}:{field_details}
+        For retrieval, if field_details is not "all", we build a pattern as:
+            {field_details}:*:*:*:*:*
+        so that only keys with that quest type (first field) are returned.
         """
         self.area = area
         self.start = start
         self.end = end
         self.mode = mode.lower()
-        self.quest_variant = quest_variant.lower()
         self.quest_mode = quest_mode.lower()
+        # Here, self.field_details represents the quest_type filter.
         self.field_details = field_details
         self.script_sha = None
 
         logger.info(
             f"Initialized QuestTimeSeries with area: {self.area}, mode: {self.mode}, "
-            f"quest_variant: {self.quest_variant}, quest_mode: {self.quest_mode}, "
-            f"field_details: {self.field_details}, start: {self.start}, end: {self.end}"
+            f"quest_mode: {self.quest_mode}, field_details: {self.field_details}, "
+            f"time range: {self.start} to {self.end}"
         )
 
     async def _load_script(self, client):
@@ -118,23 +124,20 @@ class QuestTimeSeries:
         return self.script_sha
 
     def _build_key_pattern(self) -> str:
-        # Substitute any filter value equal to "all" or "global" with a wildcard "*"
+        # Replace any filter equal to "all" or "global" with wildcard "*"
         area = "*" if self.area.lower() in ["all", "global"] else self.area
         quest_mode = "*" if self.quest_mode.lower() == "all" else self.quest_mode
 
-        if self.quest_variant == "overall":
-            # Overall keys: ts:quests_total:total:{area}:{quest_mode}
-            pattern = f"ts:quests_total:total:{area}:{quest_mode}"
+        # For field_details, which in this case is used for filtering the quest type (the first field),
+        # if it is "all" we match any field_details in the 6-field string.
+        # Otherwise, we require the key to start with the given quest type, followed by five colon-separated wildcards.
+        if self.field_details.lower() == "all":
+            field_details_pattern = "*:*:*:*:*:*"
         else:
-            # Detailed keys depend on quest_mode
-            # For AR: ts:quests_total:total_ar_detailed:{area}:{quest_mode}:{field_details}
-            # For normal: ts:quests_total:total_normal_detailed:{area}:{quest_mode}:{field_details}
-            # Use wildcard for field_details if "all"
-            field_details = "*" if self.field_details.lower() == "all" else self.field_details
-            if quest_mode == "ar":
-                pattern = f"ts:quests_total:total_ar_detailed:{area}:{quest_mode}:{field_details}"
-            else:
-                pattern = f"ts:quests_total:total_normal_detailed:{area}:{quest_mode}:{field_details}"
+            field_details_pattern = f"{self.field_details}:*:*:*:*:*"
+
+        # New key format: ts:quests_total:{quest_mode}:{area}:{field_details_pattern}
+        pattern = f"ts:quests_total:{quest_mode}:{area}:{field_details_pattern}"
         logger.info(f"Built Quest key pattern: {pattern}")
         return pattern
 
@@ -158,19 +161,20 @@ class QuestTimeSeries:
             end_ts = int(self.end.timestamp())
             logger.info(f"Quest Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
-            # Start timing right before loading/executing the script
             request_start = time.monotonic()
-
             script_sha = await self._load_script(client)
             logger.info("Executing Quest Lua script with evalsha...")
             raw_data = await client.evalsha(
                 script_sha,
-                0,  # No keys; only ARGV
+                0,
                 pattern,
                 str(start_ts),
                 str(end_ts),
                 self.mode
             )
+            request_end = time.monotonic()
+            elapsed_time = request_end - request_start
+            logger.info(f"Quest retrieval execution took {elapsed_time:.3f} seconds")
 
             logger.info(f"Raw Quest data from Lua script (pre-conversion): {raw_data}")
             raw_data = convert_redis_result(raw_data)
@@ -178,19 +182,18 @@ class QuestTimeSeries:
 
             formatted_data = {}
             if self.mode == "sum":
-                # raw_data is a dict mapping each key to its aggregate count.
-                # Order by key (you can further parse the composite key if needed).
-                formatted_data = dict(sorted(raw_data.items(), key=lambda item: item[0]))
-                logger.info(f"Formatted Quest 'sum' data: {formatted_data}")
+                # Instead of returning a breakdown per key, we compute the total sum across all keys.
+                total_sum = sum(int(v) for v in raw_data.values())
+                formatted_data = total_sum
+                logger.info(f"Formatted Quest 'sum' data (total): {formatted_data}")
             elif self.mode == "grouped":
+                # Detailed breakdown per key remains unchanged.
                 formatted_data = {}
                 for k, groups in raw_data.items():
                     if isinstance(groups, list):
                         groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                    # Order inner dictionary by timestamp (converted to int)
                     ordered_groups = dict(sorted(groups.items(), key=lambda x: int(x[0])))
                     formatted_data[k] = ordered_groups
-                # Order outer dictionary by key.
                 formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
                 logger.info(f"Formatted Quest 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
@@ -204,12 +207,7 @@ class QuestTimeSeries:
                 formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
                 logger.info(f"Formatted Quest 'surged' data: {formatted_data}")
 
-            # End timing after script execution
-            request_end = time.monotonic()
-            elapsed_time = request_end - request_start
-            logger.info(f"Quest retrieval execution took {elapsed_time:.3f} seconds")
-
             return {"mode": self.mode, "data": formatted_data}
         except Exception as e:
-            logger.error(f"Quest Lua script execution failed: {e}")
+            logger.error(f"Quest Lua script execution failed: {e}", exc_info=True)
             return {"mode": self.mode, "data": {}}
