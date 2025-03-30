@@ -30,8 +30,11 @@ def prompt_for_parameters():
     }
 
 def test_timeseries_api_and_save():
+    # Adjust webhook IP: if it's "0.0.0.0", use "127.0.0.1"
+    webhook_ip = AppConfig.webhook_ip if AppConfig.webhook_ip != "0.0.0.0" else "127.0.0.1"
+
     # API Configuration
-    url = "http://localhost:5005/api/redis/get_pokemon_timeseries"
+    url = f"http://{webhook_ip}:{AppConfig.golbat_webhook_port}/api/redis/get_pokemon_timeseries"
 
     # Security headers
     secret_header_name = AppConfig.api_header_name
