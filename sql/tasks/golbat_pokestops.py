@@ -7,9 +7,6 @@ from utils.logger import logger
 from server_fastapi import global_state
 from utils.koji_geofences import KojiGeofences
 from my_redis.connect_redis import RedisManager
-# -----------------------------------------------------------------------------
-# MySQL Pool helper
-# -----------------------------------------------------------------------------
 
 async def get_golbat_mysql_pool():
     """
@@ -25,10 +22,6 @@ async def get_golbat_mysql_pool():
         loop=asyncio.get_running_loop()
     )
     return pool
-
-# -----------------------------------------------------------------------------
-# GolbatSQLPokestops class
-# -----------------------------------------------------------------------------
 
 class GolbatSQLPokestops:
     redis_manager = RedisManager()
@@ -85,7 +78,7 @@ class GolbatSQLPokestops:
                         count = result[0] if result else 0
                         area_counts[area_name] = count
                         grand_total += count
-                        logger.info(f"Area '{area_name}' has {count} pokestops inside its geofence.")
+                        logger.info(f"🏙️ Area '{area_name}' has {count} pokestops inside its geofence.")
 
             pool.close()
             await pool.wait_closed()
@@ -144,11 +137,3 @@ class GolbatSQLPokestops:
             logger.info(f"⏰ Next pokestop refresh in {refresh_interval} seconds.")
             await asyncio.sleep(refresh_interval)
 
-# -----------------------------------------------------------------------------
-# Example usage:
-# -----------------------------------------------------------------------------
-# In your main application or scheduler, you can run:
-#
-#   asyncio.create_task(GolbatSQLPokestops.run_refresh_loop(300))
-#
-# This will refresh pokestop counts every 5 minutes (300 seconds).
