@@ -26,6 +26,10 @@
         "expire_cache_seconds": 3600,
         "refresh_cache_seconds": 3500
     },
+    "golbat_pokestops": {
+        "pokestop_cache_expiry_seconds": 86400,
+        "pokestop_refresh_interval_seconds": 86300
+    },
     "retention_hours": {
         "timeseries_pokemon": 72,
         "tth_timeseries_pokemon": 72,
