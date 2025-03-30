@@ -77,7 +77,7 @@ def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
     except Exception:
         pass
     # Extend the relative time pattern to support hours.
-    pattern = re.compile(r"(\d+)\s*(day|days|month|months|year|years|hour|hours|minute|minutes)")
+    pattern = re.compile(r"(\d+)\s*(day|days|week|weeks|month|months|year|years|hour|hours|minute|minutes)")
     match = pattern.fullmatch(time_str)
     if match:
         value = int(match.group(1))
@@ -85,6 +85,8 @@ def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
         from datetime import timedelta
         if unit in ("day", "days"):
             return reference - timedelta(days=value)
+        elif unit in ("week", "weeks"):
+            return reference - timedelta(weeks=value)
         elif unit in ("hour", "hours"):
             return reference - timedelta(hours=value)
         elif unit in ("minute", "minutes"):

@@ -29,4 +29,5 @@ docker-compose.yml
 database/
 redis-data/
 examples/test_api_url.py
+examples/test_timeseries_api.py
 dragonfly-data/
