@@ -19,7 +19,7 @@ async def aggregate_keys(keys: list, mode: str) -> dict:
     aggregated = {}
     for key in keys:
         data = await client.hgetall(key)
-        logger.info(f"🔑 Aggregating key: {key} with data: {data}")
+        logger.debug(f"🔑 Aggregating key: {key} with data: {data}")
         if mode == "sum":
             for field, value in data.items():
                 try:
@@ -29,7 +29,7 @@ async def aggregate_keys(keys: list, mode: str) -> dict:
                 aggregated[field] = aggregated.get(field, 0) + value
         elif mode in ["grouped", "surged"]:
             aggregated[key] = {k: int(v) for k, v in data.items()}
-    logger.info(f"✅ Mode:{mode} Aggregation complete. Aggregated data: {aggregated}")
+    logger.debug(f"✅ Mode:{mode} Aggregation complete. Aggregated data: {aggregated}")
     return aggregated
 
 def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: datetime, component_index: int = -1) -> list:

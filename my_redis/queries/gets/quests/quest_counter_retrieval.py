@@ -43,13 +43,13 @@ class QuestCounterRetrieval(CounterTransformer):
 
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
         if self.mode == "sum":
-            logger.debug("▶️ Transforming weekly quest_totals SUM")
+            logger.debug("▶️ Transforming weekly 🔎 quest_totals SUM")
             final_data = self.transform_quest_totals_sum(raw_aggregated, self.mode)
         elif self.mode == "grouped":
-            logger.debug("▶️ Transforming weekly quest_totals GROUPED")
+            logger.debug("▶️ Transforming weekly 🔎 quest_totals GROUPED")
             final_data = self.transform_quest_totals_sum(raw_aggregated, self.mode)
         else:
-            logger.debug("❌ Else Block weekly quest_totals")
+            logger.debug("❌ Else Block weekly 🔎 quest_totals")
             final_data = raw_aggregated
         return {"mode": self.mode, "data": final_data}
 
@@ -82,16 +82,16 @@ class QuestCounterRetrieval(CounterTransformer):
 
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
         if self.mode == "sum":
-            logger.debug("▶️ Transforming hourly quest_totals SUM")
+            logger.debug("▶️ Transforming hourly 🔎 quest_totals SUM")
             final_data = self.transform_quest_totals_sum(raw_aggregated, self.mode)
         elif self.mode == "grouped":
-            logger.debug("▶️ Transforming hourly quest_totals GROUPED")
+            logger.debug("▶️ Transforming hourly 🔎 quest_totals GROUPED")
             final_data = self.transform_quest_totals_sum(raw_aggregated, self.mode)
         elif self.mode == "surged":
             # If you want a surged mode for quests as well, you can implement a similar helper.
-            logger.debug("▶️ Transforming hourly quest_totals SURGED")
+            logger.debug("▶️ Transforming hourly 🔎 quest_totals SURGED")
             final_data = self.transform_quest_totals_sum(raw_aggregated, self.mode)
         else:
-            logger.debug("❌ Else Block Hourly quest_totals")
+            logger.debug("❌ Else Block Hourly 🔎 quest_totals")
             final_data = raw_aggregated
         return {"mode": self.mode, "data": final_data}

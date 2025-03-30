@@ -19,7 +19,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         time_format = "%Y%m%d%H"
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("❌ Retrieval pool connection not available")
+            logger.error("❌ Redis connection not available")
             return {"mode": self.mode, "data": {}}
         if self.area.lower() == "global":
             pattern = "counter:pokemon_hourly:*"
@@ -51,7 +51,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         """
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("❌ Retrieval pool connection not available")
+            logger.error("❌ Redis connection not available")
             return {"mode": self.mode, "data": {}}
 
         time_format = "%Y%m%d"
@@ -83,7 +83,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         time_format = "%Y%m%d%H"
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("❌ Retrieval pool connection not available")
+            logger.error("❌ Redis connection not available")
             return {"mode": self.mode, "data": {}}
 
         if self.area.lower() == "global":
@@ -118,7 +118,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         time_format = "%Y%m%d"
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("❌ Retrieval pool connection not available")
+            logger.error("❌ Redis connection not available")
             return {"mode": self.mode, "data": {}}
 
         if self.area.lower() == "global":
@@ -150,7 +150,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         time_format = "%Y%m"
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("❌ Retrieval pool connection not available")
+            logger.error("❌ Redis connection not available")
             return {"mode": self.mode, "data": {}}
 
         if self.area.lower() == "global":

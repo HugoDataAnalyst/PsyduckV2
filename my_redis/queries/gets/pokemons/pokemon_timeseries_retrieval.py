@@ -116,8 +116,8 @@ class PokemonTimeSeries:
         self.form = form
         self.script_sha = None
 
-        logger.info(f"Initialized PokemonTimeSeries with area: {self.area}, "
-                     f"start: {self.start}, end: {self.end}, mode: {self.mode}, "
+        logger.info(f"👻 Initialized PokemonTimeSeries with area: {self.area}, "
+                     f"▶️ Start: {self.start}, ⏸️ End: {self.end}, Mode: {self.mode}, "
                      f"pokemon_id: {self.pokemon_id}, form: {self.form}")
 
     async def _load_script(self, client):
@@ -125,16 +125,16 @@ class PokemonTimeSeries:
         if not self.script_sha:
             logger.debug("Loading Lua script into Redis...")
             self.script_sha = await client.script_load(TIMESERIES_SCRIPT)
-            logger.debug(f"Lua script loaded with SHA: {self.script_sha}")
+            logger.debug(f"Lua script 👻 pokemon loaded with SHA: {self.script_sha}")
         else:
-            logger.debug("Lua script already loaded, reusing cached SHA.")
+            logger.debug("Lua script 👻 pokemon already loaded, reusing cached SHA.")
         return self.script_sha
 
     async def retrieve_timeseries(self) -> Dict:
         """Retrieve timeseries data using optimized Lua script"""
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("Redis connection failed")
+            logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
         # Helper: convert a Redis Lua table (list) into a dictionary.
@@ -149,19 +149,19 @@ class PokemonTimeSeries:
         try:
             # Build the key pattern based on filters.
             pattern = self._build_key_pattern()
-            logger.debug(f"Key pattern built: {pattern}")
+            logger.debug(f"Built 👻 Pokémon 🔑 Key pattern: {pattern}")
 
             # Convert datetime objects to Unix timestamps.
             start_ts = int(self.start.timestamp())
             end_ts = int(self.end.timestamp())
-            logger.debug(f"Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            logger.debug(f"👻 Time range ⏱️ for query: start_ts={start_ts}, end_ts={end_ts}")
 
             # Start timing right before loading/executing the script
             request_start = time.monotonic()
 
             # Load and execute Lua script.
             script_sha = await self._load_script(client)
-            logger.debug("Executing Lua script with evalsha...")
+            logger.debug("Executing 👻 Pokémon Lua script with evalsha...")
             raw_data = await client.evalsha(
                 script_sha,
                 0,  # No keys, only ARGV
@@ -170,16 +170,16 @@ class PokemonTimeSeries:
                 str(end_ts),
                 self.mode
             )
-            logger.debug(f"Raw data from Lua script (pre-conversion): {raw_data}")
+            logger.debug(f"Raw 👻 Pokémon data from Lua script (pre-conversion): {raw_data}")
 
             raw_data = convert_redis_result(raw_data)
-            logger.debug(f"Converted raw data: {raw_data}")
+            logger.debug(f"Converted 👻 Pokémon raw data: {raw_data}")
 
             # Format results based on mode.
             formatted_data = {}
             if self.mode == "sum":
                 formatted_data = {k: v for k, v in raw_data.items()}
-                logger.debug(f"Formatted 'sum' data: {formatted_data}")
+                logger.debug(f"Formatted 👻 Pokémon 'sum' data: {formatted_data}")
             elif self.mode == "grouped":
                 for metric, groups in raw_data.items():
                     formatted_data[metric] = dict(
@@ -188,7 +188,7 @@ class PokemonTimeSeries:
                             key=lambda x: (int(x[0].split(':')[0]), int(x[0].split(':')[1]))
                         )
                     )
-                logger.debug(f"Formatted 'grouped' data: {formatted_data}")
+                logger.debug(f"Formatted 👻 Pokémon 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
                 formatted_data = {}
                 # raw_data is expected to be a dict mapping metric -> flat list [hour, count, hour, count, ...]
@@ -205,18 +205,18 @@ class PokemonTimeSeries:
                             key=lambda x: int(x[0].split()[1])
                         )
                     )
-                logger.debug(f"Formatted 'surged' data: {formatted_data}")
+                logger.debug(f"Formatted 👻 Pokémon 'surged' data: {formatted_data}")
 
             # End timing after script execution
             request_end = time.monotonic()
             elapsed_time = request_end - request_start
-            logger.info(f"Pokémon retrieval execution took {elapsed_time:.3f} seconds")
+            logger.info(f"👻 Pokémon retrieval execution took ⏱️ {elapsed_time:.3f} seconds")
 
             logger.debug(f"Finished processing timeseries data for pattern: {pattern}")
             return {"mode": self.mode, "data": formatted_data}
 
         except Exception as e:
-            logger.error(f"Lua script execution failed: {e}")
+            logger.error(f"❌ Lua Pokémon 👻 script execution failed: {e}")
             return {"mode": self.mode, "data": {}}
 
     def _build_key_pattern(self) -> str:

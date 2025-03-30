@@ -107,17 +107,17 @@ class PokemonTTHTimeSeries:
         self.script_sha = None
 
         logger.info(
-            f"Initialized PokemonTTHTimeSeries with area: {self.area}, "
-            f"tth_bucket: {self.tth_bucket}, start: {self.start}, end: {self.end}, mode: {self.mode}"
+            f"👻⏱️ Initialized PokemonTTHTimeSeries with area: {self.area}, "
+            f"⏱️ tth_bucket: {self.tth_bucket}, ▶️ Start: {self.start}, ⏸️ End: {self.end}, Mode: {self.mode}"
         )
 
     async def _load_script(self, client):
         if not self.script_sha:
-            logger.debug("Loading TTH Lua script into Redis...")
+            logger.debug("🔄 Loading 👻⏱️ TTH Lua script into Redis...")
             self.script_sha = await client.script_load(TTH_TIMESERIES_SCRIPT)
-            logger.debug(f"TTH Lua script loaded with SHA: {self.script_sha}")
+            logger.debug(f"👻⏱️ TTH Lua script loaded with SHA: {self.script_sha}")
         else:
-            logger.debug("TTH Lua script already loaded, reusing cached SHA.")
+            logger.debug("👻⏱️ TTH Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
     def _build_key_pattern(self) -> str:
@@ -125,13 +125,13 @@ class PokemonTTHTimeSeries:
         area = "*" if self.area.lower() in ["all", "global"] else self.area
         bucket = "*" if self.tth_bucket.lower() in ["all"] else self.tth_bucket
         pattern = f"ts:tth_pokemon:{area}:{bucket}"
-        logger.debug(f"Built TTH key pattern: {pattern}")
+        logger.debug(f"Built 👻⏱️ TTH 🔑 key pattern: {pattern}")
         return pattern
 
     async def retrieve_timeseries(self) -> Dict:
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("Redis connection failed")
+            logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
         def convert_redis_result(res):
@@ -146,13 +146,13 @@ class PokemonTTHTimeSeries:
             pattern = self._build_key_pattern()
             start_ts = int(self.start.timestamp())
             end_ts = int(self.end.timestamp())
-            logger.debug(f"TTH Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            logger.debug(f"👻⏱️ TTH ⏱️ Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
             # Start timing right before loading/executing the script
             request_start = time.monotonic()
 
             script_sha = await self._load_script(client)
-            logger.debug("Executing TTH Lua script with evalsha...")
+            logger.debug("Executing 👻⏱️ TTH Lua script with evalsha...")
             raw_data = await client.evalsha(
                 script_sha,
                 0,  # No keys, only ARGV
@@ -161,9 +161,9 @@ class PokemonTTHTimeSeries:
                 str(end_ts),
                 self.mode
             )
-            logger.debug(f"Raw TTH data from Lua script (pre-conversion): {raw_data}")
+            logger.debug(f"Raw 👻⏱️ TTH data from Lua script (pre-conversion): {raw_data}")
             raw_data = convert_redis_result(raw_data)
-            logger.debug(f"Converted TTH raw data: {raw_data}")
+            logger.debug(f"Converted 👻⏱️ TTH raw data: {raw_data}")
 
             formatted_data = {}
             if self.mode == "sum":
@@ -172,7 +172,7 @@ class PokemonTTHTimeSeries:
                 formatted_data = dict(
                     sorted(raw_data.items(), key=lambda item: int(item[0].split('_')[0]))
                 )
-                logger.debug(f"Formatted TTH 'sum' data: {formatted_data}")
+                logger.debug(f"Formatted 👻⏱️ TTH 'sum' data: {formatted_data}")
             elif self.mode == "grouped":
                 formatted_data = {}
                 for bucket, groups in raw_data.items():
@@ -185,7 +185,7 @@ class PokemonTTHTimeSeries:
                 formatted_data = dict(
                     sorted(formatted_data.items(), key=lambda item: int(item[0].split('_')[0]))
                 )
-                logger.debug(f"Formatted TTH 'grouped' data: {formatted_data}")
+                logger.debug(f"Formatted 👻⏱️ TTH 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
                 # For surged mode, assume your existing logic works (grouping by hour, etc.).
                 formatted_data = {}
@@ -204,14 +204,14 @@ class PokemonTTHTimeSeries:
                 formatted_data = dict(
                     sorted(formatted_data.items(), key=lambda item: int(item[0].split('_')[0]))
                 )
-                logger.debug(f"Formatted TTH 'surged' data: {formatted_data}")
+                logger.debug(f"Formatted 👻⏱️ TTH 'surged' data: {formatted_data}")
 
             # End timing after script execution
             request_end = time.monotonic()
             elapsed_time = request_end - request_start
-            logger.info(f"Pokémon TTH retrieval execution took {elapsed_time:.3f} seconds")
+            logger.info(f"👻⏱️ Pokémon TTH retrieval execution took {elapsed_time:.3f} seconds")
 
-            logger.debug(f"Finished processing TTH timeseries data for pattern: {pattern}")
+            logger.debug(f"Finished processing 👻⏱️ TTH timeseries data for pattern: {pattern}")
             return {"mode": self.mode, "data": formatted_data}
 
         except Exception as e:

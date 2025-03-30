@@ -230,7 +230,7 @@ class CounterTransformer:
         logger.debug("▶️ Starting transform_raid_totals_sum")
         # raw_aggregated is assumed to be a flat dictionary: field -> value.
         for field, value in raw_aggregated.items():
-            logger.info(f"▶️ Processing field: {field} with value: {value}")
+            logger.debug(f"▶️ Processing field: {field} with value: {value}")
             parts = field.split(":")
             if len(parts) != 7:
                 logger.debug(f"⏭️ Skipping field {field} because it does not have 7 parts")
@@ -239,7 +239,7 @@ class CounterTransformer:
             try:
                 val = int(value)
             except Exception as e:
-                logger.debug(f"❌ Could not convert value {value} of field {field} to int: {e}")
+                logger.error(f"❌ Could not convert value {value} of field {field} to int: {e}")
                 val = 0
             breakdown["total"] += val
             logger.debug(f"☑️ Added {val} to total; running total: {breakdown['total']}")
@@ -272,7 +272,7 @@ class CounterTransformer:
         breakdown["raid_is_exclusive"] = dict(sorted(breakdown["raid_is_exclusive"].items()))
         breakdown["raid_ex_eligible"] = dict(sorted(breakdown["raid_ex_eligible"].items()))
 
-        logger.info(f"✅ Raid Transformation complete. Final breakdown: {breakdown}")
+        logger.debug(f"✅ Raid Transformation complete. Final breakdown: {breakdown}")
         return breakdown
 
 
@@ -309,7 +309,7 @@ class CounterTransformer:
             try:
                 val = int(value)
             except Exception as e:
-                logger.debug(f"❌ Could not convert value '{value}' for field '{field}' to int: {e}")
+                logger.error(f"❌ Could not convert value '{value}' for field '{field}' to int: {e}")
                 val = 0
             breakdown["total"] += val
             logger.debug(f"☑️ Added {val} to total; running total: {breakdown['total']}")
@@ -333,7 +333,7 @@ class CounterTransformer:
             logger.warning(f"❌ Could not sort grunt numerically: {e}")
             breakdown["grunt"] = dict(sorted(breakdown["grunt"].items()))
         breakdown["confirmed"] = dict(sorted(breakdown["confirmed"].items()))
-        logger.info(f"✅ Invasion Transformation complete. Final breakdown: {breakdown}")
+        logger.debug(f"✅ Invasion Transformation complete. Final breakdown: {breakdown}")
         return breakdown
 
 
@@ -371,10 +371,10 @@ class CounterTransformer:
             }
             logger.info("▶️ Starting transform_quest_totals_sum (sum mode)")
             for field, value in raw_aggregated.items():
-                logger.info(f"▶️ Processing field: {field} with value: {value}")
+                logger.debug(f"▶️ Processing field: {field} with value: {value}")
                 parts = field.split(":")
                 if len(parts) < 7:
-                    logger.info(f"⏭️ Skipping field {field} because it does not have at least 7 parts (found {len(parts)})")
+                    logger.debug(f"⏭️ Skipping field {field} because it does not have at least 7 parts (found {len(parts)})")
                     continue
                 # Use the first 7 parts (ignoring the date if present)
                 if len(parts) >= 8:
@@ -390,7 +390,7 @@ class CounterTransformer:
                 try:
                     val = int(value)
                 except Exception as e:
-                    logger.info(f"❌ Could not convert value '{value}' for field '{field}' to int: {e}")
+                    logger.error(f"❌ Could not convert value '{value}' for field '{field}' to int: {e}")
                     val = 0
 
                 breakdown["total"] += val
@@ -409,7 +409,7 @@ class CounterTransformer:
             breakdown["reward_item_amount"] = dict(sorted(breakdown["reward_item_amount"].items()))
             breakdown["reward_poke"] = dict(sorted(breakdown["reward_poke"].items()))
             breakdown["reward_poke_form"] = dict(sorted(breakdown["reward_poke_form"].items()))
-            logger.info(f"✅ Quest Transformation complete (sum mode). Final breakdown: {breakdown}")
+            logger.debug(f"✅ Quest Transformation complete (sum mode). Final breakdown: {breakdown}")
             return breakdown
 
         elif mode == "grouped":
@@ -472,7 +472,7 @@ class CounterTransformer:
                 grouped_by_date[date]["reward_item_amount"] = dict(sorted(grouped_by_date[date]["reward_item_amount"].items()))
                 grouped_by_date[date]["reward_poke"] = dict(sorted(grouped_by_date[date]["reward_poke"].items()))
                 grouped_by_date[date]["reward_poke_form"] = dict(sorted(grouped_by_date[date]["reward_poke_form"].items()))
-            logger.info(f"✅ Quest Transformation complete (grouped mode). Final breakdown: {grouped_by_date}")
+            logger.debug(f"✅ Quest Transformation complete (grouped mode). Final breakdown: {grouped_by_date}")
             return grouped_by_date
 
         elif mode == "surged":
@@ -528,7 +528,7 @@ class CounterTransformer:
                 surged[hour]["reward_item_amount"] = dict(sorted(surged[hour]["reward_item_amount"].items()))
                 surged[hour]["reward_poke"] = dict(sorted(surged[hour]["reward_poke"].items()))
                 surged[hour]["reward_poke_form"] = dict(sorted(surged[hour]["reward_poke_form"].items()))
-            logger.info(f"✅ Transformation complete (surged mode). Final breakdown: {surged}")
+            logger.debug(f"✅ Transformation complete (surged mode). Final breakdown: {surged}")
             return surged
 
         else:

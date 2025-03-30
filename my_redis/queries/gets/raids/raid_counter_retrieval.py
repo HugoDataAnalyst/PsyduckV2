@@ -42,13 +42,13 @@ class RaidCounterRetrieval(CounterTransformer):
 
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
         if self.mode == "sum":
-            logger.debug("▶️ Transforming weekly raid_totals SUM")
+            logger.debug("▶️ Transforming weekly 👹 raid_totals SUM")
             final_data = self.transform_raid_totals_sum(raw_aggregated)
         elif self.mode == "grouped":
-            logger.debug("▶️ Transforming weekly raid_totals GROUPED")
+            logger.debug("▶️ Transforming weekly 👹 raid_totals GROUPED")
             final_data = self.transform_aggregated_totals(raw_aggregated, self.mode)
         else:
-            logger.debug("❌ Else Block weekly raid_totals")
+            logger.debug("❌ Else Block weekly 👹 raid_totals")
             final_data = raw_aggregated
         return {"mode": self.mode, "data": final_data}
 
@@ -81,16 +81,16 @@ class RaidCounterRetrieval(CounterTransformer):
 
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
         if self.mode == "sum":
-            logger.debug("▶️ Transforming hourly raid_totals SUM")
+            logger.debug("▶️ Transforming hourly 👹 raid_totals SUM")
             final_data = self.transform_raid_totals_sum(raw_aggregated)
         elif self.mode == "grouped":
-            logger.debug("▶️ Transforming hourly raid_totals GROUPED")
+            logger.debug("▶️ Transforming hourly 👹 raid_totals GROUPED")
             final_data = self.transform_aggregated_totals(raw_aggregated, self.mode)
         elif self.mode == "surged":
             # If you want a surged mode for raids as well, you can implement a similar helper.
-            logger.debug("▶️ Transforming hourly raid_totals SURGED")
+            logger.debug("▶️ Transforming hourly 👹 raid_totals SURGED")
             final_data = self.transform_surged_totals_hourly_by_hour(raw_aggregated)
         else:
-            logger.debug("❌ Else Block Hourly raid_totals")
+            logger.debug("❌ Else Block Hourly 👹 raid_totals")
             final_data = raw_aggregated
         return {"mode": self.mode, "data": final_data}

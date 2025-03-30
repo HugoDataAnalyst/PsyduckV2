@@ -108,18 +108,18 @@ class InvasionTimeSeries:
         self.script_sha = None
 
         logger.info(
-            f"Initialized InvasionTimeSeries with area: {self.area}, mode: {self.mode}, "
-            f"display_type: {self.display_type}, grunt: {self.grunt}, confirmed: {self.confirmed}, "
-            f"start: {self.start}, end: {self.end}"
+            f"▶️ Initialized InvasionTimeSeries with area: {self.area}, mode: {self.mode}, "
+            f"🕴️ Display type: {self.display_type}, grunt: {self.grunt}, confirmed: {self.confirmed}, "
+            f"▶️ Start: {self.start}, ⏸️ End: {self.end}"
         )
 
     async def _load_script(self, client):
         if not self.script_sha:
-            logger.debug("Loading Invasion Lua script into Redis...")
+            logger.debug("🔄 Loading 🕴️ Invasion Lua script into Redis...")
             self.script_sha = await client.script_load(INVASION_TIMESERIES_SCRIPT)
-            logger.debug(f"Invasion Lua script loaded with SHA: {self.script_sha}")
+            logger.debug(f"🕴️ Invasion Lua script loaded with SHA: {self.script_sha}")
         else:
-            logger.debug("Invasion Lua script already loaded, reusing cached SHA.")
+            logger.debug("🕴️ Invasion Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
     def _build_key_pattern(self) -> str:
@@ -129,13 +129,13 @@ class InvasionTimeSeries:
         grunt = "*" if self.grunt.lower() in ["all"] else self.grunt
         confirmed = "*" if self.confirmed.lower() in ["all"] else self.confirmed
         pattern = f"ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}"
-        logger.debug(f"Built Invasion key pattern: {pattern}")
+        logger.debug(f"Built 🕴️ Invasion 🔑 key pattern: {pattern}")
         return pattern
 
     async def invasion_retrieve_timeseries(self) -> Dict[str, Any]:
         client = await redis_manager.check_redis_connection()
         if not client:
-            logger.error("Redis connection failed")
+            logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
         def convert_redis_result(res):
@@ -150,13 +150,13 @@ class InvasionTimeSeries:
             pattern = self._build_key_pattern()
             start_ts = int(self.start.timestamp())
             end_ts = int(self.end.timestamp())
-            logger.debug(f"Invasion Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            logger.debug(f"🕴️ Invasion ⏱️ Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
             # Start timing right before loading/executing the script
             request_start = time.monotonic()
 
             script_sha = await self._load_script(client)
-            logger.debug("Executing Invasion Lua script with evalsha...")
+            logger.debug("Executing 🕴️ Invasion Lua script with evalsha...")
             raw_data = await client.evalsha(
                 script_sha,
                 0,  # No keys, only ARGV
@@ -166,9 +166,9 @@ class InvasionTimeSeries:
                 self.mode
             )
 
-            logger.debug(f"Raw Invasion data from Lua script (pre-conversion): {raw_data}")
+            logger.debug(f"Raw 🕴️ Invasion data from Lua script (pre-conversion): {raw_data}")
             raw_data = convert_redis_result(raw_data)
-            logger.debug(f"Converted Invasion raw data: {raw_data}")
+            logger.debug(f"Converted 🕴️ Invasion raw data: {raw_data}")
 
             formatted_data = {}
             if self.mode == "sum":
@@ -176,7 +176,7 @@ class InvasionTimeSeries:
                 formatted_data = dict(
                     sorted(raw_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
                 )
-                logger.debug(f"Formatted Invasion 'sum' data: {formatted_data}")
+                logger.debug(f"Formatted 🕴️ Invasion 'sum' data: {formatted_data}")
             elif self.mode == "grouped":
                 formatted_data = {}
                 for group_key, groups in raw_data.items():
@@ -188,7 +188,7 @@ class InvasionTimeSeries:
                 formatted_data = dict(
                     sorted(formatted_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
                 )
-                logger.debug(f"Formatted Invasion 'grouped' data: {formatted_data}")
+                logger.debug(f"Formatted 🕴️ Invasion 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
                 formatted_data = {}
                 for group_key, inner in raw_data.items():
@@ -202,14 +202,14 @@ class InvasionTimeSeries:
                 formatted_data = dict(
                     sorted(formatted_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
                 )
-                logger.debug(f"Formatted Invasion 'surged' data: {formatted_data}")
+                logger.debug(f"Formatted 🕴️ Invasion 'surged' data: {formatted_data}")
 
             # End timing after script execution
             request_end = time.monotonic()
             elapsed_time = request_end - request_start
-            logger.info(f"Invasion retrieval execution took {elapsed_time:.3f} seconds")
+            logger.info(f"🕴️ Invasion retrieval execution took ⏱️ {elapsed_time:.3f} seconds")
 
             return {"mode": self.mode, "data": formatted_data}
         except Exception as e:
-            logger.error(f"Invasion Lua script execution failed: {e}")
+            logger.error(f"❌ 🕴️ Invasion Lua script execution failed: {e}")
             return {"mode": self.mode, "data": {}}

@@ -24,7 +24,7 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
         return
 
     cutoff = int(time.time()) - retention_sec
-    logger.info(f"▶️ Starting Lua cleanup for {pattern} (cutoff: {cutoff})")
+    logger.debug(f"▶️ Starting Lua cleanup for {pattern} (cutoff: {cutoff})")
 
     try:
         # Register script if not already cached
