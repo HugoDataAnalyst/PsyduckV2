@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
+from sql.tasks.golbat_pokestops import GolbatSQLPokestops
 from server_fastapi.routes import data_api, webhook_router
 from server_fastapi import global_state
 from my_redis.connect_redis import RedisManager
@@ -71,6 +72,12 @@ async def lifespan(app: FastAPI):
     # Start the background refresh task
     refresh_task = asyncio.create_task(safe_refresh())
 
+    async def safe_refresh_pokestops():
+        # This will retry refresh_pokestops if it raises an exception.
+        await retry_call(GolbatSQLPokestops.run_refresh_loop, AppConfig.pokestop_refresh_interval_seconds)
+    # Start the background pokestop refresh task
+    pokestop_refresh_task = asyncio.create_task(safe_refresh_pokestops())
+
     # Start the background cleanup task
     cleanup_timeseries_task = asyncio.create_task(periodic_cleanup())
 
@@ -103,6 +110,13 @@ async def lifespan(app: FastAPI):
         await cleanup_timeseries_task
     except asyncio.CancelledError:
         logger.info("🛑 Periodic cleanup task cancelled.")
+
+    # Cancel and await the pokestop refresh task.
+    pokestop_refresh_task.cancel()
+    try:
+        await pokestop_refresh_task
+    except asyncio.CancelledError:
+        logger.info("🛑 Pokestop refresh task cancelled.")
 
     # Stop the flusher tasks
     if AppConfig.store_sql_pokemon_aggregation:
