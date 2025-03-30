@@ -116,11 +116,11 @@ class QuestTimeSeries:
 
     async def _load_script(self, client):
         if not self.script_sha:
-            logger.info("Loading Quest Lua script into Redis...")
+            logger.debug("Loading Quest Lua script into Redis...")
             self.script_sha = await client.script_load(QUEST_TIMESERIES_SCRIPT)
-            logger.info(f"Quest Lua script loaded with SHA: {self.script_sha}")
+            logger.debug(f"Quest Lua script loaded with SHA: {self.script_sha}")
         else:
-            logger.info("Quest Lua script already loaded, reusing cached SHA.")
+            logger.debug("Quest Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
     def _build_key_pattern(self) -> str:
@@ -138,7 +138,7 @@ class QuestTimeSeries:
 
         # New key format: ts:quests_total:{quest_mode}:{area}:{field_details_pattern}
         pattern = f"ts:quests_total:{quest_mode}:{area}:{field_details_pattern}"
-        logger.info(f"Built Quest key pattern: {pattern}")
+        logger.debug(f"Built Quest key pattern: {pattern}")
         return pattern
 
     async def quest_retrieve_timeseries(self) -> Dict[str, Any]:
@@ -159,11 +159,11 @@ class QuestTimeSeries:
             pattern = self._build_key_pattern()
             start_ts = int(self.start.timestamp())
             end_ts = int(self.end.timestamp())
-            logger.info(f"Quest Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            logger.debug(f"Quest Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
             request_start = time.monotonic()
             script_sha = await self._load_script(client)
-            logger.info("Executing Quest Lua script with evalsha...")
+            logger.debug("Executing Quest Lua script with evalsha...")
             raw_data = await client.evalsha(
                 script_sha,
                 0,
@@ -172,20 +172,35 @@ class QuestTimeSeries:
                 str(end_ts),
                 self.mode
             )
-            request_end = time.monotonic()
-            elapsed_time = request_end - request_start
-            logger.info(f"Quest retrieval execution took {elapsed_time:.3f} seconds")
 
-            logger.info(f"Raw Quest data from Lua script (pre-conversion): {raw_data}")
+            logger.debug(f"Raw Quest data from Lua script (pre-conversion): {raw_data}")
             raw_data = convert_redis_result(raw_data)
-            logger.info(f"Converted Quest raw data: {raw_data}")
+            logger.debug(f"Converted Quest raw data: {raw_data}")
 
             formatted_data = {}
             if self.mode == "sum":
-                # Instead of returning a breakdown per key, we compute the total sum across all keys.
-                total_sum = sum(int(v) for v in raw_data.values())
-                formatted_data = total_sum
-                logger.info(f"Formatted Quest 'sum' data (total): {formatted_data}")
+                # For sum mode, if the area filter is "all" or "global", group totals per area
+                if self.area.lower() in ["all", "global"]:
+                    area_totals = {}
+                    grand_total = 0
+                    for key, v in raw_data.items():
+                        try:
+                            parts = key.split(":")
+                            # Our key format: ts:quests_total:{quest_mode}:{area}:{field_details}
+                            # The area is the fourth element (index 3)
+                            key_area = parts[3] if len(parts) > 3 else "unknown"
+                        except Exception:
+                            key_area = "unknown"
+                        count = int(v)
+                        area_totals[key_area] = area_totals.get(key_area, 0) + count
+                        grand_total += count
+                    formatted_data = {"areas": area_totals, "grand_total": grand_total}
+                    logger.debug(f"Formatted Quest 'sum' data (by area): {formatted_data}")
+                else:
+                    # Otherwise, compute a single total sum.
+                    total_sum = sum(int(v) for v in raw_data.values())
+                    formatted_data = total_sum
+                    logger.debug(f"Formatted Quest 'sum' data (total): {formatted_data}")
             elif self.mode == "grouped":
                 # Detailed breakdown per key remains unchanged.
                 formatted_data = {}
@@ -195,7 +210,7 @@ class QuestTimeSeries:
                     ordered_groups = dict(sorted(groups.items(), key=lambda x: int(x[0])))
                     formatted_data[k] = ordered_groups
                 formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
-                logger.info(f"Formatted Quest 'grouped' data: {formatted_data}")
+                logger.debug(f"Formatted Quest 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
                 formatted_data = {}
                 for k, inner in raw_data.items():
@@ -205,7 +220,11 @@ class QuestTimeSeries:
                         hours = inner
                     formatted_data[k] = dict(sorted({f"hour {int(h)}": v for h, v in hours.items()}.items(), key=lambda x: int(x[0].split()[1])))
                 formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
-                logger.info(f"Formatted Quest 'surged' data: {formatted_data}")
+                logger.debug(f"Formatted Quest 'surged' data: {formatted_data}")
+
+            request_end = time.monotonic()
+            elapsed_time = request_end - request_start
+            logger.info(f"Quest retrieval execution took {elapsed_time:.3f} seconds")
 
             return {"mode": self.mode, "data": formatted_data}
         except Exception as e:

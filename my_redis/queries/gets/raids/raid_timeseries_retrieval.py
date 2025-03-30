@@ -112,11 +112,11 @@ class RaidTimeSeries:
 
     async def _load_script(self, client):
         if not self.script_sha:
-            logger.info("Loading Raid Lua script into Redis...")
+            logger.debug("Loading Raid Lua script into Redis...")
             self.script_sha = await client.script_load(RAID_TIMESERIES_SCRIPT)
-            logger.info(f"Raid Lua script loaded with SHA: {self.script_sha}")
+            logger.debug(f"Raid Lua script loaded with SHA: {self.script_sha}")
         else:
-            logger.info("Raid Lua script already loaded, reusing cached SHA.")
+            logger.debug("Raid Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
     def _build_key_pattern(self) -> str:
@@ -127,7 +127,7 @@ class RaidTimeSeries:
         raid_level = "*" if self.raid_level.lower() in ["all"] else self.raid_level
         raid_form = "*" if self.raid_form.lower() in ["all"] else self.raid_form
         pattern = f"ts:raids_total:{raid_type}:{area}:{raid_pokemon}:{raid_level}:{raid_form}"
-        logger.info(f"Built Raid key pattern: {pattern}")
+        logger.debug(f"Built Raid key pattern: {pattern}")
         return pattern
 
     async def raid_retrieve_timeseries(self) -> Dict[str, Any]:
@@ -148,13 +148,13 @@ class RaidTimeSeries:
             pattern = self._build_key_pattern()
             start_ts = int(self.start.timestamp())
             end_ts = int(self.end.timestamp())
-            logger.info(f"Raid Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            logger.debug(f"Raid Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
             # Start timing right before loading/executing the script
             request_start = time.monotonic()
 
             script_sha = await self._load_script(client)
-            logger.info("Executing Raid Lua script with evalsha...")
+            logger.debug("Executing Raid Lua script with evalsha...")
             raw_data = await client.evalsha(
                 script_sha,
                 0,  # No keys; only ARGV
@@ -163,16 +163,16 @@ class RaidTimeSeries:
                 str(end_ts),
                 self.mode
             )
-            logger.info(f"Raw Raid data from Lua script (pre-conversion): {raw_data}")
+            logger.debug(f"Raw Raid data from Lua script (pre-conversion): {raw_data}")
             raw_data = convert_redis_result(raw_data)
-            logger.info(f"Converted Raid raw data: {raw_data}")
+            logger.debug(f"Converted Raid raw data: {raw_data}")
 
             formatted_data = {}
             if self.mode == "sum":
                 # raw_data is a dict mapping raid_type -> count.
                 # Order by raid_type (alphabetically, or adjust if numeric ordering is desired).
                 formatted_data = dict(sorted(raw_data.items(), key=lambda item: item[0]))
-                logger.info(f"Formatted Raid 'sum' data: {formatted_data}")
+                logger.debug(f"Formatted Raid 'sum' data: {formatted_data}")
             elif self.mode == "grouped":
                 formatted_data = {}
                 for rt, groups in raw_data.items():
@@ -183,7 +183,7 @@ class RaidTimeSeries:
                     formatted_data[rt] = ordered_groups
                 # Order the outer dictionary by raid_type.
                 formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
-                logger.info(f"Formatted Raid 'grouped' data: {formatted_data}")
+                logger.debug(f"Formatted Raid 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
                 formatted_data = {}
                 for rt, inner in raw_data.items():
@@ -195,7 +195,7 @@ class RaidTimeSeries:
                         sorted({f"hour {int(h)}": v for h, v in hours.items()}.items(), key=lambda x: int(x[0].split()[1]))
                     )
                 formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
-                logger.info(f"Formatted Raid 'surged' data: {formatted_data}")
+                logger.debug(f"Formatted Raid 'surged' data: {formatted_data}")
 
             # End timing after script execution
             request_end = time.monotonic()

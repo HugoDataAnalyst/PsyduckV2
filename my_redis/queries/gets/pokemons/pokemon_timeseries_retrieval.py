@@ -123,11 +123,11 @@ class PokemonTimeSeries:
     async def _load_script(self, client):
         """Load Lua script into Redis if not already cached"""
         if not self.script_sha:
-            logger.info("Loading Lua script into Redis...")
+            logger.debug("Loading Lua script into Redis...")
             self.script_sha = await client.script_load(TIMESERIES_SCRIPT)
-            logger.info(f"Lua script loaded with SHA: {self.script_sha}")
+            logger.debug(f"Lua script loaded with SHA: {self.script_sha}")
         else:
-            logger.info("Lua script already loaded, reusing cached SHA.")
+            logger.debug("Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
     async def retrieve_timeseries(self) -> Dict:
@@ -149,19 +149,19 @@ class PokemonTimeSeries:
         try:
             # Build the key pattern based on filters.
             pattern = self._build_key_pattern()
-            logger.info(f"Key pattern built: {pattern}")
+            logger.debug(f"Key pattern built: {pattern}")
 
             # Convert datetime objects to Unix timestamps.
             start_ts = int(self.start.timestamp())
             end_ts = int(self.end.timestamp())
-            logger.info(f"Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            logger.debug(f"Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
             # Start timing right before loading/executing the script
             request_start = time.monotonic()
 
             # Load and execute Lua script.
             script_sha = await self._load_script(client)
-            logger.info("Executing Lua script with evalsha...")
+            logger.debug("Executing Lua script with evalsha...")
             raw_data = await client.evalsha(
                 script_sha,
                 0,  # No keys, only ARGV
@@ -170,16 +170,16 @@ class PokemonTimeSeries:
                 str(end_ts),
                 self.mode
             )
-            logger.info(f"Raw data from Lua script (pre-conversion): {raw_data}")
+            logger.debug(f"Raw data from Lua script (pre-conversion): {raw_data}")
 
             raw_data = convert_redis_result(raw_data)
-            logger.info(f"Converted raw data: {raw_data}")
+            logger.debug(f"Converted raw data: {raw_data}")
 
             # Format results based on mode.
             formatted_data = {}
             if self.mode == "sum":
                 formatted_data = {k: v for k, v in raw_data.items()}
-                logger.info(f"Formatted 'sum' data: {formatted_data}")
+                logger.debug(f"Formatted 'sum' data: {formatted_data}")
             elif self.mode == "grouped":
                 for metric, groups in raw_data.items():
                     formatted_data[metric] = dict(
@@ -188,7 +188,7 @@ class PokemonTimeSeries:
                             key=lambda x: (int(x[0].split(':')[0]), int(x[0].split(':')[1]))
                         )
                     )
-                logger.info(f"Formatted 'grouped' data: {formatted_data}")
+                logger.debug(f"Formatted 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
                 formatted_data = {}
                 # raw_data is expected to be a dict mapping metric -> flat list [hour, count, hour, count, ...]
@@ -205,14 +205,14 @@ class PokemonTimeSeries:
                             key=lambda x: int(x[0].split()[1])
                         )
                     )
-                logger.info(f"Formatted 'surged' data: {formatted_data}")
+                logger.debug(f"Formatted 'surged' data: {formatted_data}")
 
             # End timing after script execution
             request_end = time.monotonic()
             elapsed_time = request_end - request_start
             logger.info(f"Pokémon retrieval execution took {elapsed_time:.3f} seconds")
 
-            logger.info(f"Finished processing timeseries data for pattern: {pattern}")
+            logger.debug(f"Finished processing timeseries data for pattern: {pattern}")
             return {"mode": self.mode, "data": formatted_data}
 
         except Exception as e:
@@ -231,5 +231,5 @@ class PokemonTimeSeries:
         pokemon_id = "*" if self.pokemon_id.lower() in ["all"] else self.pokemon_id
         form = "*" if self.form.lower() in ["all"] else self.form
         pattern = f"ts:pokemon:{metric}:{area}:{pokemon_id}:{form}"
-        logger.info(f"Built key pattern: {pattern}")
+        logger.debug(f"Built key pattern: {pattern}")
         return pattern

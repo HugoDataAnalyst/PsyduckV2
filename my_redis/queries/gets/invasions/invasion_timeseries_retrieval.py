@@ -150,7 +150,7 @@ class InvasionTimeSeries:
             pattern = self._build_key_pattern()
             start_ts = int(self.start.timestamp())
             end_ts = int(self.end.timestamp())
-            logger.info(f"Invasion Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            logger.debug(f"Invasion Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
             # Start timing right before loading/executing the script
             request_start = time.monotonic()
