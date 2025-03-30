@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Dict, Any
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
+from server_fastapi import global_state
 
 redis_manager = RedisManager()
 
@@ -179,22 +180,28 @@ class QuestTimeSeries:
 
             formatted_data = {}
             if self.mode == "sum":
-                # For sum mode, if the area filter is "all" or "global", group totals per area
+                # If the area filter is "all" or "global", group quest totals per area
                 if self.area.lower() in ["all", "global"]:
                     area_totals = {}
-                    grand_total = 0
+                    quest_grand_total = 0
                     for key, v in raw_data.items():
                         try:
-                            parts = key.split(":")
                             # Our key format: ts:quests_total:{quest_mode}:{area}:{field_details}
-                            # The area is the fourth element (index 3)
+                            parts = key.split(":")
+                            # The area is at index 3
                             key_area = parts[3] if len(parts) > 3 else "unknown"
                         except Exception:
                             key_area = "unknown"
                         count = int(v)
                         area_totals[key_area] = area_totals.get(key_area, 0) + count
-                        grand_total += count
-                    formatted_data = {"areas": area_totals, "grand_total": grand_total}
+                        quest_grand_total += count
+                    # Retrieve cached pokestops from global_state (which is periodically updated)
+                    pokestops_data = global_state.cached_pokestops or {"areas": {}, "pokestop_grand_total": 0}
+                    formatted_data = {
+                        "areas": area_totals,
+                        "quest_grand_total": quest_grand_total,
+                        "total pokestops": pokestops_data
+                    }
                     logger.debug(f"Formatted Quest 'sum' data (by area): {formatted_data}")
                 else:
                     # Otherwise, compute a single total sum.
