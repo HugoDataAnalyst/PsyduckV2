@@ -31,7 +31,7 @@ class InvasionSQLProcessor:
             # Validate required fields
             pokestop_id = filtered_data.get('invasion_pokestop_id')
             if not pokestop_id:
-                logger.warning("Missing pokestop_id in invasion data")
+                logger.warning("⚠️ Missing pokestop_id in invasion data")
                 return 0
 
             # Validate coordinates
@@ -39,12 +39,12 @@ class InvasionSQLProcessor:
                 latitude = float(filtered_data.get('invasion_latitude', 0))
                 longitude = float(filtered_data.get('invasion_longitude', 0))
             except (ValueError, TypeError):
-                logger.warning(f"Invalid coordinates for pokestop {pokestop_id}")
+                logger.warning(f"⚠️ Invalid coordinates for pokestop {pokestop_id}")
                 return 0
 
             area_id = filtered_data.get('area_id')
             if not area_id:
-                logger.warning(f"Missing area_id for pokestop {pokestop_id}")
+                logger.warning(f"⚠️ Missing area_id for pokestop {pokestop_id}")
                 return 0
 
             # Validate invasion-specific fields
@@ -57,12 +57,12 @@ class InvasionSQLProcessor:
             try:
                 first_seen = filtered_data.get('invasion_first_seen')
                 if not first_seen:
-                    logger.warning(f"Missing first_seen for pokestop {pokestop_id}")
+                    logger.warning(f"⚠️ Missing first_seen for pokestop {pokestop_id}")
                     return 0
                 dt = datetime.fromtimestamp(first_seen)
                 month_year = int(dt.strftime("%y%m"))
             except (ValueError, TypeError):
-                logger.warning(f"Invalid first_seen timestamp for pokestop {pokestop_id}")
+                logger.warning(f"⚠️ Invalid first_seen timestamp for pokestop {pokestop_id}")
                 return 0
 
             # Process the record with retry logic

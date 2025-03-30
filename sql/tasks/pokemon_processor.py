@@ -42,14 +42,14 @@ class PokemonSQLProcessor:
             try:
                 # Skip if spawnpoint is None or not a valid hex string.
                 if data['spawnpoint'] is None:
-                    logger.warning("Spawnpoint is None; skipping record.")
+                    logger.warning("⚠️ Spawnpoint is None; skipping record.")
                     continue
 
                 try:
                     # Convert spawnpoint hex string to int.
                     spawnpoint_value = int(data['spawnpoint'], 16)
                 except ValueError as e:
-                    logger.warning(f"Invalid spawnpoint hex value '{data['spawnpoint']}'; skipping record.")
+                    logger.warning(f"⚠️ Invalid spawnpoint hex value '{data['spawnpoint']}'; skipping record.")
                     continue
 
                 # Ensure latitude and longitude are valid floats.
@@ -57,7 +57,7 @@ class PokemonSQLProcessor:
                     latitude = float(data['latitude'])
                     longitude = float(data['longitude'])
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Invalid latitude or longitude; skipping record.")
+                    logger.warning(f"⚠️ Invalid latitude or longitude; skipping record.")
                     continue
 
                 spawnpoints[spawnpoint_value] = (latitude, longitude)
@@ -65,7 +65,7 @@ class PokemonSQLProcessor:
                 # Convert raw IV to bucket.
                 bucket_iv = get_iv_bucket(data['iv'])
                 if bucket_iv is None:
-                    logger.warning("Bucket conversion returned None; skipping record.")
+                    logger.warning("⚠️ Bucket conversion returned None; skipping record.")
                     continue
 
                 # Convert first_seen to month_year.
@@ -73,7 +73,7 @@ class PokemonSQLProcessor:
                     dt = datetime.fromtimestamp(data['first_seen'])
                     month_year = int(dt.strftime("%y%m"))
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Invalid first_seen timestamp; skipping record.")
+                    logger.warning(f"⚠️ Invalid first_seen timestamp; skipping record.")
                     continue
 
                 # Use provided increment or default to 1.

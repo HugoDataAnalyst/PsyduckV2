@@ -31,7 +31,7 @@ class RaidSQLProcessor:
             # Validate required fields
             gym_id = filtered_data.get('raid_gym_id')
             if not gym_id:
-                logger.warning("Missing gym_id in raid data")
+                logger.warning("⚠️ Missing gym_id in raid data")
                 return 0
 
             # Validate coordinates
@@ -39,12 +39,12 @@ class RaidSQLProcessor:
                 latitude = float(filtered_data.get('raid_latitude', 0))
                 longitude = float(filtered_data.get('raid_longitude', 0))
             except (ValueError, TypeError):
-                logger.warning(f"Invalid coordinates for gym {gym_id}")
+                logger.warning(f"⚠️ Invalid coordinates for gym {gym_id}")
                 return 0
 
             area_id = filtered_data.get('area_id')
             if not area_id:
-                logger.warning(f"Missing area_id for gym {gym_id}")
+                logger.warning(f"⚠️ Missing area_id for gym {gym_id}")
                 return 0
 
             # Validate raid-specific fields
@@ -60,12 +60,12 @@ class RaidSQLProcessor:
             try:
                 first_seen = filtered_data.get('raid_first_seen')
                 if not first_seen:
-                    logger.warning(f"Missing first_seen for gym {gym_id}")
+                    logger.warning(f"⚠️ Missing first_seen for gym {gym_id}")
                     return 0
                 dt = datetime.fromtimestamp(first_seen)
                 month_year = int(dt.strftime("%y%m"))
             except (ValueError, TypeError):
-                logger.warning(f"Invalid first_seen timestamp for gym {gym_id}")
+                logger.warning(f"⚠️ Invalid first_seen timestamp for gym {gym_id}")
                 return 0
 
             # Process the record with retry logic

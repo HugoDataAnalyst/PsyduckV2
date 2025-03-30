@@ -31,7 +31,7 @@ class QuestSQLProcessor:
             # Validate required fields
             pokestop_id = filtered_data.get('pokestop_id')
             if not pokestop_id:
-                logger.warning("Missing pokestop_id in quest data")
+                logger.warning("⚠️ Missing pokestop_id in quest data")
                 return 0
 
             # Validate coordinates
@@ -39,24 +39,24 @@ class QuestSQLProcessor:
                 latitude = float(filtered_data.get('latitude', 0))
                 longitude = float(filtered_data.get('longitude', 0))
             except (ValueError, TypeError):
-                logger.warning(f"Invalid coordinates for pokestop {pokestop_id}")
+                logger.warning(f"⚠️ Invalid coordinates for pokestop {pokestop_id}")
                 return 0
 
             area_id = filtered_data.get('area_id')
             if not area_id:
-                logger.warning(f"Missing area_id for pokestop {pokestop_id}")
+                logger.warning(f"⚠️ Missing area_id for pokestop {pokestop_id}")
                 return 0
 
             # Validate timestamp
             try:
                 first_seen = filtered_data.get('first_seen')
                 if not first_seen:
-                    logger.warning(f"Missing first_seen for pokestop {pokestop_id}")
+                    logger.warning(f"⚠️ Missing first_seen for pokestop {pokestop_id}")
                     return 0
                 dt = datetime.fromtimestamp(first_seen)
                 month_year = int(dt.strftime("%y%m"))
             except (ValueError, TypeError):
-                logger.warning(f"Invalid first_seen timestamp for pokestop {pokestop_id}")
+                logger.warning(f"⚠️ Invalid first_seen timestamp for pokestop {pokestop_id}")
                 return 0
 
             # Process the record with retry logic

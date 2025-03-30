@@ -1,25 +1,12 @@
-"""
-sql/tasks/golbat_pokestops.py
-
-This module retrieves the number of pokestops (from the MySQL 'pokestop' table)
-inside the geofence polygons retrieved from Koji (cached in Redis).
-It then caches the results in Redis (as 'cached_pokestops') keyed per area
-and with a grand total. It also offers a refresh loop to update the cached data.
-"""
-
-import asyncio
-import json
 import time
-from datetime import datetime
-from shapely.geometry import Polygon  # used only to help with bounding box if needed
+import json
+import asyncio
 import aiomysql
-import redis
 import config as AppConfig
-from my_redis.connect_redis import RedisManager
 from utils.logger import logger
-from utils.koji_geofences import KojiGeofences  # our KojiGeofences class
-from server_fastapi import global_state  # assuming you update global_state with new data
-
+from server_fastapi import global_state
+from utils.koji_geofences import KojiGeofences
+from my_redis.connect_redis import RedisManager
 # -----------------------------------------------------------------------------
 # MySQL Pool helper
 # -----------------------------------------------------------------------------
@@ -45,11 +32,8 @@ async def get_golbat_mysql_pool():
 
 class GolbatSQLPokestops:
     redis_manager = RedisManager()
-    # Create an instance of KojiGeofences with the refresh interval (in seconds) from config
     koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
-    # Key to store cached pokestop counts
     cache_key = "cached_pokestops"
-    # Cache expiry time in seconds (adjust as needed)
     cache_expiry = AppConfig.pokestop_cache_expiry_seconds if hasattr(AppConfig, "pokestop_cache_expiry_seconds") else 300
     logger.info(f"Set pokestops cache to: {cache_expiry} seconds")
     @classmethod
@@ -83,21 +67,15 @@ class GolbatSQLPokestops:
                             logger.warning(f"⚠️ No coordinates for area '{area_name}', skipping")
                             continue
 
-                        # Build WKT for the polygon.
-                        # Coordinates are assumed to be in the format [[ [lon, lat], [lon, lat], ... ]]
-                        # We'll use the first ring.
                         try:
                             poly_coords = coordinates[0]
-                            # Build a WKT polygon string: "POLYGON((lon lat, lon lat, ...))"
-                            # Note: WKT uses "longitude latitude" order.
+
                             coord_str = ", ".join(f"{lon} {lat}" for lon, lat in poly_coords)
                             polygon_wkt = f"POLYGON(({coord_str}))"
                         except Exception as ex:
                             logger.error(f"❌ Failed to build polygon for area '{area_name}': {ex}")
                             continue
 
-                        # Query the pokestop table using a spatial query.
-                        # Adjust column names ("latitude", "longitude") if needed.
                         sql = """
                         SELECT COUNT(*) AS cnt FROM pokestop
                         WHERE ST_CONTAINS(ST_GeomFromText(%s), POINT(lon, lat));
@@ -146,7 +124,7 @@ class GolbatSQLPokestops:
         if cached:
             try:
                 result = json.loads(cached)
-                logger.info(f"✅ Retrieved cached pokestops: {result}")
+                logger.success(f"✅ Retrieved cached pokestops: {result}")
                 return result
             except Exception as ex:
                 logger.error(f"❌ Failed to parse cached pokestops: {ex}")
