@@ -148,7 +148,7 @@ class WebhookFilter:
         ranks = {f'pvp_{category}_rank': None for category in ['great', 'little', 'ultra']}
 
         if pvp_data:
-            for category in list(ranks.keys()):
+            for category in ['great', 'little', 'ultra']:
                 category_data = pvp_data.get(category, [])
                 top_ranks = sorted([entry.get('rank') for entry in category_data if entry.get('rank') is not None])
                 # Store only if in Top 1
