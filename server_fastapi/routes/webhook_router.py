@@ -25,7 +25,7 @@ async def process_single_event(event: dict):
         return {"status": "error", "message": "Invalid webhook format"}
 
     # Initialize WebhookFilter with the global geofences
-    webhook_filter = WebhookFilter(allowed_types={data_type}, geofences=global_state.geofences, user_timezone=global_state.user_timezone)
+    webhook_filter = WebhookFilter(allowed_types={data_type}, geofences=global_state.geofences)
     filtered_data = await webhook_filter.filter_webhook_data(event)
 
     if not filtered_data:

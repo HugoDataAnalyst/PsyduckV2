@@ -1,7 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 import re
+import pytz
+from server_fastapi import global_state
 
 redis_manager = RedisManager()
 
@@ -57,53 +60,72 @@ def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: date
     logger.info(f"✅ Filtered down to {len(filtered)} keys")
     return filtered
 
-def parse_time_input(time_str: str, reference: datetime = None) -> datetime:
+def parse_time_input(time_str: str, area_offset: int = 0) -> datetime:
     """
-    Parses a time input string.
+    Parses time input with precise handling for Redis queries:
+    - ISO timestamps: treated as exact local_area_utc (what's stored in Redis)
+    - Relative times: calculated in area's local time then converted to local_area_utc
+    - "now": current time in area's local time converted to local_area_utc
 
-    If time_str can be parsed as an ISO datetime, returns that datetime.
-    Otherwise, if time_str is in a relative format like "1 month", "10 days", "1 day", "3 months", "1 year", "10 hours" or "15 minutes",
-    subtracts that duration from the reference (or now if reference is None) and returns that datetime.
-    If time_str is "now", returns datetime.now().
+    Args:
+        time_str: Time string to parse
+        area_offset: Timezone offset in hours for the area
+
+    Returns:
+        datetime object matching Redis' local_area_utc storage
     """
-    if reference is None:
-        reference = datetime.now()
     time_str = time_str.strip().lower()
-    if time_str == "now":
-        return datetime.now()
+
+    # 1. Handle ISO format - treat as exact local_area_utc (already adjusted)
     try:
-        # Try ISO datetime first.
-        return datetime.fromisoformat(time_str)
-    except Exception:
+        dt = datetime.fromisoformat(time_str)
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except ValueError:
         pass
-    # Extend the relative time pattern to support hours.
-    pattern = re.compile(r"(\d+)\s*(day|days|week|weeks|month|months|year|years|hour|hours|minute|minutes)")
+
+    # Get current UTC time
+    now_utc = datetime.utcnow()
+
+    # 2. Handle "now" - current local time in area converted to local_area_utc
+    if time_str == "now":
+        # Equivalent to: (now_utc + area_offset) - 0
+        return now_utc + timedelta(hours=area_offset)
+
+    # 3. Handle relative times
+    pattern = re.compile(r"(\d+)\s*(hour|hours|minute|minutes|day|days)")
     match = pattern.fullmatch(time_str)
     if match:
         value = int(match.group(1))
-        unit = match.group(2)
-        from datetime import timedelta
-        if unit in ("day", "days"):
-            return reference - timedelta(days=value)
-        elif unit in ("week", "weeks"):
-            return reference - timedelta(weeks=value)
-        elif unit in ("hour", "hours"):
-            return reference - timedelta(hours=value)
-        elif unit in ("minute", "minutes"):
-            return reference - timedelta(minutes=value)
-        elif unit in ("month", "months"):
-            try:
-                from dateutil.relativedelta import relativedelta
-                return reference - relativedelta(months=value)
-            except ImportError:
-                # Approximate a month as 30 days if dateutil is not available.
-                return reference - timedelta(days=30 * value)
-        elif unit in ("year", "years"):
-            try:
-                from dateutil.relativedelta import relativedelta
-                return reference - relativedelta(years=value)
-            except ImportError:
-                # Approximate a year as 365 days.
-                return reference - timedelta(days=365 * value)
+        unit = match.group(2).rstrip('s')  # Remove plural
+
+        # Calculate reference time (current local time in area)
+        local_now = now_utc + timedelta(hours=area_offset)
+
+        # Calculate the past time in local timezone
+        if unit == "hour":
+            past_local = local_now - timedelta(hours=value)
+        elif unit == "minute":
+            past_local = local_now - timedelta(minutes=value)
+        elif unit == "day":
+            past_local = local_now - timedelta(days=value)
+
+        # Convert to local_area_utc (what Redis stores)
+        return past_local
+
     raise ValueError(f"Unrecognized time format: {time_str}")
 
+def get_area_offset(area: str, geofences: list) -> int:
+    """
+    Get timezone offset for a given area.
+    Defaults to 0 (UTC) if area not found or is global.
+    """
+    if area.lower() in ["global", "all"]:
+        return 0
+
+    for geofence in geofences:
+        if geofence["name"].lower() == area.lower():
+            return geofence.get("offset", 0)
+
+    return 0
