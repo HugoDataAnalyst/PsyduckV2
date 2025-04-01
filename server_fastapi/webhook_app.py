@@ -17,8 +17,18 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
+from tzlocal import get_localzone
+from datetime import datetime
+
 
 redis_manager = RedisManager()
+
+def detect_and_store_local_timezone():
+    """Detects and loads the local machine's timezone (e.g., 'Europe/Lisbon')."""
+    local_tz = get_localzone()
+    global_state.user_timezone = local_tz
+    logger.success(f"✅ Local timezone detected and stored: {local_tz}")
+
 
 async def retry_call(coro_func, *args, max_attempts=5, initial_delay=2, delay_increment=2, **kwargs):
     """
@@ -53,6 +63,8 @@ async def retry_call(coro_func, *args, max_attempts=5, initial_delay=2, delay_in
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Detect and store the local timezone at startup.
+    detect_and_store_local_timezone()
     # Start Koji Instance
     koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
     global_state.geofences = await retry_call(koji_instance.get_cached_geofences)

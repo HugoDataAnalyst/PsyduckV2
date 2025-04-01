@@ -1,10 +1,13 @@
 from utils.logger import logger
 from shapely.geometry import Point, Polygon
+import pytz
+from zoneinfo import ZoneInfo
+from datetime import datetime
 
 class WebhookFilter:
     """Filters incoming webhook data based on type and geofence location."""
 
-    def __init__(self, allowed_types, geofences):
+    def __init__(self, allowed_types, geofences, user_timezone: str):
         """
         Initialize webhook filter with specific types and latest geofences.
 
@@ -13,26 +16,51 @@ class WebhookFilter:
         """
         self.allowed_types = allowed_types
         self.geofences = geofences  # ✅ Inject geofences dynamically
+        self.user_timezone = user_timezone
 
     # Helper functions
 
     @staticmethod
-    def adjust_first_seen_to_local(geofence_name, utc_first_seen:int, offset: int) -> int:
+    def get_machine_offset(user_timezone) -> int:
+        """Handle both string and ZoneInfo timezone inputs."""
+        try:
+            if isinstance(user_timezone, str):
+                # Try pytz first (for backward compatibility)
+                try:
+                    tz = pytz.timezone(user_timezone)
+                except (pytz.UnknownTimeZoneError, AttributeError):
+                    # Fall back to zoneinfo
+                    tz = ZoneInfo(user_timezone)
+            else:
+                # Assume it's already a timezone object
+                tz = user_timezone
+
+            now = datetime.now(tz)
+            return int(now.utcoffset().total_seconds() // 3600)
+        except Exception as e:
+            logger.error(f"Error getting timezone offset: {e}")
+            return 0  # Fallback to UTC
+
+    @staticmethod
+    def adjust_first_seen_to_local(geofence_name, utc_first_seen: int, geofence_offset: int, machine_offset: int) -> int:
         """
-        Adjust a UTC timestamp by a given offset in hours.
+        Adjust a UTC timestamp by the difference between the geofence offset and the machine's offset.
 
         Args:
+            geofence_name: The name of the geofence.
             utc_first_seen: The original UTC timestamp (in seconds).
-            offset: The UTC offset in hours (can be negative, zero, or positive).
+            geofence_offset: The geofence offset in hours.
+            machine_offset: The machine's current offset in hours (from user_timezone).
 
         Returns:
-            The adjusted timestamp (in seconds) accounting for the offset.
+            The adjusted timestamp (in seconds) accounting for the offset difference.
         """
-        # Convert the offset to seconds.
-        offset_secs = offset * 3600
-        # Add the offset to the UTC timestamp.
-        adjusted_first_seen = utc_first_seen + offset_secs
-        logger.debug(f"🔧 Adjusting timezone for {geofence_name} from UTC: {utc_first_seen} to: {adjusted_first_seen}")
+        # The adjustment is the difference between the geofence's intended offset and the machine's current offset.
+        # For example, if machine_offset is 1 (UTC+1) and geofence_offset is 1 as well, adjustment_hours is 0.
+        adjustment_hours = geofence_offset - machine_offset
+        adjusted_first_seen = utc_first_seen + adjustment_hours * 3600
+        logger.debug(f"🔧 Adjusting timezone for {geofence_name}: "
+                     f"UTC timestamp {utc_first_seen} adjusted by {adjustment_hours} hour(s) to {adjusted_first_seen}")
         return adjusted_first_seen
 
     @staticmethod
@@ -257,8 +285,9 @@ class WebhookFilter:
         pvp_ranks = self.extract_pvp_ranks(message.get("pvp", {}))
 
         # ✅ Adjust first_seen timestamp to local time
+        machine_offset = self.get_machine_offset(self.user_timezone)
         utc_first_seen = int(message["first_seen"])
-        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset, machine_offset)
 
         # ✅ Calculate despawn timer
         despawn_timer = await self.calculate_despawn_time(message["disappear_time"], utc_first_seen)
@@ -300,8 +329,9 @@ class WebhookFilter:
             return None
 
         # ✅ Adjust first_seen timestamp to local time
+        machine_offset = self.get_machine_offset(self.user_timezone)
         utc_first_seen = int(message["updated"])
-        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset, machine_offset)
 
         # Build initial quest data structure.
         quest_data = {
@@ -365,10 +395,11 @@ class WebhookFilter:
             return None
 
         # ✅ Adjust first_seen timestamp to local time
+        machine_offset = self.get_machine_offset(self.user_timezone)
         utc_first_seen = int(message["spawn"])
         utc_end = int(message["end"])
-        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
-        corrected_end = self.adjust_first_seen_to_local(geofence_name, utc_end, offset)
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset, machine_offset)
+        corrected_end = self.adjust_first_seen_to_local(geofence_name, utc_end, offset, machine_offset)
 
         # ✅ Extract Raid Data
         raid_data = {
@@ -409,8 +440,9 @@ class WebhookFilter:
             return None
 
         # ✅ Adjust first_seen timestamp to local time
+        machine_offset = self.get_machine_offset(self.user_timezone)
         utc_first_seen = int(message["start"])
-        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset)
+        corrected_first_seen = self.adjust_first_seen_to_local(geofence_name, utc_first_seen, offset, machine_offset)
 
         # ✅ Extract Invasion Data
         invasion_data = {
