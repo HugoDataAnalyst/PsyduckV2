@@ -36,7 +36,7 @@ class WebhookFilter:
             now = datetime.now(tz)
             return int(now.utcoffset().total_seconds() // 3600)
         except Exception as e:
-            logger.error(f"Error getting timezone offset: {e}")
+            logger.error(f"❌ Error getting timezone offset: {e}")
             return 0  # Fallback to UTC
 
     @staticmethod
@@ -66,10 +66,10 @@ class WebhookFilter:
 
         logger.debug(
             f"🕒 Time Correction | Area: {geofence_name} (UTC+{area_offset}) | "
-            f"Received: {received_ts} ({datetime.fromtimestamp(received_ts).strftime('%H:%M')}) | "
-            f"Machine UTC Offset: {machine_offset} | "
-            f"True UTC: {true_utc} ({datetime.fromtimestamp(true_utc).strftime('%H:%M')} UTC) | "
-            f"Local Time: {display_time} ({datetime.fromtimestamp(display_time).strftime('%H:%M')})"
+            f"📥 Received: {received_ts} ({datetime.fromtimestamp(received_ts).strftime('%H:%M')}) | "
+            f"🖥️ Machine UTC 🕒 Offset: {machine_offset} | "
+            f"💯 True UTC: {true_utc} ({datetime.fromtimestamp(true_utc).strftime('%H:%M')} UTC) | "
+            f"🏙️ Local Time: {display_time} ({datetime.fromtimestamp(display_time).strftime('%H:%M')})"
         )
 
         return true_utc, display_time
