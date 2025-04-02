@@ -2,6 +2,7 @@ import config as AppConfig
 from datetime import datetime
 from server_fastapi.utils import secure_api
 from sql.utils.time_parser import parse_time_input
+from server_fastapi import global_state
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from typing import Optional
 from my_redis.utils import filtering_keys
@@ -63,8 +64,11 @@ async def get_pokemon_counterseries(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -129,8 +133,11 @@ async def get_counter_raids(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -191,8 +198,11 @@ async def get_counter_invasions(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -254,8 +264,11 @@ async def get_counter_quests(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -309,8 +322,11 @@ async def get_pokemon_timeseries(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -356,8 +372,11 @@ async def get_pokemon_tth_timeseries(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -404,8 +423,11 @@ async def get_raid_timeseries(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -455,8 +477,11 @@ async def get_invasion_timeseries(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
@@ -505,8 +530,11 @@ async def get_quest_timeseries(
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = filtering_keys.parse_time_input(start_time)
-        end_dt = filtering_keys.parse_time_input(end_time)
+        # Get timezone offset (None means use machine timezone)
+        area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+
+        start_dt = filtering_keys.parse_time_input(start_time, area_offset)
+        end_dt = filtering_keys.parse_time_input(end_time, area_offset)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
