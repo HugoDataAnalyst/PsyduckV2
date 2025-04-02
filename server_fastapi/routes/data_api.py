@@ -3,7 +3,7 @@ from datetime import datetime
 from server_fastapi.utils import secure_api
 from sql.utils.time_parser import parse_time_input
 from server_fastapi import global_state
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, dependencies
 from typing import Optional
 from my_redis.utils import filtering_keys
 from my_redis.queries.gets.pokemons.pokemon_counter_retrieval import PokemonCounterRetrieval
@@ -23,13 +23,17 @@ from sql.queries.quest_gets import QuestSQLQueries
 
 router = APIRouter()
 
+dependencies_list = [
+    Depends(secure_api.validate_path),
+    Depends(secure_api.validate_ip)
+]
+if AppConfig.api_secret_key:
+    dependencies_list.append(Depends(secure_api.verify_token))
+
 @router.get(
     "/api/redis/get_pokemon_counterseries",
     tags=["Pokémon Counter Series"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_pokemon_counterseries(
     counter_type: str = Query(..., description="Type of counter series: totals, tth, or weather"),
@@ -40,11 +44,11 @@ async def get_pokemon_counterseries(
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    #api_secret_key: Optional[str] = secure_api.get_secret_key_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
+    #await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     counter_type = counter_type.lower()
@@ -97,10 +101,7 @@ async def get_pokemon_counterseries(
 @router.get(
     "/api/redis/get_raids_counterseries",
     tags=["Raid Counter Series"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_counter_raids(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
@@ -110,12 +111,10 @@ async def get_counter_raids(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     counter_type = counter_type.lower()
@@ -162,10 +161,7 @@ async def get_counter_raids(
 @router.get(
     "/api/redis/get_invasions_counterseries",
     tags=["Invasion Counter Series"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_counter_invasions(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
@@ -175,12 +171,10 @@ async def get_counter_invasions(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     counter_type = counter_type.lower()
@@ -228,10 +222,7 @@ async def get_counter_invasions(
 @router.get(
     "/api/redis/get_quest_counterseries",
     tags=["Quest Counter Series"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_counter_quests(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
@@ -241,12 +232,10 @@ async def get_counter_quests(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     counter_type = counter_type.lower()
@@ -294,10 +283,7 @@ async def get_counter_quests(
 @router.get(
     "/api/redis/get_pokemon_timeseries",
     tags=["Pokémon TimeSeries"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_pokemon_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
@@ -307,12 +293,10 @@ async def get_pokemon_timeseries(
     area: str = Query("global", description="Area to filter"),
     pokemon_id: str = Query("all", description="Pokémon ID"),
     form: str = Query("all", description="Pokémon form"),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     mode = mode.lower()
@@ -347,10 +331,7 @@ async def get_pokemon_timeseries(
 @router.get(
     "/api/redis/get_pokemon_tth_timeseries",
     tags=["Pokémon TTH TimeSeries"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_pokemon_tth_timeseries(
     start_time: str = Query(..., description="Start time as ISO format or relative (e.g., '1 month')"),
@@ -359,11 +340,9 @@ async def get_pokemon_tth_timeseries(
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter"),
     tth_bucket: str = Query("all", description="TTH bucket filter (e.g., '10_15'; use 'all' to match any)"),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     mode = mode.lower()
     if mode not in ["sum", "grouped", "surged"]:
@@ -394,10 +373,7 @@ async def get_pokemon_tth_timeseries(
 @router.get(
     "/api/redis/get_raid_timeseries",
     tags=["Raid TimeSeries"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_raid_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
@@ -408,12 +384,10 @@ async def get_raid_timeseries(
     raid_pokemon: str = Query("all", description="all or Pokémon ID"),
     raid_form: str = Query("all", description="all or Form ID"),
     raid_level: str = Query("all", description="all or Raid Level"),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     mode = mode.lower()
@@ -448,10 +422,7 @@ async def get_raid_timeseries(
 @router.get(
     "/api/redis/get_invasion_timeseries",
     tags=["Invasion TimeSeries"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_invasion_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
@@ -462,12 +433,10 @@ async def get_invasion_timeseries(
     display: str = Query("all", description="all or Invasion Display ID"),
     grunt: str = Query("all", description="all or Grunt ID"),
     confirmed: str = Query("all", description="0 or 1 (confirmed or not details)."),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     mode = mode.lower()
@@ -502,10 +471,7 @@ async def get_invasion_timeseries(
 @router.get(
     "/api/redis/get_quest_timeseries",
     tags=["Quest TimeSeries"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_quest_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
@@ -515,12 +481,10 @@ async def get_quest_timeseries(
     area: str = Query("global", description="Area to filter"),
     quest_mode: str = Query("all", description="all or AR or NORMAL"),
     quest_type: str = Query("all", description="all or Quest Type ID"),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     mode = mode.lower()
@@ -555,10 +519,7 @@ async def get_quest_timeseries(
 @router.get(
     "/api/sql/get_pokemon_heatmap_data",
     tags=["Pokémon HeatMap Data"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_pokemon_heatmap_data(
     start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
@@ -569,12 +530,10 @@ async def get_pokemon_heatmap_data(
     form: str = Query("all", description="all or Pokémon Form ID"),
     iv_bucket: str = Query("all", description="all or IV specific bucket(0, 25, 50, 75, 90, 100), choose one."),
     limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     if response_format.lower() not in ["json", "text"]:
@@ -603,10 +562,7 @@ async def get_pokemon_heatmap_data(
 @router.get(
     "/api/sql/get_shiny_rate_data",
     tags=["Shiny Rate Data"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_shiny_rate_data(
     start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
@@ -618,12 +574,10 @@ async def get_shiny_rate_data(
     form: str = Query("all", description="all or Pokémon Form ID"),
     shiny: str = Query("all", description="all or shiny status (0=non-shiny, 1=shiny)"),
     limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     if response_format.lower() not in ["json", "text"]:
@@ -654,10 +608,7 @@ async def get_shiny_rate_data(
 @router.get(
     "/api/sql/get_raid_data",
     tags=["Raid SQL Data"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_raid_data(
     start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
@@ -673,12 +624,10 @@ async def get_raid_data(
     raid_is_exclusive: str = Query("all", description="all or exclusive status (0 or 1)"),
     raid_ex_raid_eligible: str = Query("all", description="all or EX eligibility (0 or 1)"),
     limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     if response_format.lower() not in ["json", "text"]:
@@ -719,10 +668,7 @@ async def get_raid_data(
 @router.get(
     "/api/sql/get_invasion_data",
     tags=["Invasion SQL Data"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_invasion_data(
     start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
@@ -735,12 +681,10 @@ async def get_invasion_data(
     grunt: str = Query("all", description="all or grunt type"),
     confirmed: str = Query("all", description="all or confirmed status (0 or 1)"),
     limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     if response_format.lower() not in ["json", "text"]:
@@ -778,10 +722,7 @@ async def get_invasion_data(
 @router.get(
     "/api/sql/get_quest_data",
     tags=["Quest SQL Data"],
-    dependencies=[
-        Depends(secure_api.validate_path),
-        Depends(secure_api.validate_ip),
-    ]
+    dependencies=dependencies_list
 )
 async def get_quest_data(
     start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
@@ -798,12 +739,10 @@ async def get_quest_data(
     reward_ar_poke_id: str = Query("all", description="all or AR reward Pokémon ID"),
     reward_normal_poke_id: str = Query("all", description="all or normal reward Pokémon ID"),
     limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
-    api_secret_key: Optional[str] = secure_api.get_secret_key_param()
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
-    await secure_api.check_secret_key_value(api_secret_key)
 
     # Normalize and validate inputs
     if response_format.lower() not in ["json", "text"]:
