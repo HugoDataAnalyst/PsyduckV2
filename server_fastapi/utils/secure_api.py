@@ -1,5 +1,6 @@
 import config as AppConfig
-from fastapi import Request, HTTPException, Header, Query
+from fastapi import Request, HTTPException, Header, Query, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from utils.logger import logger
 from typing import Optional
 from starlette.responses import JSONResponse
@@ -70,15 +71,24 @@ async def check_secret_header_value(header_value: Optional[str]):
     else:
         logger.info("⏭️ No Header option set. Skipping...")
 
-async def check_secret_key_value(key_value: Optional[str]):
+# Create a security instance with auto_error disabled so we can handle missing credentials
+security = HTTPBearer(auto_error=False)
+
+async def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     secret_key = AppConfig.api_secret_key
     if secret_key:
-        if key_value != secret_key:
-            logger.warning(f"⚠️ Invalid API secret key provided: {key_value}")
-            raise HTTPException(status_code=403, detail="Invalid API secret key")
+        # Validate that credentials exist and are formatted properly
+        if not credentials or credentials.scheme.lower() != "bearer" or credentials.credentials != secret_key:
+            logger.warning("⚠️ Invalid or missing API secret key in Authorization header")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or missing Bearer API secret key. Click the 🔒 to auth."
+            )
         logger.info("✅ Secret Key Validated")
     else:
-        logger.info("⏭️ No Secret Key set. Skipping...")
+        # If no secret key is configured, skip validation.
+        logger.info("⏭️ No Secret Key set in configuration. Skipping token validation...")
+
 
 # New helper functions to define parameters based on AppConfig
 
@@ -93,6 +103,18 @@ def get_secret_header_param():
     else:
         return Header(None, description="No secret header required")
 
+# Deprecated atm
+async def check_secret_key_value(key_value: Optional[str]):
+    secret_key = AppConfig.api_secret_key
+    if secret_key:
+        if key_value != secret_key:
+            logger.warning(f"⚠️ Invalid API secret key provided: {key_value}")
+            raise HTTPException(status_code=403, detail="Invalid API secret key")
+        logger.info("✅ Secret Key Validated")
+    else:
+        logger.info("⏭️ No Secret Key set. Skipping...")
+
+# Deprecated atm
 def get_secret_key_param():
     """
     Returns a Query parameter for the secret key based on config.
