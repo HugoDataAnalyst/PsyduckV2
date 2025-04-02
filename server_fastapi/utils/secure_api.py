@@ -79,10 +79,10 @@ async def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Dep
     if secret_key:
         # Validate that credentials exist and are formatted properly
         if not credentials or credentials.scheme.lower() != "bearer" or credentials.credentials != secret_key:
-            logger.warning("⚠️ Invalid or missing API secret key in Authorization header")
+            logger.warning("⚠️ Invalid or missing Bearer API secret key in Authorization header")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid or missing Bearer API secret key. Click the 🔒 to auth."
+                detail="⚠️ Invalid or missing Bearer API secret key. Click the 🔒 to auth."
             )
         logger.info("✅ Secret Key Validated")
     else:
