@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from dateutil.relativedelta import relativedelta
 from typing import Optional
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
@@ -94,7 +95,7 @@ def parse_time_input(time_str: str, area_offset: int = 0) -> datetime:
         return now_utc + timedelta(hours=area_offset)
 
     # 3. Handle relative times
-    pattern = re.compile(r"(\d+)\s*(hour|hours|second|seconds|minute|minutes|day|days|week|weeks|month|months|year|years)")
+    pattern = re.compile(r"(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)")
     match = pattern.fullmatch(time_str)
     if match:
         value = int(match.group(1))
@@ -104,22 +105,22 @@ def parse_time_input(time_str: str, area_offset: int = 0) -> datetime:
         local_now = now_utc + timedelta(hours=area_offset)
 
         # Calculate the past time in local timezone
-        if unit == "hour":
-            past_local = local_now - timedelta(hours=value)
-        elif unit == "second":
+        if unit == "second":
             past_local = local_now - timedelta(seconds=value)
         elif unit == "minute":
             past_local = local_now - timedelta(minutes=value)
+        elif unit == "hour":
+            past_local = local_now - timedelta(hours=value)
         elif unit == "day":
             past_local = local_now - timedelta(days=value)
         elif unit == "week":
             past_local = local_now - timedelta(weeks=value)
         elif unit == "month":
-            past_local = local_now - timedelta(months=value)
+            past_local = local_now - relativedelta(months=value)
         elif unit == "year":
-            past_local = local_now - timedelta(years=value)
+            past_local = local_now - relativedelta(years=value)
 
-        # Convert to local_area_utc (what Redis stores)
+        # Convert to local_area_utc
         return past_local
 
     raise ValueError(f"Unrecognized time format: {time_str}")
