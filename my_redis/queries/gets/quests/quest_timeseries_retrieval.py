@@ -29,7 +29,7 @@ repeat
     for i = 1, #hash_data, 2 do
       local ts = tonumber(hash_data[i])
       local count = tonumber(hash_data[i+1])
-      if ts and count and ts >= start_ts and ts <= end_ts then
+      if ts and count and ts >= start_ts and ts < end_ts then
          if mode == 'sum' then
            sum_results[key] = (sum_results[key] or 0) + count
          elseif mode == 'grouped' then
@@ -139,7 +139,7 @@ class QuestTimeSeries:
 
         # New key format: ts:quests_total:{quest_mode}:{area}:{field_details_pattern}
         pattern = f"ts:quests_total:{quest_mode}:{area}:{field_details_pattern}"
-        logger.debug(f"Built 🔎 Quest key pattern: {pattern}")
+        logger.debug(f"Built 🔎 Quest 🔑 key pattern: {pattern}")
         return pattern
 
     async def quest_retrieve_timeseries(self) -> Dict[str, Any]:

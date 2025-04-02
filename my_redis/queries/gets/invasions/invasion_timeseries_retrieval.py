@@ -34,7 +34,7 @@ repeat
     for i = 1, #hash_data, 2 do
       local ts = tonumber(hash_data[i])
       local count = tonumber(hash_data[i+1])
-      if ts and count and ts >= start_ts and ts <= end_ts then
+      if ts and count and ts >= start_ts and ts < end_ts then
          sum_results[group_key] = (sum_results[group_key] or 0) + count
          if not grouped_results[group_key] then
            grouped_results[group_key] = {}

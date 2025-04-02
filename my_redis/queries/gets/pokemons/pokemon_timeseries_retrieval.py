@@ -42,7 +42,7 @@ repeat
         for i = 1, #hash_data, 2 do
             local ts = tonumber(hash_data[i])
             local count = tonumber(hash_data[i+1])
-            if ts and count and ts >= start_ts and ts <= end_ts then
+            if ts and count and ts >= start_ts and ts < end_ts then
                 local metric = key_parts[3] or 'unknown'
                 local pokemon_id = key_parts[5] or 'all'
                 local form = key_parts[6] or '0'

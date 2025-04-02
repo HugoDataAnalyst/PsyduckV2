@@ -50,7 +50,7 @@ def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: date
             timestr = parts[component_index]
             dt = datetime.strptime(timestr, time_format)
             logger.debug(f"Key: {key} parsed time: {dt}")
-            if start <= dt <= end:
+            if start <= dt < end:
                 logger.debug(f"Key: {key} is in range.")
                 filtered.append(key)
             else:
@@ -94,7 +94,7 @@ def parse_time_input(time_str: str, area_offset: int = 0) -> datetime:
         return now_utc + timedelta(hours=area_offset)
 
     # 3. Handle relative times
-    pattern = re.compile(r"(\d+)\s*(hour|hours|minute|minutes|day|days)")
+    pattern = re.compile(r"(\d+)\s*(hour|hours|second|seconds|minute|minutes|day|days|week|weeks|month|months|year|years)")
     match = pattern.fullmatch(time_str)
     if match:
         value = int(match.group(1))
@@ -106,10 +106,18 @@ def parse_time_input(time_str: str, area_offset: int = 0) -> datetime:
         # Calculate the past time in local timezone
         if unit == "hour":
             past_local = local_now - timedelta(hours=value)
+        elif unit == "second":
+            past_local = local_now - timedelta(seconds=value)
         elif unit == "minute":
             past_local = local_now - timedelta(minutes=value)
         elif unit == "day":
             past_local = local_now - timedelta(days=value)
+        elif unit == "week":
+            past_local = local_now - timedelta(weeks=value)
+        elif unit == "month":
+            past_local = local_now - timedelta(months=value)
+        elif unit == "year":
+            past_local = local_now - timedelta(years=value)
 
         # Convert to local_area_utc (what Redis stores)
         return past_local
