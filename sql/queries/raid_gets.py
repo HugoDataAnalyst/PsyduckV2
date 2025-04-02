@@ -1,7 +1,7 @@
 from datetime import datetime
 from utils.logger import logger
 from sql import models
-from tortoise.expressions import Q
+from tortoise.expressions import Q, F
 
 class RaidSQLQueries():
     def __init__(self, area: str, start: datetime, end: datetime,
@@ -66,16 +66,22 @@ class RaidSQLQueries():
                 "raid_ex_raid_eligible",
                 "area__name",
                 "month_year"
+            ).annotate(
+                gym_id=F("gym__gym"),
+                gym_name=F("gym__gym_name"),
+                gym_latitude=F("gym__latitude"),
+                gym_longitude=F("gym__longitude"),
+                area_name=F("area__name")
             )
 
             if self.limit > 0:
                 query = query.limit(self.limit)
 
             results = await query.values(
-                "gym__gym",
-                "gym__gym_name",
-                "gym__latitude",
-                "gym__longitude",
+                "gym_id",
+                "gym_name",
+                "gym_latitude",
+                "gym_longitude",
                 "raid_pokemon",
                 "raid_level",
                 "raid_form",
@@ -83,7 +89,7 @@ class RaidSQLQueries():
                 "raid_costume",
                 "raid_is_exclusive",
                 "raid_ex_raid_eligible",
-                "area__name",
+                "area_name",
                 "total_count",
                 "month_year"
             )

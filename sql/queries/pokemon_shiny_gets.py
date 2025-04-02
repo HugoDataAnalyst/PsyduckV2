@@ -1,7 +1,7 @@
 from datetime import datetime
 from utils.logger import logger
 from sql import models
-from tortoise.expressions import Q
+from tortoise.expressions import Q, F
 
 class ShinySQLQueries():
     def __init__(self, area: str, start: datetime, end: datetime,
@@ -42,7 +42,7 @@ class ShinySQLQueries():
                 "shiny",
                 "area__name",
                 "month_year"
-            )
+            ).annotate(area_name=F("area_name"))
 
             if self.limit > 0:
                 query = query.limit(self.limit)
@@ -52,7 +52,7 @@ class ShinySQLQueries():
                 "pokemon_id",
                 "form",
                 "shiny",
-                "area__name",
+                "area_name",
                 "total_count",
                 "month_year"
             )

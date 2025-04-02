@@ -1,7 +1,7 @@
 from datetime import datetime
 from utils.logger import logger
 from sql import models
-from tortoise.expressions import Q
+from tortoise.expressions import Q, F
 
 class QuestSQLQueries():
     def __init__(self, area: str, start: datetime, end: datetime,
@@ -73,16 +73,22 @@ class QuestSQLQueries():
                 "reward_normal_poke_id",
                 "area__name",
                 "month_year"
-            )
+            ).annotate(
+                pokestop_id=F("pokestop__pokestop"),
+                pokestop_name=F("pokestop__pokestop_name"),
+                pokestop_latitude=F("pokestop__latitude"),
+                pokestop_longitude=F("pokestop__longitude"),
+                area_name=F("area__name")
+                )
 
             if self.limit > 0:
                 query = query.limit(self.limit)
 
             results = await query.values(
-                "pokestop__pokestop",
-                "pokestop__pokestop_name",
-                "pokestop__latitude",
-                "pokestop__longitude",
+                "pokestop_id",
+                "pokestop_name",
+                "pokestop_latitude",
+                "pokestop_longitude",
                 "ar_type",
                 "normal_type",
                 "reward_ar_type",
@@ -95,7 +101,7 @@ class QuestSQLQueries():
                 "reward_ar_poke_form",
                 "reward_normal_poke_id",
                 "reward_normal_poke_form",
-                "area__name",
+                "area_name",
                 "total_count",
                 "month_year"
             )

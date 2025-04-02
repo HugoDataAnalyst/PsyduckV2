@@ -1,7 +1,7 @@
 from datetime import datetime
 from utils.logger import logger
 from sql import models
-from tortoise.expressions import Q
+from tortoise.expressions import Q, F
 
 class PokemonSQLQueries():
     def __init__(self, area: str, start: datetime, end: datetime,
@@ -38,7 +38,7 @@ class PokemonSQLQueries():
                 "area__name",
                 "spawnpoint",
                 "month_year"
-            )
+            ).annotate(area_name=F("area_name"))
 
             if self.limit > 0:
                 query = query.limit(self.limit)
@@ -48,7 +48,7 @@ class PokemonSQLQueries():
                 "pokemon_id",
                 "form",
                 "iv",
-                "area__name",
+                "area_name",
                 "spawnpoint",
                 "total_count",
                 "month_year"
