@@ -114,6 +114,12 @@ async def get_counter_raids(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
+    raid_pokemon: str = Query("all", description="Filter by raid_pokemon. Use 'all' to show all."),
+    raid_form: str = Query("all", description="Filter by raid_form. Use 'all' to show all."),
+    raid_level: str = Query("all", description="Filter by raid_level. Use 'all' to show all."),
+    raid_costume: str = Query("all", description="Filter by raid_costume. Use 'all' to show all."),
+    raid_is_exclusive: str = Query("all", description="Filter by raid_is_exclusive. Use 'all' to show all."),
+    raid_ex_eligible: str = Query("all", description="Filter by raid_ex_eligible. Use 'all' to show all."),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
@@ -144,7 +150,7 @@ async def get_counter_raids(
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
     # Initialize the counter retrieval object
-    raid_counter_retrieval = RaidCounterRetrieval(area, start_dt, end_dt, mode)
+    raid_counter_retrieval = RaidCounterRetrieval(area, start_dt, end_dt, mode, raid_pokemon, raid_form, raid_level, raid_costume, raid_is_exclusive, raid_ex_eligible)
 
     # Retrieve data dynamically based on counter type and interval
     retrieval_methods = {
