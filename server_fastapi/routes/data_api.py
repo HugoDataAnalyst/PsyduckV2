@@ -20,6 +20,7 @@ from sql.queries.pokemon_shiny_gets import ShinySQLQueries
 from sql.queries.raid_gets import RaidSQLQueries
 from sql.queries.invasion_gets import InvasionSQLQueries
 from sql.queries.quest_gets import QuestSQLQueries
+from sql.tasks.golbat_pokestops import GolbatSQLPokestops
 
 router = APIRouter()
 
@@ -29,6 +30,59 @@ dependencies_list = [
 ]
 if AppConfig.api_secret_key:
     dependencies_list.append(Depends(secure_api.verify_token))
+
+
+@router.get(
+    "/api/redis/get_cached_pokestops",
+    tags=["Pokestops"],
+    dependencies=dependencies_list
+)
+async def get_cached_pokestops(
+    response_format: str = Query("json", description="Response format: json or text"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+):
+    """
+    Retrieve the cached pokestops counts from Redis.
+    """
+    await secure_api.check_secret_header_value(api_secret_header)
+    result = await GolbatSQLPokestops.get_cached_pokestops()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Cached pokestops not found")
+
+    if response_format.lower() == "json":
+        return result
+    else:
+        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
+        return text_output
+
+
+@router.get(
+    "/api/redis/get_cached_geofences",
+    tags=["Koji Geofences"],
+    dependencies=dependencies_list
+)
+async def get_cached_geofences(
+    response_format: str = Query("json", description="Response format: json or text"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+):
+    """
+    Retrieve the cached Koji geofences from the global state.
+    """
+    await secure_api.check_secret_header_value(api_secret_header)
+    result = global_state.geofences
+    if not result:
+        raise HTTPException(status_code=404, detail="Cached geofences not found")
+    if response_format.lower() == "json":
+        return result
+    else:
+        if isinstance(result, dict):
+            text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
+        elif isinstance(result, list):
+            text_output = "\n".join(str(item) for item in result)
+        else:
+            text_output = str(result)
+        return text_output
+
 
 @router.get(
     "/api/redis/get_pokemon_counterseries",

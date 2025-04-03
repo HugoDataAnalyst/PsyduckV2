@@ -16,6 +16,16 @@ VERSION = "1.0.0"
 
 TAGS_METADATA = [
     {
+        "name": "Pokestops",
+        "description": "Obtain Pokestops counts from Redis.",
+        "summary": "Get Pokestops counts for each Area.",
+    },
+    {
+        "name": "Koji Geofences",
+        "description": "Obtain Koji Geofences from Redis.",
+        "summary": "Get Koji Geofences.",
+    },
+    {
         "name": "Pokémon Counter Series",
         "description": "Obtain Pokémon Counter Series Data from Redis.",
         "summary": "Get Pokémon counter series data.",
