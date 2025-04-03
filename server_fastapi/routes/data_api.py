@@ -43,6 +43,9 @@ async def get_pokemon_counterseries(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
+    metric: str = Query("all", description="Filter by metric. For totals: allowed values are total, iv100, iv0, pvp_little, pvp_great, pvp_ultra, shiny. For weather: allowed values are 0 to 9. For TTH: allowed values are e.g. 0_5, 5_10, etc."),
+    pokemon_id: str = Query("all", description="ONLY IN TOTALS. Filter by Pokémon ID. Use 'all' to show all Pokémon."),
+    form: str = Query("all", description="ONLY IN TOTALS. Filter by form. Use 'all' to show all forms."),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
     #api_secret_key: Optional[str] = secure_api.get_secret_key_param()
 ):
@@ -77,7 +80,7 @@ async def get_pokemon_counterseries(
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
     # Initialize the counter retrieval object
-    pokemon_counter_retrieval = PokemonCounterRetrieval(area, start_dt, end_dt, mode)
+    pokemon_counter_retrieval = PokemonCounterRetrieval(area, start_dt, end_dt, mode, pokemon_id, form, metric)
 
     # Retrieve data dynamically based on counter type and interval
     retrieval_methods = {
