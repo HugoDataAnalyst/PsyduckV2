@@ -234,6 +234,10 @@ async def get_counter_invasions(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
+    display_type: str = Query("all", description="all or invasion display type"),
+    character: str = Query("all", description="all or invasion character"),
+    grunt: str = Query("all", description="all or grunt type"),
+    confirmed: str = Query("all", description="all or confirmed status (0 or 1)"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
@@ -264,7 +268,7 @@ async def get_counter_invasions(
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
     # Initialize the counter retrieval object
-    invasion_counter_retrieval = InvasionCounterRetrieval(area, start_dt, end_dt, mode)
+    invasion_counter_retrieval = InvasionCounterRetrieval(area, start_dt, end_dt, mode, display_type, character, grunt, confirmed)
 
     # Retrieve data dynamically based on counter type and interval
     retrieval_methods = {

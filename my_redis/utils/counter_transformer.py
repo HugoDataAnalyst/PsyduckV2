@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from turtle import st
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
@@ -161,6 +162,51 @@ class CounterTransformer:
 
 
     @classmethod
+    def transform_invasion_surged_totals_hourly_by_hour(cls, raw_aggregated: dict) -> dict:
+        """
+        Transforms raw aggregated raid totals hourly data (grouped mode) into a dictionary keyed by the hour of day.
+
+        This function expects raw_aggregated to be a dictionary where each key is the original Redis key
+        (which includes a time component in the format "...:{YYYYMMDDHH}") and its value is a dictionary of
+        aggregated fields (e.g. "raid_pokemon:raid_level:raid_form:raid_costume:raid_is_exclusive:raid_ex_eligible:total" -> count).
+
+        For each Redis key, it extracts the hour (the last two characters of the time portion), merges the inner
+        dictionaries for all keys that fall within the same hour, and then applies transform_raid_totals_sum
+        to produce the detailed breakdown for that hour.
+
+        The final output is a dictionary keyed as "hour {H}" with the detailed breakdown as its value.
+        """
+        surged = {}
+        # Group fields by hour from the original Redis keys.
+        for full_key, fields in raw_aggregated.items():
+            parts = full_key.split(":")
+            if len(parts) < 4:
+                continue
+            time_part = parts[-1]  # Expected to be something like YYYYMMDDHH
+            if len(time_part) < 2:
+                continue
+            # Extract the last two digits for the hour.
+            hour_only = time_part[-2:]
+            if hour_only not in surged:
+                surged[hour_only] = {}
+            # Merge the fields for this key into the appropriate hour bucket.
+            for field, value in fields.items():
+                surged[hour_only][field] = surged[hour_only].get(field, 0) + value
+
+        # For each hour, use the detailed transformation (grouped method) to get a breakdown.
+        result = {}
+        for hour, flat_fields in surged.items():
+            # flat_fields is a flat dict with keys like:
+            # "raid_pokemon:raid_level:raid_form:raid_costume:raid_is_exclusive:raid_ex_eligible:total"
+            transformed = cls.transform_invasion_totals_grouped(flat_fields)
+            result[f"hour {int(hour)}"] = transformed
+
+        # Optionally, sort the result by hour (numerically)
+        sorted_result = dict(sorted(result.items(), key=lambda item: int(item[0].split()[1])))
+        return sorted_result
+
+
+    @classmethod
     def transform_raids_surged_totals_hourly_by_hour(cls, raw_aggregated: dict) -> dict:
         """
         Transforms raw aggregated raid totals hourly data (grouped mode) into a dictionary keyed by the hour of day.
@@ -251,11 +297,9 @@ class CounterTransformer:
     @staticmethod
     def transform_raid_totals_sum(raw_data: dict) -> dict:
         """
-        New SUM transformation for raids.
         Returns a dictionary with:
          - "total": the combined total raids (after filtering)
          - "raid_level": a breakdown of total raids per raid_level.
-        Assumes raw_data is already filtered.
         """
         total = 0
         raid_level_totals = {}
@@ -299,7 +343,7 @@ class CounterTransformer:
             "raid_ex_eligible": {},
             "total": 0
         }
-        logger.debug("▶️ Starting transform_raid_totals_sum")
+        logger.debug("▶️ Starting transform_raid_totals_grouped")
         # raw_aggregated is assumed to be a flat dictionary: field -> value.
         for field, value in raw_aggregated.items():
             logger.debug(f"▶️ Processing field: {field} with value: {value}")
@@ -349,7 +393,32 @@ class CounterTransformer:
 
 
     @staticmethod
-    def transform_invasion_totals_sum(raw_aggregated: dict) -> dict:
+    def transform_invasion_totals_sum(raw_data: dict) -> dict:
+        """
+        Returns a dictionary with:
+         - "total": overall total invasions (after filtering)
+         - "confirmed": a breakdown of total invasions per confirmed.
+        """
+        total = 0
+        confirmed_totals = {}
+        for key, value in raw_data.items():
+            parts = key.split(":")
+            if len(parts) != 5:
+                continue
+            # parts: display_type, character, grunt, confirmed, metric
+            _, _, _, conf, _ = parts
+            try:
+                val = int(value)
+            except Exception as e:
+                logger.error(f"Could not convert value {value} for key {key}: {e}")
+                val = 0
+            total += val
+            confirmed_totals[conf] = confirmed_totals.get(conf, 0) + val
+        return {"total": total, "confirmed": confirmed_totals}
+
+
+    @staticmethod
+    def transform_invasion_totals_grouped(raw_aggregated: dict) -> dict:
         """
         Transforms raw aggregated invasion totals (in sum mode) into a detailed breakdown.
 
@@ -368,7 +437,7 @@ class CounterTransformer:
             "confirmed": {},
             "total": 0
         }
-        logger.info("▶️ Starting transform_invasion_totals_sum")
+        logger.debug("▶️ Starting transform_invasion_totals_grouped")
 
         # raw_aggregated is expected to be a flat dict: field -> value.
         for field, value in raw_aggregated.items():
