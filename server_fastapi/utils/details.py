@@ -7,6 +7,9 @@ DESCRIPTION = """
 
 This API provides endpoints for processing webhooks and retrieving Redis/SQL data.
 For support or further information, please contact: hugogomes@databyhugo.com.
+
+### Documentation for the API can be found [here](https://docspsyduckv2.databyhugo.com/).
+
 """
 
 VERSION = "1.0.0"
