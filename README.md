@@ -38,3 +38,7 @@ After making changes to the models, run the following command to apply the migra
 
 > This command will create a new migration file in the migrations/models directory.
 > Make sure to commit the migration file to the repository.
+
+## API Documentation
+
+ Available [here](https://docspsyduckv2.databyhugo.com/).
