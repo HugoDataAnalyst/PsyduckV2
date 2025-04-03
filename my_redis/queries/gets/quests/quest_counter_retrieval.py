@@ -32,7 +32,7 @@ class QuestCounterRetrieval(CounterTransformer):
 
         time_format = "%Y%m%d"
 
-        if self.area.lower() == "global":
+        if self.area.lower() in ["global", "all"]:
             pattern = "counter:quest:*"
         else:
             pattern = f"counter:quest:{self.area}:*"
@@ -71,7 +71,7 @@ class QuestCounterRetrieval(CounterTransformer):
             return {"mode": self.mode, "data": {}}
 
         time_format = "%Y%m%d%H"
-        if self.area.lower() == "global":
+        if self.area.lower() in ["global", "all"]:
             pattern = "counter:quest_hourly:*"
         else:
             pattern = f"counter:quest_hourly:{self.area}:*"

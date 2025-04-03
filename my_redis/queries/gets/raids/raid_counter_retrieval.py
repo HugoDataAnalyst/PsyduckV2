@@ -31,7 +31,7 @@ class RaidCounterRetrieval(CounterTransformer):
 
         time_format = "%Y%m%d"
 
-        if self.area.lower() == "global":
+        if self.area.lower() in ["global", "all"]:
             pattern = "counter:raid_total:*"
         else:
             pattern = f"counter:raid_total:{self.area}:*"
@@ -70,7 +70,7 @@ class RaidCounterRetrieval(CounterTransformer):
             return {"mode": self.mode, "data": {}}
 
         time_format = "%Y%m%d%H"
-        if self.area.lower() == "global":
+        if self.area.lower() in ["global", "all"]:
             pattern = "counter:raid_hourly:*"
         else:
             pattern = f"counter:raid_hourly:{self.area}:*"

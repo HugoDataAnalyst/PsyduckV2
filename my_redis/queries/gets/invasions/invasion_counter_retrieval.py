@@ -34,7 +34,7 @@ class InvasionCounterRetrieval(CounterTransformer):
 
         time_format = "%Y%m%d"
 
-        if self.area.lower() == "global":
+        if self.area.lower() in ["global", "all"]:
             pattern = "counter:invasion:*"
         else:
             pattern = f"counter:invasion:{self.area}:*"
@@ -73,7 +73,7 @@ class InvasionCounterRetrieval(CounterTransformer):
             return {"mode": self.mode, "data": {}}
 
         time_format = "%Y%m%d%H"
-        if self.area.lower() == "global":
+        if self.area.lower() in ["global", "all"]:
             pattern = "counter:invasion_hourly:*"
         else:
             pattern = f"counter:invasion_hourly:{self.area}:*"
