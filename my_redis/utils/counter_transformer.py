@@ -479,28 +479,28 @@ class CounterTransformer:
 
 
     @staticmethod
-    def transform_quest_totals_sum(raw_aggregated: dict, mode: str = "sum") -> dict:
+    def transform_quest_totals_sum(raw_aggregated: dict, mode: str = "sum", filter_func=None) -> dict:
         """
-        Transforms raw aggregated quest totals (in sum mode) into a detailed breakdown.
-
-        Expected field format (8 parts):
-            "{mode}:{normal_type}:{reward_normal_type}:{reward_normal_item_id}:{reward_normal_item_amount}:{reward_normal_poke_id}:{reward_normal_poke_form}:total"
-
+        Transforms raw aggregated quest totals into a detailed breakdown.
+        Expected field format (for each individual field):
+        "{quest_mode}:{field1}:{field2}:{field3}:{field4}:{field5}:{field6}:total"
         In sum mode the function behaves as before.
-        In grouped mode the function will return a dictionary keyed by the date portion
+        In grouped mode the function returns a dictionary keyed by the date portion
         (extracted from the full Redis key) with each date’s breakdown.
 
+        If filter_func is provided, it is a callable that takes the list of split parts
+        and returns True if the field should be included.
+
         Breakdown keys:
-          - "quest_mode": aggregated sum per quest mode (parts[0]).
-          - "reward_type": aggregated sum per reward type (parts[2]).
-          - "reward_item": aggregated sum per reward item ID (parts[3]).
-          - "reward_item_amount": aggregated sum per reward item amount (parts[4]).
-          - "reward_poke": aggregated sum per reward poke ID (parts[5]).
-          - "reward_poke_form": aggregated sum per reward poke form (parts[6]).
-          - "total": overall total.
+        - "quest_mode": aggregated sum per quest mode (parts[0]).
+        - "reward_type": aggregated sum per reward type (parts[2]).
+        - "reward_item": aggregated sum per reward item ID (parts[3]).
+        - "reward_item_amount": aggregated sum per reward item amount (parts[4]).
+        - "reward_poke": aggregated sum per reward poke ID (parts[5]).
+        - "reward_poke_form": aggregated sum per reward poke form (parts[6]).
+        - "total": overall total.
         """
         if mode == "sum":
-            # Flat aggregation (ignoring the date portion)
             breakdown = {
                 "quest_mode": {},
                 "reward_type": {},
@@ -517,17 +517,13 @@ class CounterTransformer:
                 if len(parts) < 7:
                     logger.debug(f"⏭️ Skipping field {field} because it does not have at least 7 parts (found {len(parts)})")
                     continue
-                # Use the first 7 parts (ignoring the date if present)
-                if len(parts) >= 8:
-                    quest_mode = parts[0]
-                    reward_type = parts[2]
-                    reward_item = parts[3]
-                    reward_item_amount = parts[4]
-                    reward_poke = parts[5]
-                    reward_poke_form = parts[6]
-                else:
-                    quest_mode, reward_type, reward_item, reward_item_amount, reward_poke, reward_poke_form, _ = parts
-
+                # Use only the first 7 parts (ignoring any extra, e.g. date)
+                quest_mode = parts[0]
+                reward_type = parts[2]
+                reward_item = parts[3]
+                reward_item_amount = parts[4]
+                reward_poke = parts[5]
+                reward_poke_form = parts[6]
                 try:
                     val = int(value)
                 except Exception as e:
@@ -542,8 +538,7 @@ class CounterTransformer:
                 breakdown["reward_item_amount"][reward_item_amount] = breakdown["reward_item_amount"].get(reward_item_amount, 0) + val
                 breakdown["reward_poke"][reward_poke] = breakdown["reward_poke"].get(reward_poke, 0) + val
                 breakdown["reward_poke_form"][reward_poke_form] = breakdown["reward_poke_form"].get(reward_poke_form, 0) + val
-
-            # Sort each inner dictionary lexicographically
+            # Sorting (optional)
             breakdown["quest_mode"] = dict(sorted(breakdown["quest_mode"].items()))
             breakdown["reward_type"] = dict(sorted(breakdown["reward_type"].items()))
             breakdown["reward_item"] = dict(sorted(breakdown["reward_item"].items()))
@@ -558,12 +553,11 @@ class CounterTransformer:
             grouped_by_date = {}
             logger.info("▶️ Starting transform_quest_totals_sum (grouped mode)")
             for full_key, flat_fields in raw_aggregated.items():
-                # Expect full_key to be in the format: "counter:quest_hourly:{area}:{YYYYMMDDHH}"
+                # Full keyformat: "counter:quest_hourly:{area}:{YYYYMMDDHH}"
                 parts = full_key.split(":")
                 if len(parts) < 4:
                     continue
-                date_str = parts[-1]  # e.g., "2025031601"
-                # Initialize the breakdown for this date if not present.
+                date_str = parts[-1]  # e.g. "YYYYMMDDHH" or "YYYYMMDD"
                 if date_str not in grouped_by_date:
                     grouped_by_date[date_str] = {
                         "quest_mode": {},
@@ -576,21 +570,11 @@ class CounterTransformer:
                     }
                 # Process each field from the flat_fields
                 for field, value in flat_fields.items():
-                    logger.debug(f"▶️ Processing field: {field} with value: {value} (for date {date_str})")
-                    parts_field = field.split(":")
-                    if len(parts_field) < 7:
-                        logger.debug(f"⏭️ Skipping field {field} (date {date_str}) because it does not have at least 7 parts (found {len(parts_field)})")
+                    split_parts = field.split(":")
+                    if len(split_parts) < 7:
                         continue
-                    if len(parts_field) >= 8:
-                        quest_mode = parts_field[0]
-                        reward_type = parts_field[2]
-                        reward_item = parts_field[3]
-                        reward_item_amount = parts_field[4]
-                        reward_poke = parts_field[5]
-                        reward_poke_form = parts_field[6]
-                    else:
-                        quest_mode, reward_type, reward_item, reward_item_amount, reward_poke, reward_poke_form, _ = parts_field
-
+                    if filter_func and not filter_func(split_parts):
+                        continue
                     try:
                         val = int(value)
                     except Exception as e:
@@ -598,6 +582,12 @@ class CounterTransformer:
                         val = 0
 
                     grouped_by_date[date_str]["total"] += val
+                    quest_mode = split_parts[0]
+                    reward_type = split_parts[2]
+                    reward_item = split_parts[3]
+                    reward_item_amount = split_parts[4]
+                    reward_poke = split_parts[5]
+                    reward_poke_form = split_parts[6]
                     grouped_by_date[date_str]["quest_mode"][quest_mode] = grouped_by_date[date_str]["quest_mode"].get(quest_mode, 0) + val
                     grouped_by_date[date_str]["reward_type"][reward_type] = grouped_by_date[date_str]["reward_type"].get(reward_type, 0) + val
                     grouped_by_date[date_str]["reward_item"][reward_item] = grouped_by_date[date_str]["reward_item"].get(reward_item, 0) + val
@@ -605,7 +595,7 @@ class CounterTransformer:
                     grouped_by_date[date_str]["reward_poke"][reward_poke] = grouped_by_date[date_str]["reward_poke"].get(reward_poke, 0) + val
                     grouped_by_date[date_str]["reward_poke_form"][reward_poke_form] = grouped_by_date[date_str]["reward_poke_form"].get(reward_poke_form, 0) + val
 
-            # Optionally, sort each inner breakdown dictionary (keys are strings, so lexicographical sort is fine)
+            # (Optional: sort each inner dictionary)
             for date in grouped_by_date:
                 grouped_by_date[date]["quest_mode"] = dict(sorted(grouped_by_date[date]["quest_mode"].items()))
                 grouped_by_date[date]["reward_type"] = dict(sorted(grouped_by_date[date]["reward_type"].items()))
@@ -621,11 +611,10 @@ class CounterTransformer:
             surged = {}
             logger.info("▶️ Starting transform_quest_totals_sum (surged mode)")
             for full_key, flat_fields in raw_aggregated.items():
-                parts_key = full_key.split(":")
-                if len(parts_key) < 4:
+                parts = full_key.split(":")
+                if len(parts) < 4:
                     continue
-                date_str = parts_key[-1]  # e.g., "2025031601"
-                # Extract the hour (last two characters of date_str)
+                date_str = parts[-1]
                 hour = date_str[-2:]
                 if hour not in surged:
                     surged[hour] = {
@@ -638,23 +627,24 @@ class CounterTransformer:
                         "total": 0
                     }
                 for field, value in flat_fields.items():
-                    logger.debug(f"Processing field: {field} with value: {value} (for hour {hour})")
-                    parts_field = field.split(":")
-                    if len(parts_field) < 7:
-                        logger.debug(f"⏭️ Skipping field {field} (hour {hour}) because it does not have at least 7 parts (found {len(parts_field)})")
+                    split_parts = field.split(":")
+                    if len(split_parts) < 7:
                         continue
-                    quest_mode = parts_field[0]
-                    reward_type = parts_field[2]
-                    reward_item = parts_field[3]
-                    reward_item_amount = parts_field[4]
-                    reward_poke = parts_field[5]
-                    reward_poke_form = parts_field[6]
+                    if filter_func and not filter_func(split_parts):
+                        continue
                     try:
                         val = int(value)
                     except Exception as e:
                         logger.error(f"❌ Could not convert value '{value}' for field '{field}' to int: {e}")
                         val = 0
+
                     surged[hour]["total"] += val
+                    quest_mode = split_parts[0]
+                    reward_type = split_parts[2]
+                    reward_item = split_parts[3]
+                    reward_item_amount = split_parts[4]
+                    reward_poke = split_parts[5]
+                    reward_poke_form = split_parts[6]
                     surged[hour]["quest_mode"][quest_mode] = surged[hour]["quest_mode"].get(quest_mode, 0) + val
                     surged[hour]["reward_type"][reward_type] = surged[hour]["reward_type"].get(reward_type, 0) + val
                     surged[hour]["reward_item"][reward_item] = surged[hour]["reward_item"].get(reward_item, 0) + val

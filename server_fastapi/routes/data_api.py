@@ -299,6 +299,19 @@ async def get_counter_quests(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
+    with_ar: str = Query("false", description="Filter by AR quests: true, false, or all"),
+    ar_type: str = Query("all", description="Filter by AR quest type"),
+    reward_ar_type: str = Query("all", description="Filter by AR reward type"),
+    reward_ar_item_id: str = Query("all", description="Filter by AR reward item ID"),
+    reward_ar_item_amount: str = Query("all", description="Filter by AR reward item amount"),
+    reward_ar_poke_id: str = Query("all", description="Filter by AR reward Pokémon ID"),
+    reward_ar_poke_form: str = Query("all", description="Filter by AR reward Pokémon form"),
+    normal_type: str = Query("all", description="Filter by normal quest type"),
+    reward_normal_type: str = Query("all", description="Filter by normal reward type"),
+    reward_normal_item_id: str = Query("all", description="Filter by normal reward item ID"),
+    reward_normal_item_amount: str = Query("all", description="Filter by normal reward item amount"),
+    reward_normal_poke_id: str = Query("all", description="Filter by normal reward Pokémon ID"),
+    reward_normal_poke_form: str = Query("all", description="Filter by normal reward Pokémon form"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     # Validate secret parameters
@@ -329,7 +342,11 @@ async def get_counter_quests(
         raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
 
     # Initialize the counter retrieval object
-    quest_counter_retrieval = QuestCounterRetrieval(area, start_dt, end_dt, mode)
+    quest_counter_retrieval = QuestCounterRetrieval(
+        area, start_dt, end_dt, mode, with_ar,
+        ar_type, reward_ar_type, reward_ar_item_id, reward_ar_item_amount, reward_ar_poke_id, reward_ar_poke_form,
+        normal_type, reward_normal_type, reward_normal_item_id, reward_normal_item_amount, reward_normal_poke_id, reward_normal_poke_form
+    )
 
     # Retrieve data dynamically based on counter type and interval
     retrieval_methods = {
