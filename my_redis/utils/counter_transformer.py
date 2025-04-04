@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from turtle import st
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
