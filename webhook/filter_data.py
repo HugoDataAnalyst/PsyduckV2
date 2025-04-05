@@ -277,7 +277,8 @@ class WebhookFilter:
             "individual_stamina",
             "disappear_time",
             "first_seen",
-            "spawnpoint_id"
+            "spawnpoint_id",
+            "disappear_time_verified"
         ]
 
         # ✅ Check if all required fields are present
@@ -327,6 +328,7 @@ class WebhookFilter:
             "spawnpoint": message["spawnpoint_id"],
             "area_id": geofence_id,
             "area_name": geofence_name,
+            "disappear_time_verified": message["disappear_time_verified"],
         }
 
         logger.debug(f"✅ Pokémon {pokemon_data['pokemon_id']} (Form {pokemon_data['form']}) in {geofence_id} - IV: {pokemon_data['iv']}% - Despawns in {despawn_timer} sec with True UTC: {true_utc} and local time: {local_area_utc}")

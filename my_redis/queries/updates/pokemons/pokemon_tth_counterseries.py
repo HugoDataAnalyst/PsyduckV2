@@ -30,6 +30,12 @@ async def update_tth_pokemon_counter(data, pipe=None):
         logger.error("❌ Redis is not connected. Cannot update Pokémon TTH counter.")
         return "ERROR"
 
+    # ✅ Check that 'disappear_time_verified' is present and True.
+    if not data.get("disappear_time_verified", False):
+        status_verified = data.get("disappear_time_verified")
+        logger.debug(f"⚠️ Skipping Pokémon data because disappear_time_verified is not True: {status_verified}")
+        return "IGNORED"
+
     # Convert first_seen timestamp to YYYYMMDD format
     ts = data["first_seen"]
     dt = datetime.fromtimestamp(ts)

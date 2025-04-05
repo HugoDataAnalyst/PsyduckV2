@@ -1,3 +1,4 @@
+import dis
 import config as AppConfig
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
@@ -16,6 +17,7 @@ def get_tth_bucket(despawn_timer_sec):
     Convert despawn time (in seconds) to minutes and assign it to the correct TTH bucket.
     Returns a bucket string like "0_5", "5_10", etc.
     """
+    logger.debug(f"▶️ Despawn timer: {despawn_timer_sec}s")
     despawn_timer_min = despawn_timer_sec // 60  # convert seconds to minutes
     for min_tth, max_tth in TTH_BUCKETS:
         if min_tth <= despawn_timer_min < max_tth:
@@ -50,6 +52,12 @@ async def add_tth_timeseries_pokemon_event(data, pipe=None):
     if not client:
         logger.error("❌ Redis is not connected. Cannot add Pokémon TTH event to timeseries.")
         return "ERROR"
+
+    # ✅ Check that 'disappear_time_verified' is present and True.
+    if not data.get("disappear_time_verified", False):
+        status_verified = data.get("disappear_time_verified")
+        logger.debug(f"⚠️ Skipping Pokémon data because disappear_time_verified is not True: {status_verified}")
+        return "IGNORED"
 
     # Retrieve despawn timer and determine bucket.
     despawn_timer = data.get("despawn_timer", 0)
