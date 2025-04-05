@@ -14,9 +14,11 @@ local end_ts = tonumber(ARGV[3])
 local mode = ARGV[4]
 local batch_size = 1000
 
+local total = 0
 local sum_results = {}
 local grouped_results = {}
 local surged_results = {}
+local confirmed_results = {}
 
 local cursor = '0'
 repeat
@@ -35,29 +37,38 @@ repeat
       local ts = tonumber(hash_data[i])
       local count = tonumber(hash_data[i+1])
       if ts and count and ts >= start_ts and ts < end_ts then
+         total = total + count
          sum_results[group_key] = (sum_results[group_key] or 0) + count
+
          if not grouped_results[group_key] then
            grouped_results[group_key] = {}
          end
          local bucket_str = tostring(ts)
          grouped_results[group_key][bucket_str] = (grouped_results[group_key][bucket_str] or 0) + count
+
          if not surged_results[group_key] then
            surged_results[group_key] = {}
          end
          local hour = tostring(math.floor((ts % 86400) / 3600))
          surged_results[group_key][hour] = (surged_results[group_key][hour] or 0) + count
+
+         -- Accumulate counts per confirmed flag.
+         local confirmed_key = key_parts[7]
+         confirmed_results[confirmed_key] = (confirmed_results[confirmed_key] or 0) + count
       end
     end
   end
 until cursor == '0'
 
 if mode == 'sum' then
-  local arr = {}
-  for k, v in pairs(sum_results) do
-    table.insert(arr, k)
-    table.insert(arr, v)
+  -- Convert confirmed_results into an array of key/value pairs.
+  local confirmed_arr = {}
+  for k, v in pairs(confirmed_results) do
+    table.insert(confirmed_arr, k)
+    table.insert(confirmed_arr, v)
   end
-  return arr
+  local result = {"total", total, "confirmed", confirmed_arr}
+  return result
 elseif mode == 'grouped' then
   local arr = {}
   for group_key, groups in pairs(grouped_results) do
@@ -172,10 +183,8 @@ class InvasionTimeSeries:
 
             formatted_data = {}
             if self.mode == "sum":
-                # Order by the composite key (display_type:grunt:confirmed) by splitting and converting numeric parts.
-                formatted_data = dict(
-                    sorted(raw_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
-                )
+                # For mode "sum", raw_data is now a dictionary with keys "total" and "confirmed".
+                formatted_data = raw_data
                 logger.debug(f"Formatted 🕴️ Invasion 'sum' data: {formatted_data}")
             elif self.mode == "grouped":
                 formatted_data = {}
