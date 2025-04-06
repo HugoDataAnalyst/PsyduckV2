@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Dict, Any
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
+from server_fastapi import global_state
+from webhook.filter_data import WebhookFilter  # Ensure this function is available
 
 redis_manager = RedisManager()
 
@@ -12,6 +14,7 @@ local pattern = ARGV[1]
 local start_ts = tonumber(ARGV[2])
 local end_ts = tonumber(ARGV[3])
 local mode = ARGV[4]
+local offset = tonumber(ARGV[5]) or 0
 local batch_size = 1000
 
 local sum_results = {}
@@ -25,30 +28,20 @@ repeat
   local keys = reply[2]
   for _, key in ipairs(keys) do
     local hash_data = redis.call('HGETALL', key)
-    -- Extract key parts: ts, raids_total, raid_type, area, raid_pokemon, raid_level, raid_form
-    local key_parts = {}
-    for part in string.gmatch(key, "([^:]+)") do
-      table.insert(key_parts, part)
-    end
-    local raid_type = key_parts[3] or "unknown"
     for i = 1, #hash_data, 2 do
       local ts = tonumber(hash_data[i])
       local count = tonumber(hash_data[i+1])
       if ts and count and ts >= start_ts and ts < end_ts then
-         -- Sum mode: aggregate counts per raid_type.
-         sum_results[raid_type] = (sum_results[raid_type] or 0) + count
-         -- Grouped mode: group by raid_type then by the bucket (timestamp).
-         if not grouped_results[raid_type] then
-           grouped_results[raid_type] = {}
+         -- For sum and grouped modes, aggregate counts using the full key.
+         sum_results[key] = (sum_results[key] or 0) + count
+         grouped_results[key] = (grouped_results[key] or 0) + count
+         -- For surged mode, compute the hour from UTC, adjust by the provided offset, and wrap into 0–23.
+         if mode == 'surged' then
+            local hour = math.floor((ts % 86400) / 3600)
+            local local_hour = (hour + offset) % 24
+            local new_key = key .. ":" .. tostring(local_hour)
+            surged_results[new_key] = (surged_results[new_key] or 0) + count
          end
-         local bucket_str = tostring(ts)
-         grouped_results[raid_type][bucket_str] = (grouped_results[raid_type][bucket_str] or 0) + count
-         -- Surged mode: group by raid_type then by the hour (extracted from the timestamp).
-         if not surged_results[raid_type] then
-           surged_results[raid_type] = {}
-         end
-         local hour = tostring(math.floor((ts % 86400) / 3600))
-         surged_results[raid_type][hour] = (surged_results[raid_type][hour] or 0) + count
       end
     end
   end
@@ -63,26 +56,16 @@ if mode == 'sum' then
   return arr
 elseif mode == 'grouped' then
   local arr = {}
-  for rt, groups in pairs(grouped_results) do
-    local inner = {}
-    for bucket, count in pairs(groups) do
-      table.insert(inner, bucket)
-      table.insert(inner, count)
-    end
-    table.insert(arr, rt)
-    table.insert(arr, inner)
+  for k, v in pairs(grouped_results) do
+    table.insert(arr, k)
+    table.insert(arr, v)
   end
   return arr
 elseif mode == 'surged' then
   local arr = {}
-  for rt, hours in pairs(surged_results) do
-    local inner = {}
-    for hour, count in pairs(hours) do
-      table.insert(inner, hour)
-      table.insert(inner, count)
-    end
-    table.insert(arr, rt)
-    table.insert(arr, inner)
+  for k, v in pairs(surged_results) do
+    table.insert(arr, k)
+    table.insert(arr, v)
   end
   return arr
 else
@@ -121,14 +104,106 @@ class RaidTimeSeries:
 
     def _build_key_pattern(self) -> str:
         # Replace any filter set to "all" (or "global" for area) with a wildcard "*"
-        raid_type = "*" if self.raid_type.lower() in ["all"] else self.raid_type
+        raid_type = "*" if self.raid_type.lower() == "all" else self.raid_type
         area = "*" if self.area.lower() in ["all", "global"] else self.area
-        raid_pokemon = "*" if self.raid_pokemon.lower() in ["all"] else self.raid_pokemon
-        raid_level = "*" if self.raid_level.lower() in ["all"] else self.raid_level
-        raid_form = "*" if self.raid_form.lower() in ["all"] else self.raid_form
+        raid_pokemon = "*" if self.raid_pokemon.lower() == "all" else self.raid_pokemon
+        raid_level = "*" if self.raid_level.lower() == "all" else self.raid_level
+        raid_form = "*" if self.raid_form.lower() == "all" else self.raid_form
         pattern = f"ts:raids_total:{raid_type}:{area}:{raid_pokemon}:{raid_level}:{raid_form}"
         logger.debug(f"Built 👹 Raid 🔑 key pattern: {pattern}")
         return pattern
+
+    @staticmethod
+    def _transform_timeseries_sum(raw_data: dict) -> dict:
+        """
+        Transforms raw 'sum' data into a breakdown.
+        Expected key format: ts:raids_total:{raid_type}:{area}:{raid_pokemon}:{raid_level}:{raid_form}
+        """
+        total = 0
+        raid_level_totals = {}
+        for key, value in raw_data.items():
+            parts = key.split(":")
+            if len(parts) != 7:
+                continue
+            raid_level = parts[5]
+            try:
+                val = int(value)
+            except Exception as e:
+                logger.error(f"Could not convert value {value} for key {key}: {e}")
+                val = 0
+            total += val
+            raid_level_totals[raid_level] = raid_level_totals.get(raid_level, 0) + val
+        return {"total": total, "raid_level": raid_level_totals}
+
+    @staticmethod
+    def transform_raid_totals_grouped(raw_data: dict) -> dict:
+        """
+        Transforms raw aggregated raid totals (from grouped mode) into a detailed breakdown.
+        Expected key format: ts:raids_total:{raid_type}:{area}:{raid_pokemon}:{raid_level}:{raid_form}
+        The breakdown includes:
+         - "raid_pokemon+raid_form": aggregated sum for each unique combination.
+         - "raid_level": aggregated sum per raid_level.
+         - "total": overall total.
+        """
+        breakdown = {
+            "raid_pokemon+raid_form": {},
+            "raid_level": {},
+            "total": 0
+        }
+        for key, value in raw_data.items():
+            parts = key.split(":")
+            if len(parts) != 7:
+                continue
+            raid_pokemon = parts[4]
+            raid_level = parts[5]
+            raid_form = parts[6]
+            try:
+                val = int(value)
+            except Exception as e:
+                logger.error(f"Could not convert value {value} for key {key}: {e}")
+                val = 0
+            breakdown["total"] += val
+            pf_key = f"{raid_pokemon}:{raid_form}"
+            breakdown["raid_pokemon+raid_form"][pf_key] = breakdown["raid_pokemon+raid_form"].get(pf_key, 0) + val
+            breakdown["raid_level"][raid_level] = breakdown["raid_level"].get(raid_level, 0) + val
+        breakdown["raid_pokemon+raid_form"] = dict(sorted(breakdown["raid_pokemon+raid_form"].items()))
+        breakdown["raid_level"] = dict(sorted(breakdown["raid_level"].items(), key=lambda x: int(x[0]) if x[0].isdigit() else x[0]))
+        return breakdown
+
+    @classmethod
+    def transform_raids_surged_totals_hourly_by_hour(cls, raw_aggregated: dict) -> dict:
+        """
+        Transforms raw aggregated raid totals (from surged mode) into a dictionary keyed by the hour of day.
+        Assumes that each key in raw_aggregated ends with a colon and an hour (0–23) appended by the Lua script.
+        For each key, the function:
+          - Splits the key to remove the appended hour (to get the base key).
+          - Groups counts by that hour.
+          - Applies transform_raid_totals_grouped to produce the detailed breakdown.
+        The final output is a dictionary keyed as "hour {H}" with the detailed breakdown as its value.
+        """
+        surged = {}
+        for full_key, count in raw_aggregated.items():
+            parts = full_key.split(":")
+            if len(parts) < 2:
+                continue
+            hour_str = parts[-1]
+            if not hour_str.isdigit():
+                continue
+            hour_int = int(hour_str)
+            if not (0 <= hour_int <= 23):
+                continue
+            hour_key = f"hour {hour_int}"
+            # Remove the appended hour to get the base key.
+            base_key = ":".join(parts[:-1])
+            if hour_key not in surged:
+                surged[hour_key] = {}
+            surged[hour_key][base_key] = surged[hour_key].get(base_key, 0) + int(count)
+        result = {}
+        for hour, group in surged.items():
+            transformed = RaidTimeSeries.transform_raid_totals_grouped(group)
+            result[hour] = transformed
+        sorted_result = dict(sorted(result.items(), key=lambda item: int(item[0].split()[1])))
+        return sorted_result
 
     async def raid_retrieve_timeseries(self) -> Dict[str, Any]:
         client = await redis_manager.check_redis_connection()
@@ -150,7 +225,18 @@ class RaidTimeSeries:
             end_ts = int(self.end.timestamp())
             logger.debug(f"👹 Raid ⏱️ Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
-            # Start timing right before loading/executing the script
+            # Determine the appropriate offset.
+            # If the area is global, use the machine's timezone offset from global_state.user_timezone.
+            # Otherwise, look up the area's offset from global_state.geofences.
+            offset = "0"  # default offset as string
+            if self.area.lower() in ["all", "global"]:
+                offset = str(WebhookFilter.get_machine_offset(global_state.user_timezone))
+            else:
+                for area in global_state.geofences:
+                    if area["name"].lower() == self.area.lower():
+                        offset = str(area.get("offset", 0))
+                        break
+
             request_start = time.monotonic()
 
             script_sha = await self._load_script(client)
@@ -161,7 +247,8 @@ class RaidTimeSeries:
                 pattern,
                 str(start_ts),
                 str(end_ts),
-                self.mode
+                self.mode,
+                offset
             )
             logger.debug(f"Raw 👹 Raid data from Lua script (pre-conversion): {raw_data}")
             raw_data = convert_redis_result(raw_data)
@@ -169,33 +256,17 @@ class RaidTimeSeries:
 
             formatted_data = {}
             if self.mode == "sum":
-                # raw_data is a dict mapping raid_type -> count.
-                # Order by raid_type (alphabetically, or adjust if numeric ordering is desired).
-                formatted_data = dict(sorted(raw_data.items(), key=lambda item: item[0]))
+                formatted_data = self._transform_timeseries_sum(raw_data)
                 logger.debug(f"Formatted 👹 Raid 'sum' data: {formatted_data}")
             elif self.mode == "grouped":
-                formatted_data = {}
-                for rt, groups in raw_data.items():
-                    if isinstance(groups, list):
-                        groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                    # Order inner dictionary by timestamp (converted to int)
-                    ordered_groups = dict(sorted(groups.items(), key=lambda x: int(x[0])))
-                    formatted_data[rt] = ordered_groups
-                # Order the outer dictionary by raid_type.
-                formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
+                formatted_data = self.transform_raid_totals_grouped(raw_data)
                 logger.debug(f"Formatted 👹 Raid 'grouped' data: {formatted_data}")
             elif self.mode == "surged":
-                formatted_data = {}
-                for rt, inner in raw_data.items():
-                    if isinstance(inner, list):
-                        hours = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
-                    else:
-                        hours = inner
-                    formatted_data[rt] = dict(
-                        sorted({f"hour {int(h)}": v for h, v in hours.items()}.items(), key=lambda x: int(x[0].split()[1]))
-                    )
-                formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
+                formatted_data = self.transform_raids_surged_totals_hourly_by_hour(raw_data)
                 logger.debug(f"Formatted 👹 Raid 'surged' data: {formatted_data}")
+            else:
+                formatted_data = raw_data
+                logger.debug(f"Formatted 👹 Raid data (raw mode): {formatted_data}")
 
             # End timing after script execution
             request_end = time.monotonic()
