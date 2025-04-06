@@ -31,6 +31,7 @@ from sql.tasks.quests_processor import QuestSQLProcessor
 from my_redis.connect_redis import RedisManager
 from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer, ShinyRateRedisBuffer
 from utils.logger import logger
+from utils.retry_functions import retry
 
 redis_manager = RedisManager()
 pokemon_sql = PokemonSQLProcessor()
@@ -68,7 +69,7 @@ async def process_pokemon_data(filtered_data):
         pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
 
         # Execute all Redis commands in a single batch
-        results = await pipe.execute()
+        results = await retry(pipe.execute, max_attempts=5, delay=2)
         for res in results:
             if isinstance(res, Exception) and "key already exists" in str(res).lower():
                 logger.debug(f"⚠️ Duplicate key error: FUCK YOU")
@@ -136,8 +137,8 @@ async def process_raid_data(filtered_data):
             raid_counterseries_update = await raids_counterseries.update_raid_counter(filtered_data, pipe)
             raid_hourly_counterseries_update = await raids_hourly_counterseries.update_raid_hourly_counter(filtered_data, pipe)
 
-            # Execute all Redis commands in a single batch
-            await pipe.execute()
+            # Execute all Redis commands in a single batch wrapped in retry function for startup exception connection handling
+            await retry(pipe.execute, max_attempts=5, delay=2)
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_raid_aggregation:
@@ -186,8 +187,8 @@ async def process_quest_data(filtered_data):
             quest_counterseries_update = await quests_counterseries.update_quest_counter(filtered_data, pipe)
             quest_hourly_counterseries_update = await quests_hourly_counterseries.update_quest_hourly_counter(filtered_data, pipe)
 
-            # Execute all Redis commands in a single batch
-            await pipe.execute()
+            # Execute all Redis commands in a single batch wrapped in retry function for startup exception connection handling
+            await retry(pipe.execute, max_attempts=5, delay=2)
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_quest_aggregation:
@@ -242,8 +243,8 @@ async def process_invasion_data(filtered_data):
             invasion_counterseries_update = await invasions_counterseries.update_invasion_counter(filtered_data, pipe)
             invasion_hourly_counterseries_update = await invasions_hourly_counterseries.update_invasion_hourly_counter(filtered_data, pipe)
 
-            # Execute all Redis commands in a single batch
-            await pipe.execute()
+            # Execute all Redis commands in a single batch wrapped in retry function for startup exception connection handling
+            await retry(pipe.execute, max_attempts=5, delay=2)
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_invasion_aggregation:
