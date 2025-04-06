@@ -17,7 +17,7 @@ async def retry(coro_func, *args, max_attempts=5, delay=2, **kwargs):
     while attempt <= max_attempts:
         try:
             result = await coro_func(*args, **kwargs)
-            logger.success(f"✅ Operation '{coro_func.__name__}' succeeded on attempt {attempt} with result: {result}")
+            logger.debug(f"✅ Operation '{coro_func.__name__}' succeeded on attempt {attempt} with result: {result}")
             return result
         except Exception as e:
             if attempt == max_attempts:
