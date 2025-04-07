@@ -123,8 +123,12 @@ class GolbatSQLPokestops:
                 logger.error(f"❌ Failed to parse cached pokestops: {ex}")
                 return None
         else:
-            logger.warning("⚠️ No cached pokestops found.")
-            return None
+            logger.warning("⚠️ No cached pokestops found. Triggering 🔃 refresh!")
+            result = await cls.refresh_pokestops()
+            if result is None:
+                logger.warning("⚠️ Failed to refresh pokestops. Returning global 🌐 state.")
+                return global_state.cached_pokestops
+            return result
 
     @classmethod
     async def run_refresh_loop(cls, refresh_interval: int):
