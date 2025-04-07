@@ -419,9 +419,16 @@ class WebhookFilter:
         # ✅ Adjust first_seen timestamp to local time
         machine_offset = self.get_machine_offset(self.user_timezone)
         local_utc_first_seen = int(message["spawn"])
+        local_utc_first_start = int(message["start"])
         local_utc_end = int(message["end"])
         true_utc, local_area_utc = self.correct_and_convert_timestamp(
             local_utc_first_seen,
+            machine_offset,
+            offset,
+            geofence_name
+        )
+        true_utc_start, local_area_start_utc = self.correct_and_convert_timestamp(
+            local_utc_first_start,
             machine_offset,
             offset,
             geofence_name
@@ -449,6 +456,7 @@ class WebhookFilter:
             "area_id": geofence_id,
             "area_name": geofence_name,
             "raid_first_seen": local_area_utc,
+            "raid_start": local_area_start_utc,
             "raid_end": local_area_end,
         }
 
