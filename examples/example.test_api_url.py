@@ -269,15 +269,15 @@ def test_api_and_save():
     url = base_url + endpoint
 
     # Security headers
-    secret_header_name = AppConfig.api_header_name
-    secret_header_value = AppConfig.api_header_secret
+    headers = {}
+    if hasattr(AppConfig, "api_secret_key") and AppConfig.api_secret_key:
+        headers["Authorization"] = f"Bearer {AppConfig.api_secret_key}"
+    elif (hasattr(AppConfig, "api_header_name") and AppConfig.api_header_name and
+        hasattr(AppConfig, "api_header_secret") and AppConfig.api_header_secret):
+        headers[AppConfig.api_header_name] = AppConfig.api_header_secret
 
     # Prompt user for parameters
     params = prompt_for_parameters(endpoint)
-
-    headers = {
-        secret_header_name: secret_header_value
-    }
 
     print(f"\n🚀 Starting API request to {endpoint}...")
     total_start = time.time()

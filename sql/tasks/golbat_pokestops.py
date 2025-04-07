@@ -39,6 +39,7 @@ class GolbatSQLPokestops:
               "grand_total": total_count
             }
         """
+        max_retries = 5
         try:
             # Retrieve cached geofences from Koji
             geofences = await cls.koji_instance.get_cached_geofences()
@@ -50,35 +51,50 @@ class GolbatSQLPokestops:
             area_counts = {}
             grand_total = 0
 
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    # Loop over each geofence (each is a dict with keys: "name", "coordinates", etc.)
-                    for geofence in geofences:
-                        area_name = geofence.get("name")
-                        coordinates = geofence.get("coordinates", [])
-                        if not coordinates or not coordinates[0]:
-                            logger.warning(f"⚠️ No coordinates for area '{area_name}', skipping")
-                            continue
+            for geofence in geofences:
+                area_name = geofence.get("name")
+                coordinates = geofence.get("coordinates", [])
+                if not coordinates or not coordinates[0]:
+                    logger.warning(f"⚠️ No coordinates for area '{area_name}', skipping")
+                    continue
 
-                        try:
-                            poly_coords = coordinates[0]
+                # Build the polygon WKT string
+                try:
+                    poly_coords = coordinates[0]
+                    coord_str = ", ".join(f"{lon} {lat}" for lon, lat in poly_coords)
+                    polygon_wkt = f"POLYGON(({coord_str}))"
+                except Exception as ex:
+                    logger.error(f"❌ Failed to build polygon for area '{area_name}': {ex}")
+                    continue
 
-                            coord_str = ", ".join(f"{lon} {lat}" for lon, lat in poly_coords)
-                            polygon_wkt = f"POLYGON(({coord_str}))"
-                        except Exception as ex:
-                            logger.error(f"❌ Failed to build polygon for area '{area_name}': {ex}")
-                            continue
 
-                        sql = """
-                        SELECT COUNT(*) AS cnt FROM pokestop
-                        WHERE ST_CONTAINS(ST_GeomFromText(%s), POINT(lon, lat));
-                        """
-                        await cur.execute(sql, (polygon_wkt,))
-                        result = await cur.fetchone()
-                        count = result[0] if result else 0
-                        area_counts[area_name] = count
-                        grand_total += count
+                retries = 0
+                count = 0
+                while retries < max_retries:
+                    try:
+                        async with pool.acquire() as conn:
+                            async with conn.cursor() as cur:
+                                sql = """
+                                SELECT COUNT(*) AS cnt FROM pokestop
+                                WHERE ST_CONTAINS(ST_GeomFromText(%s), POINT(lon, lat));
+                                """
+                                await cur.execute(sql, (polygon_wkt,))
+                                result = await cur.fetchone()
+                                count = result[0] if result else 0
                         logger.info(f"🏙️ Area '{area_name}' has {count} pokestops inside its geofence.")
+                        break
+
+                    except Exception as ex:
+                        retries += 1
+                        logger.error(f"❌ Error retrieving data for area '{area_name}' (attempt {retries}/{max_retries}): {ex}")
+                        if retries < max_retries:
+                            logger.info(f"🔄 Retrying area '{area_name}'...")
+                            await asyncio.sleep(1)
+                        else:
+                            logger.error(f"⚠️ Max retries exceeded for area '{area_name}'. Skipping.")
+
+                area_counts[area_name] = count
+                grand_total += count
 
             pool.close()
             await pool.wait_closed()
@@ -123,8 +139,21 @@ class GolbatSQLPokestops:
                 logger.error(f"❌ Failed to parse cached pokestops: {ex}")
                 return None
         else:
-            logger.warning("⚠️ No cached pokestops found.")
-            return None
+            logger.warning("⚠️ No cached pokestops found. Triggering 🔃 refresh!")
+            result = await cls.refresh_pokestops()
+            if result is None:
+                logger.warning("⚠️ Failed to refresh pokestops. Trying to cache global 🌐 state.")
+                if global_state.cached_pokestops:
+                    try:
+                        redis_client = await cls.redis_manager.check_redis_connection()
+                        await redis_client.set(cls.cache_key, json.dumps(global_state.cached_pokestops), ex=cls.cache_expiry)
+                        logger.success("✅ Cached 🌐 global_state.cached_pokestops as fallback.")
+                    except Exception as ex:
+                        logger.error(f"❌ Failed to cache 🌐 global_state.cached_pokestops: {ex}")
+                else:
+                    logger.warning("⚠️ No 🌐 global_state.cached_pokestops available as fallback.")
+                return global_state.cached_pokestops
+            return result
 
     @classmethod
     async def run_refresh_loop(cls, refresh_interval: int):

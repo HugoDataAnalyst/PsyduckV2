@@ -206,7 +206,7 @@ class QuestTimeSeries:
                 else:
                     # Otherwise, compute a single total sum.
                     total_sum = sum(int(v) for v in raw_data.values())
-                    formatted_data = total_sum
+                    formatted_data = {"total": total_sum}
                     logger.debug(f"Formatted 🔎 Quest 'sum' data (total): {formatted_data}")
             elif self.mode == "grouped":
                 # Detailed breakdown per key remains unchanged.

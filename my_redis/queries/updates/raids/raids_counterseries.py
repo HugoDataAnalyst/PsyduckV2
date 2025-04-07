@@ -14,7 +14,7 @@ async def update_raid_counter(raid_data, pipe=None):
         logger.error("❌ Redis is not connected. Cannot update Raid counters.")
         return None
 
-    ts = raid_data["raid_first_seen"]
+    ts = raid_data["raid_start"]
     dt = datetime.fromtimestamp(ts)
     # dt.weekday() returns 0 for Monday, 6 for Sunday.
     monday_dt = dt - timedelta(days=dt.weekday(),
