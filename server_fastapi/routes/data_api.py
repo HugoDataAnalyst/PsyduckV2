@@ -315,7 +315,7 @@ async def get_counter_quests(
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
     response_format: str = Query("json", description="Response format: json or text"),
     area: str = Query("global", description="Area to filter counters"),
-    with_ar: str = Query("false", description="Filter by AR quests: true, false, or all"),
+    with_ar: str = Query("all", description="Filter by AR quests: true, false, or all"),
     ar_type: str = Query("all", description="Filter by AR quest type"),
     reward_ar_type: str = Query("all", description="Filter by AR reward type"),
     reward_ar_item_id: str = Query("all", description="Filter by AR reward item ID"),
