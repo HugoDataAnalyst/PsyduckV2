@@ -20,7 +20,7 @@ async def update_raid_hourly_counter(raid_data, pipe=None):
         logger.error("❌ Redis is not connected. Cannot update Raid hourly counter.")
         return None
 
-    ts = raid_data["raid_first_seen"]
+    ts = raid_data["raid_start"]
     date_hour = datetime.fromtimestamp(ts).strftime("%Y%m%d%H")
 
     area = raid_data.get("area_name")

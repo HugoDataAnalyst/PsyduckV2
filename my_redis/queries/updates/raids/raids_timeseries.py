@@ -24,7 +24,7 @@ async def add_raid_timeseries_event(data, pipe=None):
         return "ERROR"
 
     # Round raid_first_seen to nearest minute (in seconds).
-    raid_first_seen = data["raid_first_seen"]
+    raid_first_seen = data["raid_start"]
     bucket = str((raid_first_seen // 60) * 60)
 
     area = data["area_name"]
