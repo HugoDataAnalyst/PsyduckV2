@@ -126,7 +126,16 @@ class GolbatSQLPokestops:
             logger.warning("⚠️ No cached pokestops found. Triggering 🔃 refresh!")
             result = await cls.refresh_pokestops()
             if result is None:
-                logger.warning("⚠️ Failed to refresh pokestops. Returning global 🌐 state.")
+                logger.warning("⚠️ Failed to refresh pokestops. Trying to cache global 🌐 state.")
+                if global_state.cached_pokestops:
+                    try:
+                        redis_client = await cls.redis_manager.check_redis_connection()
+                        await redis_client.set(cls.cache_key, json.dumps(global_state.cached_pokestops), ex=cls.cache_expiry)
+                        logger.success("✅ Cached 🌐 global_state.cached_pokestops as fallback.")
+                    except Exception as ex:
+                        logger.error(f"❌ Failed to cache 🌐 global_state.cached_pokestops: {ex}")
+                else:
+                    logger.warning("⚠️ No 🌐 global_state.cached_pokestops available as fallback.")
                 return global_state.cached_pokestops
             return result
 
