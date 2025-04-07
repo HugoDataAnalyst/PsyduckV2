@@ -50,7 +50,7 @@ async def get_cached_pokestops(
     if result is None:
         raise HTTPException(status_code=404, detail="Cached pokestops not found")
 
-    total_value = result.get("total", 0)
+    total_value = result.get("grand_total", 0)
     if area.lower() in ["global", "all"]:
         # Return all areas along with the combined total.
         result = {"areas": result.get("areas", {}), "total": total_value}
@@ -62,6 +62,8 @@ async def get_cached_pokestops(
             0
         )
         result = {"total": filtered_value}
+
+    result = {"data": result}
 
     if response_format.lower() == "json":
         return result
