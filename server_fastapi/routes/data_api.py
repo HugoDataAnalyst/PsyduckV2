@@ -38,6 +38,7 @@ if AppConfig.api_secret_key:
     dependencies=dependencies_list
 )
 async def get_cached_pokestops(
+    area: Optional[str] = Query("global", description="Filter pokestops by area (default: global)"),
     response_format: str = Query("json", description="Response format: json or text"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
@@ -48,6 +49,19 @@ async def get_cached_pokestops(
     result = await GolbatSQLPokestops.get_cached_pokestops()
     if result is None:
         raise HTTPException(status_code=404, detail="Cached pokestops not found")
+
+    total_value = result.get("total", 0)
+    if area.lower() in ["global", "all"]:
+        # Return all areas along with the combined total.
+        result = {"areas": result.get("areas", {}), "total": total_value}
+    else:
+        # For a specific area, return only the total for that area.
+        # Do a case-insensitive lookup in the cached "areas" dictionary.
+        filtered_value = next(
+            (v for k, v in result.get("areas", {}).items() if k.lower() == area.lower()),
+            0
+        )
+        result = {"total": filtered_value}
 
     if response_format.lower() == "json":
         return result
