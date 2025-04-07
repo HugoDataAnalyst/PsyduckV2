@@ -9,12 +9,12 @@ from webhook.filter_data import WebhookFilter  # Ensure this function is availab
 
 redis_manager = RedisManager()
 
+# Lua script without any offset logic.
 RAID_TIMESERIES_SCRIPT = """
 local pattern = ARGV[1]
 local start_ts = tonumber(ARGV[2])
 local end_ts = tonumber(ARGV[3])
 local mode = ARGV[4]
-local offset = tonumber(ARGV[5]) or 0
 local batch_size = 1000
 
 local sum_results = {}
@@ -35,11 +35,10 @@ repeat
          -- For sum and grouped modes, aggregate counts using the full key.
          sum_results[key] = (sum_results[key] or 0) + count
          grouped_results[key] = (grouped_results[key] or 0) + count
-         -- For surged mode, compute the hour from UTC, adjust by the provided offset, and wrap into 0–23.
+         -- For surged mode, compute the hour from the UTC timestamp
          if mode == 'surged' then
             local hour = math.floor((ts % 86400) / 3600)
-            local local_hour = (hour + offset) % 24
-            local new_key = key .. ":" .. tostring(local_hour)
+            local new_key = key .. ":" .. tostring(hour)
             surged_results[new_key] = (surged_results[new_key] or 0) + count
          end
       end
@@ -75,7 +74,8 @@ end
 
 class RaidTimeSeries:
     def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
-                 raid_type: str = "all", raid_pokemon: str = "all", raid_level: str = "all", raid_form: str = "all"):
+                 raid_type: str = "all", raid_pokemon: str = "all",
+                 raid_level: str = "all", raid_form: str = "all"):
         self.area = area
         self.start = start
         self.end = end
@@ -173,13 +173,7 @@ class RaidTimeSeries:
     @classmethod
     def transform_raids_surged_totals_hourly_by_hour(cls, raw_aggregated: dict) -> dict:
         """
-        Transforms raw aggregated raid totals (from surged mode) into a dictionary keyed by the hour of day.
-        Assumes that each key in raw_aggregated ends with a colon and an hour (0–23) appended by the Lua script.
-        For each key, the function:
-          - Splits the key to remove the appended hour (to get the base key).
-          - Groups counts by that hour.
-          - Applies transform_raid_totals_grouped to produce the detailed breakdown.
-        The final output is a dictionary keyed as "hour {H}" with the detailed breakdown as its value.
+        Transforms raw surged data (keys with a trailing ":<hour>") into a dictionary keyed by hour.
         """
         surged = {}
         for full_key, count in raw_aggregated.items():
@@ -198,6 +192,7 @@ class RaidTimeSeries:
             if hour_key not in surged:
                 surged[hour_key] = {}
             surged[hour_key][base_key] = surged[hour_key].get(base_key, 0) + int(count)
+
         result = {}
         for hour, group in surged.items():
             transformed = RaidTimeSeries.transform_raid_totals_grouped(group)
@@ -225,20 +220,9 @@ class RaidTimeSeries:
             end_ts = int(self.end.timestamp())
             logger.debug(f"👹 Raid ⏱️ Time range for query: start_ts={start_ts}, end_ts={end_ts}")
 
-            # Determine the appropriate offset.
-            # If the area is global, use the machine's timezone offset from global_state.user_timezone.
-            # Otherwise, look up the area's offset from global_state.geofences.
-            offset = "0"  # default offset as string
-            if self.area.lower() in ["all", "global"]:
-                offset = str(WebhookFilter.get_machine_offset(global_state.user_timezone))
-            else:
-                for area in global_state.geofences:
-                    if area["name"].lower() == self.area.lower():
-                        offset = str(area.get("offset", 0))
-                        break
-
             request_start = time.monotonic()
 
+            # Note: No offset is computed or passed.
             script_sha = await self._load_script(client)
             logger.debug("Executing 👹 Raid Lua script with evalsha...")
             raw_data = await client.evalsha(
@@ -247,8 +231,7 @@ class RaidTimeSeries:
                 pattern,
                 str(start_ts),
                 str(end_ts),
-                self.mode,
-                offset
+                self.mode
             )
             logger.debug(f"Raw 👹 Raid data from Lua script (pre-conversion): {raw_data}")
             raw_data = convert_redis_result(raw_data)
