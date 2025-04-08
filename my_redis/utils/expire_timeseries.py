@@ -118,7 +118,7 @@ repeat
         end
 
         -- Immediately check if the hash is empty and delete the key
-        if redis.call("HLEN", key) == 0 then
+        if redis.call("HLEN", key) == 0 and redis.call("EXISTS", key) == 1 then
             redis.call("DEL", key)
             empty_keys_deleted = empty_keys_deleted + 1
         end
