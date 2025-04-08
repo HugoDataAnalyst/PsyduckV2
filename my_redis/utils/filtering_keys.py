@@ -131,7 +131,7 @@ def get_area_offset(area: str, geofences: list) -> int:
     Defaults to 0 (UTC) if area not found or is global.
     """
     if area.lower() in ["global", "all"]:
-        return 0
+        return {geofence["name"]: geofence.get("offset", 0) for geofence in geofences}
 
     for geofence in geofences:
         if geofence["name"].lower() == area.lower():
