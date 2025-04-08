@@ -95,7 +95,6 @@ local batch_size = tonumber(ARGV[3] or 1000)
 local fields_removed = 0
 local empty_keys_deleted = 0
 
--- Clean old fields in matching keys
 local cursor = "0"
 repeat
     local reply = redis.call("SCAN", cursor, "MATCH", pattern, "COUNT", batch_size)
@@ -117,17 +116,8 @@ repeat
             redis.call("HDEL", key, unpack(to_delete))
             fields_removed = fields_removed + #to_delete
         end
-    end
-until cursor == "0"
 
--- Delete empty keys
-cursor = "0"
-repeat
-    local reply = redis.call("SCAN", cursor, "MATCH", pattern, "COUNT", batch_size)
-    cursor = reply[1]
-    local keys = reply[2]
-
-    for _, key in ipairs(keys) do
+        -- Immediately check if the hash is empty and delete the key
         if redis.call("HLEN", key) == 0 then
             redis.call("DEL", key)
             empty_keys_deleted = empty_keys_deleted + 1
