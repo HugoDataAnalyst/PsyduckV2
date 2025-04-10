@@ -32,7 +32,7 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
             client.cleanup_script_sha = await client.script_load(CLEANUP_SCRIPT)
 
         start_time = time.time()
-        fields_removed = await client.evalsha(
+        fields_removed, empty_keys_deleted = await client.evalsha(
             client.cleanup_script_sha,
             0,  # No keys used, only ARGV
             pattern,
@@ -44,6 +44,7 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
         logger.success(
             f"Lua ♻️ cleanup ✅ completed for {pattern}\n"
             f"• Fields 🗑️ removed: {fields_removed}\n"
+            f"• Empty keys 🔥 deleted: {empty_keys_deleted}\n"
             f"• Duration ⏱️: {duration:.2f}s"
         )
 
@@ -92,6 +93,7 @@ local pattern = ARGV[1]
 local cutoff = tonumber(ARGV[2])
 local batch_size = tonumber(ARGV[3] or 1000)
 local fields_removed = 0
+local empty_keys_deleted = 0
 
 local cursor = "0"
 repeat
@@ -114,10 +116,16 @@ repeat
             redis.call("HDEL", key, unpack(to_delete))
             fields_removed = fields_removed + #to_delete
         end
+
+        -- Immediately check if the hash is empty and delete the key
+        if redis.call("HLEN", key) == 0 and redis.call("EXISTS", key) == 1 then
+            redis.call("DEL", key)
+            empty_keys_deleted = empty_keys_deleted + 1
+        end
     end
 until cursor == "0"
 
-return fields_removed
+return {fields_removed, empty_keys_deleted}
 """
 
 
