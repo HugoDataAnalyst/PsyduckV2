@@ -3,7 +3,9 @@
 ## Configuration
 1. Copy the [`.env.example`](./.env.example) file to `.env` and fill in the required environment variables.
 2. Copy [config/example.config.json](./config/example.config.json) to `config/config.json` and fill in the required configurations.
-
+3. Ensure in Golbat you have the webhook with `/webhook`.
+Example:
+`127.0.0.1:5050/webhook`
 
 ## Docker Setup
 1. Install Docker Desktop
