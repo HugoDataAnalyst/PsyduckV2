@@ -40,14 +40,15 @@ class GolbatSQLPokestops:
             }
         """
         max_retries = 5
+        pool = None
         try:
+            pool = await get_golbat_mysql_pool()
             # Retrieve cached geofences from Koji
             geofences = await cls.koji_instance.get_cached_geofences()
             if not geofences:
                 logger.warning("⚠️ No geofences retrieved; skipping pokestop refresh")
                 return
 
-            pool = await get_golbat_mysql_pool()
             area_counts = {}
             grand_total = 0
 
@@ -118,6 +119,10 @@ class GolbatSQLPokestops:
         except Exception as e:
             logger.error(f"❌ Error refreshing pokestop counts: {e}", exc_info=True)
             return None
+
+        finally:
+            pool.close()
+            await pool.wait_closed()
 
     @classmethod
     async def get_cached_pokestops(cls):

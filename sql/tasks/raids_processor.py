@@ -24,10 +24,9 @@ class RaidSQLProcessor:
         """
         Process a single raid record with proper error handling and retry logic.
         """
-        if pool is None:
-            pool = await get_mysql_pool()
-
+        pool = None
         try:
+            pool = await get_mysql_pool()
             # Validate required fields
             gym_id = filtered_data.get('raid_gym_id')
             if not gym_id:
@@ -99,6 +98,11 @@ class RaidSQLProcessor:
         except Exception as e:
             logger.error(f"❌ Unexpected error processing raid for gym {gym_id}: {e}", exc_info=True)
             return 0
+
+        finally:
+            if pool is not None:
+                pool.close()
+                await pool.wait_closed()
 
     @classmethod
     async def _upsert_raid_with_retry(cls, pool, **raid_data):

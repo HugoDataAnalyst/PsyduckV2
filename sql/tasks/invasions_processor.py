@@ -24,10 +24,10 @@ class InvasionSQLProcessor:
         """
         Process a single invasion record with proper error handling and retry logic.
         """
-        if pool is None:
-            pool = await get_mysql_pool()
 
+        pool = None
         try:
+            pool = await get_mysql_pool()
             # Validate required fields
             pokestop_id = filtered_data.get('invasion_pokestop_id')
             if not pokestop_id:
@@ -93,6 +93,11 @@ class InvasionSQLProcessor:
         except Exception as e:
             logger.error(f"❌ Unexpected error processing invasion for pokestop {pokestop_id}: {e}", exc_info=True)
             return 0
+
+        finally:
+            if pool is not None:
+                pool.close()
+                await pool.wait_closed()
 
     @classmethod
     async def _upsert_invasion_with_retry(cls, pool, **invasion_data):

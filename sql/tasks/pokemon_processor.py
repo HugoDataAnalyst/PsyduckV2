@@ -31,109 +31,116 @@ class PokemonSQLProcessor:
         Assumes the AggregatedPokemonIVMonthly table has a unique constraint on:
         (spawnpoint, pokemon_id, form, iv, area_id, month_year)
         """
-        if pool is None:
-            pool = await get_mysql_pool()
 
+        pool = None
         # Prepare lists for spawnpoint upsert and aggregated data.
         spawnpoints = {}  # Mapping: spawnpoint_value -> (latitude, longitude)
         aggregated_values = []  # List of tuples for bulk upsert
 
-        for data in data_batch:
-            try:
-                # Skip if spawnpoint is None or not a valid hex string.
-                if data['spawnpoint'] is None:
-                    logger.warning("⚠️ Spawnpoint is None; skipping record.")
-                    continue
-
+        try:
+            pool = await get_mysql_pool()
+            for data in data_batch:
                 try:
-                    # Convert spawnpoint hex string to int.
-                    spawnpoint_value = int(data['spawnpoint'], 16)
-                except ValueError as e:
-                    logger.warning(f"⚠️ Invalid spawnpoint hex value '{data['spawnpoint']}'; skipping record.")
-                    continue
+                    # Skip if spawnpoint is None or not a valid hex string.
+                    if data['spawnpoint'] is None:
+                        logger.warning("⚠️ Spawnpoint is None; skipping record.")
+                        continue
 
-                # Ensure latitude and longitude are valid floats.
-                try:
-                    latitude = float(data['latitude'])
-                    longitude = float(data['longitude'])
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"⚠️ Invalid latitude or longitude; skipping record.")
-                    continue
+                    try:
+                        # Convert spawnpoint hex string to int.
+                        spawnpoint_value = int(data['spawnpoint'], 16)
+                    except ValueError as e:
+                        logger.warning(f"⚠️ Invalid spawnpoint hex value '{data['spawnpoint']}'; skipping record.")
+                        continue
 
-                spawnpoints[spawnpoint_value] = (latitude, longitude)
+                    # Ensure latitude and longitude are valid floats.
+                    try:
+                        latitude = float(data['latitude'])
+                        longitude = float(data['longitude'])
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"⚠️ Invalid latitude or longitude; skipping record.")
+                        continue
 
-                # Convert raw IV to bucket.
-                bucket_iv = get_iv_bucket(data['iv'])
-                if bucket_iv is None:
-                    logger.warning("⚠️ Bucket conversion returned None; skipping record.")
-                    continue
+                    spawnpoints[spawnpoint_value] = (latitude, longitude)
 
-                # Convert first_seen to month_year.
-                try:
-                    dt = datetime.fromtimestamp(data['first_seen'])
-                    month_year = int(dt.strftime("%y%m"))
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"⚠️ Invalid first_seen timestamp; skipping record.")
-                    continue
+                    # Convert raw IV to bucket.
+                    bucket_iv = get_iv_bucket(data['iv'])
+                    if bucket_iv is None:
+                        logger.warning("⚠️ Bucket conversion returned None; skipping record.")
+                        continue
 
-                # Use provided increment or default to 1.
-                increment = data.get('increment', 1)
+                    # Convert first_seen to month_year.
+                    try:
+                        dt = datetime.fromtimestamp(data['first_seen'])
+                        month_year = int(dt.strftime("%y%m"))
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"⚠️ Invalid first_seen timestamp; skipping record.")
+                        continue
 
-                aggregated_values.append((
-                    spawnpoint_value,
-                    data['pokemon_id'],
-                    data.get('form', 0),
-                    bucket_iv,
-                    data['area_id'],
-                    month_year,
-                    increment
-                ))
-            except Exception as e:
-                logger.error(f"❌ Error processing data batch record: {e}", exc_info=True)
+                    # Use provided increment or default to 1.
+                    increment = data.get('increment', 1)
 
-        if not aggregated_values:
-            logger.warning("⚠️ No valid aggregated records to upsert.")
-            return 0
+                    aggregated_values.append((
+                        spawnpoint_value,
+                        data['pokemon_id'],
+                        data.get('form', 0),
+                        bucket_iv,
+                        data['area_id'],
+                        month_year,
+                        increment
+                    ))
+                except Exception as e:
+                    logger.error(f"❌ Error processing data batch record: {e}", exc_info=True)
 
-        # Step 1: Bulk insert spawnpoints with deadlock handling.
-        spawnpoint_values = [
-            (sp, lat, lon) for sp, (lat, lon) in spawnpoints.items()
-        ]
-        spawnpoint_success = await cls._bulk_upsert_with_retry(
-            pool,
-            "spawnpoints",
-            """
-            INSERT INTO spawnpoints (spawnpoint, latitude, longitude)
-            VALUES (%s, %s, %s)
-            ON DUPLICATE KEY UPDATE latitude = VALUES(latitude), longitude = VALUES(longitude);
-            """,
-            spawnpoint_values,
-            max_retries,
-            "spawnpoints"
-        )
-        if not spawnpoint_success:
-            logger.error("❌ Failed to upsert spawnpoints after retries.")
-            return 0
+            if not aggregated_values:
+                logger.warning("⚠️ No valid aggregated records to upsert.")
+                return 0
 
-        # Step 2: Bulk upsert aggregated IV data with deadlock handling.
-        aggregated_success = await cls._bulk_upsert_with_retry(
-            pool,
-            "aggregated_pokemon_iv_monthly",
-            """
-            INSERT INTO aggregated_pokemon_iv_monthly
-            (spawnpoint, pokemon_id, form, iv, area_id, month_year, total_count)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE total_count = total_count + VALUES(total_count)
-            """,
-            aggregated_values,
-            max_retries,
-            "aggregated Pokémon IV"
-        )
-        if not aggregated_success:
-            logger.error("❌ Failed to upsert aggregated Pokémon IV data after retries.")
-            return 0
+            # Step 1: Bulk insert spawnpoints with deadlock handling.
+            spawnpoint_values = [
+                (sp, lat, lon) for sp, (lat, lon) in spawnpoints.items()
+            ]
+            spawnpoint_success = await cls._bulk_upsert_with_retry(
+                pool,
+                "spawnpoints",
+                """
+                INSERT INTO spawnpoints (spawnpoint, latitude, longitude)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE latitude = VALUES(latitude), longitude = VALUES(longitude);
+                """,
+                spawnpoint_values,
+                max_retries,
+                "spawnpoints"
+            )
+            if not spawnpoint_success:
+                logger.error("❌ Failed to upsert spawnpoints after retries.")
+                return 0
 
-        return len(aggregated_values)
+            # Step 2: Bulk upsert aggregated IV data with deadlock handling.
+            aggregated_success = await cls._bulk_upsert_with_retry(
+                pool,
+                "aggregated_pokemon_iv_monthly",
+                """
+                INSERT INTO aggregated_pokemon_iv_monthly
+                (spawnpoint, pokemon_id, form, iv, area_id, month_year, total_count)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE total_count = total_count + VALUES(total_count)
+                """,
+                aggregated_values,
+                max_retries,
+                "aggregated Pokémon IV"
+            )
+            if not aggregated_success:
+                logger.error("❌ Failed to upsert aggregated Pokémon IV data after retries.")
+                return 0
+
+            return len(aggregated_values)
+
+        finally:
+            if pool is not None:
+                pool.close()
+                await pool.wait_closed()
+
 
     @classmethod
     async def _bulk_upsert_with_retry(cls, pool, table_name, sql, values, max_retries, operation_name):
@@ -180,47 +187,53 @@ class PokemonSQLProcessor:
         Assumes the ShinyUsernameRates table has a unique constraint on:
           (username, pokemon_id, form, shiny, area_id, month_year)
         """
-        if pool is None:
-            pool = await get_mysql_pool()
+        pool = None
 
         aggregated_values = []  # List of tuples for bulk upsert
 
-        for data in data_batch:
-            try:
-                dt = datetime.fromtimestamp(data['first_seen'])
-                month_year = int(dt.strftime("%y%m"))
-                increment = data.get('increment', 1)
-                aggregated_values.append((
-                    data['username'],
-                    data['pokemon_id'],
-                    data.get('form', 0),
-                    int(data['shiny']),
-                    data['area_id'],
-                    month_year,
-                    increment
-                ))
-            except Exception as e:
-                logger.error(f"❌ Error processing shiny record: {e}", exc_info=True)
+        try:
+            pool = await get_mysql_pool()
+            for data in data_batch:
+                try:
+                    dt = datetime.fromtimestamp(data['first_seen'])
+                    month_year = int(dt.strftime("%y%m"))
+                    increment = data.get('increment', 1)
+                    aggregated_values.append((
+                        data['username'],
+                        data['pokemon_id'],
+                        data.get('form', 0),
+                        int(data['shiny']),
+                        data['area_id'],
+                        month_year,
+                        increment
+                    ))
+                except Exception as e:
+                    logger.error(f"❌ Error processing shiny record: {e}", exc_info=True)
 
-        if not aggregated_values:
-            logger.warning("⚠️ No valid aggregated shiny records to upsert.")
-            return 0
+            if not aggregated_values:
+                logger.warning("⚠️ No valid aggregated shiny records to upsert.")
+                return 0
 
-        success = await cls._bulk_upsert_with_retry(
-            pool,
-            "shiny_username_rates",
-            """
-            INSERT INTO shiny_username_rates
-            (username, pokemon_id, form, shiny, area_id, month_year, total_count)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE total_count = total_count + VALUES(total_count)
-            """,
-            aggregated_values,
-            max_retries,
-            "shiny username rates"
-        )
-        if not success:
-            logger.error("❌ Failed to upsert shiny username rates after retries.")
-            return 0
+            success = await cls._bulk_upsert_with_retry(
+                pool,
+                "shiny_username_rates",
+                """
+                INSERT INTO shiny_username_rates
+                (username, pokemon_id, form, shiny, area_id, month_year, total_count)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE total_count = total_count + VALUES(total_count)
+                """,
+                aggregated_values,
+                max_retries,
+                "shiny username rates"
+            )
+            if not success:
+                logger.error("❌ Failed to upsert shiny username rates after retries.")
+                return 0
 
-        return len(aggregated_values)
+            return len(aggregated_values)
+
+        finally:
+            if pool is not None:
+                pool.close()
+                await pool.wait_closed()
