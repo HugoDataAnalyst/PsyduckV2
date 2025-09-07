@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # Optional parameter. Validate Remote Address
 async def validate_remote_addr(request: Request):
     if not AppConfig.validated_remote_address:
-        logger.info(f"⏭️ No validation set. Skipping...")
+        logger.debug(f"⏭️ No validation set. Skipping...")
         return
     remote_addr = request.client.host
     if remote_addr != AppConfig.validated_remote_address:
