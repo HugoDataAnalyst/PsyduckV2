@@ -1,21 +1,30 @@
 import asyncio
 import time
-from typing import List, Dict
+from typing import Dict
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 import config as AppConfig
 
 redis_manager = RedisManager()
 
+# Cache the SHA at module level so it survives different client instances
+_CLEANUP_SHA = None
+
 def get_retention_mapping() -> Dict[str, int]:
     """Build retention mapping with compiled patterns for faster matching."""
+
     return {
-        "ts:pokemon:*": AppConfig.timeseries_pokemon_retention_ms // 1000,
-        "ts:tth_pokemon:*": AppConfig.tth_timeseries_retention_ms // 1000,
-        "ts:raids_total:*": AppConfig.raid_timeseries_retention_ms // 1000,
-        "ts:invasion:*": AppConfig.invasion_timeseries_retention_ms // 1000,
+        "ts:pokemon:*":      AppConfig.timeseries_pokemon_retention_ms // 1000,
+        "ts:tth_pokemon:*":  AppConfig.tth_timeseries_retention_ms // 1000,
+        "ts:raids_total:*":  AppConfig.raid_timeseries_retention_ms // 1000,
+        "ts:invasion:*":     AppConfig.invasion_timeseries_retention_ms // 1000,
         "ts:quests_total:*": AppConfig.quests_timeseries_retention_ms // 1000,
     }
+
+async def _ensure_script_loaded(client):
+    global _CLEANUP_SHA
+    if not _CLEANUP_SHA:
+        _CLEANUP_SHA = await client.script_load(CLEANUP_SCRIPT)
 
 async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> None:
     client = await redis_manager.check_redis_connection()
@@ -27,18 +36,24 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
     logger.debug(f"▶️ Starting Lua cleanup for {pattern} (cutoff: {cutoff})")
 
     try:
-        # Register script if not already cached
-        if not hasattr(client, "cleanup_script_sha"):
-            client.cleanup_script_sha = await client.script_load(CLEANUP_SCRIPT)
+        await _ensure_script_loaded(client)
 
         start_time = time.time()
-        fields_removed, empty_keys_deleted = await client.evalsha(
-            client.cleanup_script_sha,
-            0,  # No keys used, only ARGV
-            pattern,
-            str(cutoff),
-            "1000"  # SCAN batch size
-        )
+        try:
+            # ARGV: pattern, cutoff, key-scan, field-scan, hdel-batch
+            fields_removed, empty_keys_deleted = await client.evalsha(
+                _CLEANUP_SHA, 0, pattern, str(cutoff), "1000", "500", "1000"
+            )
+        except Exception as e:
+            # Redis may report NOSCRIPT or similar after restart
+            if "NOSCRIPT" in str(e).upper():
+                logger.warning("📜 Cleanup script missing in Redis cache. Reloading…")
+                await _ensure_script_loaded(client)
+                fields_removed, empty_keys_deleted = await client.evalsha(
+                    _CLEANUP_SHA, 0, pattern, str(cutoff), "1000", "500", "1000"
+                )
+            else:
+                raise
 
         duration = time.time() - start_time
         logger.success(
@@ -50,8 +65,6 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
 
     except Exception as e:
         logger.error(f"❌ Lua script failed: {e}")
-    finally:
-        await client.aclose()
 
 async def cleanup_timeseries() -> None:
     """Run cleanup for all patterns with progress tracking."""
@@ -76,11 +89,11 @@ async def periodic_cleanup() -> None:
                 await cleanup_timeseries()
             except Exception as e:
                 logger.error(f"❌ Cleanup failed: {e}")
-                await asyncio.sleep(60)  # Wait before retry
+                await asyncio.sleep(60)
                 continue
 
             duration = time.time() - start_time
-            sleep_time = max(3600 - duration, 0)  # Ensure full hour between runs
+            sleep_time = max(3600 - duration, 0)
             logger.success(f"✅ Cleanup completed. 💤 Sleeping for ⏱️ {sleep_time:.1f} seconds")
             await asyncio.sleep(sleep_time)
 
@@ -88,36 +101,51 @@ async def periodic_cleanup() -> None:
         logger.info("🛑 Cleanup task cancelled")
         raise
 
-CLEANUP_SCRIPT = """
-local pattern = ARGV[1]
-local cutoff = tonumber(ARGV[2])
-local batch_size = tonumber(ARGV[3] or 1000)
+CLEANUP_SCRIPT = r"""
+local pattern     = ARGV[1]
+local cutoff      = tonumber(ARGV[2])
+local scan_count  = tonumber(ARGV[3] or 1000)   -- SCAN COUNT for keys
+local hscan_count = tonumber(ARGV[4] or 500)    -- HSCAN COUNT for fields
+local hdel_batch  = tonumber(ARGV[5] or 1000)   -- max fields per HDEL call
+
 local fields_removed = 0
 local empty_keys_deleted = 0
 
 local cursor = "0"
 repeat
-    local reply = redis.call("SCAN", cursor, "MATCH", pattern, "COUNT", batch_size)
+    local reply = redis.call("SCAN", cursor, "MATCH", pattern, "COUNT", scan_count)
     cursor = reply[1]
     local keys = reply[2]
 
     for _, key in ipairs(keys) do
-        local fields = redis.call("HKEYS", key)
-        local to_delete = {}
+        local hcursor = "0"
+        local pending = {}
 
-        for _, field in ipairs(fields) do
-            local timestamp = tonumber(field)
-            if timestamp and timestamp < cutoff then
-                table.insert(to_delete, field)
+        repeat
+            local hreply = redis.call("HSCAN", key, hcursor, "COUNT", hscan_count)
+            hcursor = hreply[1]
+            local flat = hreply[2]  -- [field1, value1, field2, value2, ...]
+
+            for i = 1, #flat, 2 do
+                local field = flat[i]
+                local ts = tonumber(field)
+                if ts and ts < cutoff then
+                    table.insert(pending, field)
+                    if #pending >= hdel_batch then
+                        redis.call("HDEL", key, unpack(pending))
+                        fields_removed = fields_removed + #pending
+                        pending = {}
+                    end
+                end
             end
+        until hcursor == "0"
+
+        if #pending > 0 then
+            redis.call("HDEL", key, unpack(pending))
+            fields_removed = fields_removed + #pending
+            pending = {}
         end
 
-        if #to_delete > 0 then
-            redis.call("HDEL", key, unpack(to_delete))
-            fields_removed = fields_removed + #to_delete
-        end
-
-        -- Immediately check if the hash is empty and delete the key
         if redis.call("HLEN", key) == 0 and redis.call("EXISTS", key) == 1 then
             redis.call("DEL", key)
             empty_keys_deleted = empty_keys_deleted + 1
@@ -127,7 +155,3 @@ until cursor == "0"
 
 return {fields_removed, empty_keys_deleted}
 """
-
-
-if __name__ == "__main__":
-    asyncio.run(cleanup_timeseries())
