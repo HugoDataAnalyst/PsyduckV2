@@ -1,9 +1,11 @@
 from server_fastapi import global_state
 from utils.logger import logger
 from shapely.geometry import Point, Polygon
-import pytz
 from zoneinfo import ZoneInfo
 from datetime import datetime
+import pytz
+import math
+import re
 
 class WebhookFilter:
     """Filters incoming webhook data based on type and geofence location."""
@@ -20,6 +22,28 @@ class WebhookFilter:
         self.user_timezone = global_state.user_timezone
 
     # Helper functions
+    HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+
+    @staticmethod
+    def _valid_spawnpoint_id(v) -> bool:
+        if v is None:
+            return False
+        s = str(v).strip()
+        if not s:
+            return False
+        # accept hex only; optionally constrain length
+        return bool(WebhookFilter.HEX_RE.fullmatch(s)) and (8 <= len(s) <= 32)
+
+    @staticmethod
+    def _valid_coords(lat, lon) -> bool:
+        try:
+            lat = float(lat); lon = float(lon)
+            return (
+                math.isfinite(lat) and math.isfinite(lon) and
+                (-90.0 <= lat <= 90.0) and (-180.0 <= lon <= 180.0)
+            )
+        except Exception:
+            return False
 
     @staticmethod
     def get_machine_offset(user_timezone) -> int:
@@ -286,6 +310,15 @@ class WebhookFilter:
             logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
             return None
 
+        spid = message.get("spawnpoint_id")
+        if not self._valid_spawnpoint_id(spid):
+            logger.debug(f"⚠️ Skipping Pokémon: invalid spawnpoint_id={spid!r}")
+            return None
+
+        if not self._valid_coords(message["latitude"], message["longitude"]):
+            logger.debug(f"⚠️ Skipping Pokémon: invalid coords lat={message['latitude']}, lon={message['longitude']}")
+            return None
+
         # ✅ Calculate IV percentage
         iv_percentage = self.calculate_iv(
             message["individual_attack"],
@@ -410,6 +443,13 @@ class WebhookFilter:
             logger.debug(f"⚠️ Skipping Raid data due to missing fields: {message}")
             return None
 
+        required_always = ["gym_id", "level", "latitude", "longitude", "spawn", "start", "end"]
+
+        missing = [k for k in required_always if (k not in message or message[k] is None or (isinstance(message[k], str) and message[k].strip() == ""))]
+        if missing:
+            logger.debug(f"⚠️ Skipping Raid: missing required fields {missing}. Payload: {message}")
+            return None
+
         #✅ Extra check: ensure 'pokemon_id' is not None or 0
         pokemon_id_val = message.get("pokemon_id")
         if not pokemon_id_val or int(pokemon_id_val) == 0:
@@ -477,6 +517,13 @@ class WebhookFilter:
         # ✅ Check if all required fields are present
         if not all(field in message and message[field] is not None for field in required_invasion_fields):
             logger.debug(f"⚠️ Skipping Invasion data due to missing fields: {message}")
+            return None
+
+        required_always = ["pokestop_id", "start", "latitude", "longitude"]
+
+        missing = [k for k in required_always if (k not in message or message[k] is None or (isinstance(message[k], str) and message[k].strip() == ""))]
+        if missing:
+            logger.warning(f"⚠️ Skipping Invasion: missing required fields {missing}. Payload: {message}")
             return None
 
         # ✅ Adjust first_seen timestamp to local time
