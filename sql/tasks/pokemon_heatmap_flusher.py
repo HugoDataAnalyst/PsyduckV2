@@ -16,6 +16,7 @@ class PokemonIVBufferFlusher:
         await asyncio.sleep(5)  # Initial delay
         logger.info(f"⏳ Starting Pokémon IV aggregated buffer flusher every {self.flush_interval}s")
 
+        cycle = 0
         while self._running:
             try:
                 redis = await RedisManager().check_redis_connection()
@@ -25,17 +26,29 @@ class PokemonIVBufferFlusher:
                     continue
 
                 start = time.perf_counter()
-                # Force flush regardless of threshold every 5 minutes
-                await PokemonIVRedisBuffer.flush_if_ready(redis)
+
+                # Every 6th cycle -> FORCE flush; otherwise normal flush-if-ready
+                if cycle % 6 == 0:
+                    added = await PokemonIVRedisBuffer.force_flush(redis)
+                    mode = "force"
+                else:
+                    added = await PokemonIVRedisBuffer.flush_if_ready(redis)
+                    mode = "threshold/ready"
+
                 duration = time.perf_counter() - start
 
-                logger.success(f"👻 Completed aggregated Pokémon heatmap flush in {duration:.2f}s ⏱️")
+                if added:
+                    logger.success(f"👻 Pokémon heatmap flush ({mode}): +{added} rows in {duration:.2f}s ⏱️")
+                else:
+                    logger.info(f"👻 No new Pokémon heatmap rows to flush ({mode}). Took {duration:.2f}s ⏱️")
+
             except asyncio.CancelledError:
                 logger.info("🛑 Pokémon IV buffer flusher loop was cancelled.")
                 break
             except Exception as e:
                 logger.error(f"❌ Exception in aggregated buffer flusher loop: {e}")
             finally:
+                cycle += 1
                 await asyncio.sleep(self.flush_interval)
 
     async def start(self):
@@ -62,8 +75,7 @@ class PokemonIVBufferFlusher:
                 start = time.perf_counter()
                 count = await PokemonIVRedisBuffer.force_flush(redis)
                 logger.success(
-                    f"🔚 Final Pokémon 👻 IV flush completed "
-                    f"({count} records in {time.perf_counter()-start:.2f}s)"
+                    f"🔚 Final Pokémon 👻 IV flush completed (+{count} rows in {time.perf_counter()-start:.2f}s)"
                 )
         except Exception as e:
             logger.error(f"❌ Final Pokémon IV flush failed: {e}")

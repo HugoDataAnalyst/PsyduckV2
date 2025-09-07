@@ -16,6 +16,7 @@ class ShinyRateBufferFlusher:
         redis_manager = RedisManager()
         shiny_buffer = ShinyRateRedisBuffer()
 
+        cycle = 0
         while self._running:
             try:
                 client = await redis_manager.check_redis_connection()
@@ -23,22 +24,31 @@ class ShinyRateBufferFlusher:
                     logger.error("❌ Redis is not connected. Skipping flush.")
                     await asyncio.sleep(self.flush_interval)
                     continue
-                # Measure the time taken for the flush operation
+
                 start_time = time.perf_counter()
 
-                # Flush the buffer
-                await shiny_buffer.flush_if_ready(client)
+                # Every 6th cycle -> FORCE flush; otherwise normal flush-if-ready
+                if cycle % 6 == 0:
+                    added = await shiny_buffer.force_flush(client)
+                    mode = "force"
+                else:
+                    added = await shiny_buffer.flush_if_ready(client)
+                    mode = "threshold/ready"
 
-                # Calculate the duration of the flush operation
                 duration = time.perf_counter() - start_time
-                logger.success(f"✨ Completed shiny rate buffer flush in {duration:.2f}s ⏱️")
+
+                if added:
+                    logger.success(f"✨ Shiny buffer flush ({mode}): +{added} rows in {duration:.2f}s ⏱️")
+                else:
+                    logger.info(f"✨ No shiny rows to flush ({mode}). Took {duration:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Shiny rate buffer flusher loop was cancelled.")
                 break
             except Exception as e:
-                logger.error(f"❌ Exception in aggregated buffer flusher loop: {e}")
+                logger.error(f"❌ Exception in shiny buffer flusher loop: {e}")
             finally:
+                cycle += 1
                 await asyncio.sleep(self.flush_interval)
 
     async def start(self):
@@ -65,8 +75,7 @@ class ShinyRateBufferFlusher:
                 start = time.perf_counter()
                 count = await ShinyRateRedisBuffer.force_flush(client)
                 logger.success(
-                    f"🔚 Final shiny ✨ flush completed "
-                    f"({count} records in {time.perf_counter()-start:.2f}s)"
+                    f"🔚 Final shiny ✨ flush completed (+{count} rows in {time.perf_counter()-start:.2f}s)"
                 )
         except Exception as e:
             logger.error(f"❌ Final shiny flush failed: {e}")

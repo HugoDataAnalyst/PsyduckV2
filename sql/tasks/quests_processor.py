@@ -22,48 +22,51 @@ class QuestSQLProcessor:
     @classmethod
     async def upsert_aggregated_quest_from_filtered(cls, filtered_data, increment: int = 1, pool=None):
         """
-        Process a single quest record with proper error handling and retry logic.
+        Upsert a single quest with robust session settings and retries.
+        Keeps pokestops fresh and bumps aggregated_quests.total_count.
         """
-        pool = None
+        created_pool = False
         try:
-            pool = await get_mysql_pool()
-            # Validate required fields
+            if pool is None:
+                pool = await get_mysql_pool()
+                created_pool = True
+
+            # --- Validate required fields ---
             pokestop_id = filtered_data.get('pokestop_id')
             if not pokestop_id:
                 logger.warning("⚠️ Missing pokestop_id in quest data")
                 return 0
 
-            # Validate coordinates
+            # Coordinates (required for pokestops, but don't crash on weird values)
             try:
-                latitude = float(filtered_data.get('latitude', 0))
-                longitude = float(filtered_data.get('longitude', 0))
-            except (ValueError, TypeError):
+                latitude = float(filtered_data.get('latitude'))
+                longitude = float(filtered_data.get('longitude'))
+            except (TypeError, ValueError):
                 logger.warning(f"⚠️ Invalid coordinates for pokestop {pokestop_id}")
                 return 0
 
             area_id = filtered_data.get('area_id')
-            if not area_id:
+            if area_id is None:
                 logger.warning(f"⚠️ Missing area_id for pokestop {pokestop_id}")
                 return 0
 
-            # Validate timestamp
+            # month_year from first_seen
             try:
-                first_seen = filtered_data.get('first_seen')
-                if not first_seen:
-                    logger.warning(f"⚠️ Missing first_seen for pokestop {pokestop_id}")
-                    return 0
+                first_seen = int(filtered_data.get('first_seen'))
                 dt = datetime.fromtimestamp(first_seen)
                 month_year = int(dt.strftime("%y%m"))
-            except (ValueError, TypeError):
+            except Exception:
                 logger.warning(f"⚠️ Invalid first_seen timestamp for pokestop {pokestop_id}")
                 return 0
 
-            # Process the record with retry logic
+            inc = int(increment)
+
+            # --- Execute with retry ---
             start_time = time.perf_counter()
             success = await cls._upsert_quest_with_retry(
                 pool=pool,
-                pokestop_id=pokestop_id,
-                pokestop_name=filtered_data.get('pokestop_name', ''),
+                pokestop_id=str(pokestop_id),
+                pokestop_name=str(filtered_data.get('pokestop_name') or ""),
                 latitude=latitude,
                 longitude=longitude,
                 ar_type=filtered_data.get('ar_type', 0),
@@ -75,69 +78,73 @@ class QuestSQLProcessor:
                 reward_normal_item_id=filtered_data.get('reward_normal_item_id', 0),
                 reward_normal_item_amount=filtered_data.get('reward_normal_item_amount', 0),
                 reward_ar_poke_id=filtered_data.get('reward_ar_poke_id', 0),
-                reward_ar_poke_form=filtered_data.get('reward_ar_poke_form', ''),
+                reward_ar_poke_form=str(filtered_data.get('reward_ar_poke_form') or ""),
                 reward_normal_poke_id=filtered_data.get('reward_normal_poke_id', 0),
-                reward_normal_poke_form=filtered_data.get('reward_normal_poke_form', ''),
-                area_id=area_id,
+                reward_normal_poke_form=str(filtered_data.get('reward_normal_poke_form') or ""),
+                area_id=int(area_id),
                 month_year=month_year,
-                increment=increment,
+                increment=inc,
                 max_retries=10
             )
-            processing_time = time.perf_counter() - start_time
+            elapsed = time.perf_counter() - start_time
 
             if success:
-                logger.debug(f"✅ Processed quest for pokestop {pokestop_id} in area {area_id} in {processing_time:.4f}s")
+                logger.debug(f"✅ Processed quest for pokestop {pokestop_id} in area {area_id} in {elapsed:.4f}s")
                 return 1
-            logger.warning(f"⚠️ Failed to process quest for pokestop {pokestop_id} after {processing_time:.4f}s")
-            return 0
+            else:
+                logger.warning(f"⚠️ Failed to process quest for pokestop {pokestop_id} after {elapsed:.4f}s")
+                return 0
 
         except Exception as e:
-            logger.error(f"❌ Unexpected error processing quest for pokestop {pokestop_id}: {e}", exc_info=True)
+            logger.error(f"❌ Unexpected error processing quest for pokestop {filtered_data.get('pokestop_id')}: {e}", exc_info=True)
             return 0
-
         finally:
-            if pool is not None:
+            if created_pool and pool is not None:
                 pool.close()
                 await pool.wait_closed()
 
     @classmethod
-    async def _upsert_quest_with_retry(cls, pool, **quest_data):
+    async def _upsert_quest_with_retry(cls, pool, **q):
         """
-        Helper method to handle the actual upsert operation with retry logic.
+        Do the two-step upsert inside a short, atomic transaction with good session knobs.
+        Retries on 1213 (deadlock) and 1205 (lock wait timeout).
         """
-        increment = quest_data.get('increment', 1)
-        for attempt in range(quest_data['max_retries']):
+        max_retries = int(q.get('max_retries', 8))
+        inc = int(q.get('increment', 1))
+
+        for attempt in range(max_retries):
             try:
                 async with pool.acquire() as conn:
-                    async with conn.cursor() as cursor:
-                        # Time pokestop upsert
-                        pokestop_start = time.perf_counter()
-                        await cursor.execute(
-                            """
+                    async with conn.cursor() as cur:
+                        # Session tuning: keep waits short and reduce gap locks
+                        await cur.execute("SET SESSION innodb_lock_wait_timeout = 10")
+                        await cur.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                        await cur.execute("SET autocommit = 0")
+
+                        # ---- Step 1: upsert pokestop (id/name/coords) ----
+                        pokestop_sql = """
                             INSERT INTO pokestops (pokestop, pokestop_name, latitude, longitude)
                             VALUES (%s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 pokestop_name = VALUES(pokestop_name),
-                                latitude = VALUES(latitude),
-                                longitude = VALUES(longitude)
-                            """,
-                            (
-                                quest_data['pokestop_id'],
-                                quest_data['pokestop_name'],
-                                quest_data['latitude'],
-                                quest_data['longitude']
-                            )
+                                latitude     = VALUES(latitude),
+                                longitude    = VALUES(longitude)
+                        """
+                        await cur.execute(
+                            pokestop_sql,
+                            (q['pokestop_id'], q['pokestop_name'], q['latitude'], q['longitude'])
                         )
-                        pokestop_time = time.perf_counter() - pokestop_start
 
-                        # Time quest upsert
-                        quest_start = time.perf_counter()
-                        await cursor.execute(
-                            """
+                        # ---- Step 2: bump aggregated_quests via SELECT p.id ----
+                        quest_sql = """
                             INSERT INTO aggregated_quests (
-                                pokestop_id, ar_type, normal_type, reward_ar_type, reward_normal_type,
-                                reward_ar_item_id, reward_ar_item_amount, reward_normal_item_id, reward_normal_item_amount,
-                                reward_ar_poke_id, reward_ar_poke_form, reward_normal_poke_id, reward_normal_poke_form,
+                                pokestop_id,
+                                ar_type, normal_type,
+                                reward_ar_type,   reward_normal_type,
+                                reward_ar_item_id,    reward_ar_item_amount,
+                                reward_normal_item_id, reward_normal_item_amount,
+                                reward_ar_poke_id,     reward_ar_poke_form,
+                                reward_normal_poke_id, reward_normal_poke_form,
                                 area_id, month_year, total_count
                             )
                             SELECT
@@ -159,41 +166,53 @@ class QuestSQLProcessor:
                                 %s
                             FROM pokestops p
                             WHERE p.pokestop = %s
-                            ON DUPLICATE KEY UPDATE total_count = total_count + VALUES(total_count)
-                            """,
+                            ON DUPLICATE KEY UPDATE
+                                total_count = total_count + VALUES(total_count)
+                        """
+                        await cur.execute(
+                            quest_sql,
                             (
-                                quest_data['ar_type'],
-                                quest_data['normal_type'],
-                                quest_data['reward_ar_type'],
-                                quest_data['reward_normal_type'],
-                                quest_data['reward_ar_item_id'],
-                                quest_data['reward_ar_item_amount'],
-                                quest_data['reward_normal_item_id'],
-                                quest_data['reward_normal_item_amount'],
-                                quest_data['reward_ar_poke_id'],
-                                quest_data['reward_ar_poke_form'],
-                                quest_data['reward_normal_poke_id'],
-                                quest_data['reward_normal_poke_form'],
-                                quest_data['area_id'],
-                                quest_data['month_year'],
-                                increment,
-                                quest_data['pokestop_id']
+                                q['ar_type'],
+                                q['normal_type'],
+                                q['reward_ar_type'],
+                                q['reward_normal_type'],
+                                q['reward_ar_item_id'],
+                                q['reward_ar_item_amount'],
+                                q['reward_normal_item_id'],
+                                q['reward_normal_item_amount'],
+                                q['reward_ar_poke_id'],
+                                q['reward_ar_poke_form'],
+                                q['reward_normal_poke_id'],
+                                q['reward_normal_poke_form'],
+                                q['area_id'],
+                                q['month_year'],
+                                inc,
+                                q['pokestop_id']
                             )
                         )
-                        quest_time = time.perf_counter() - quest_start
 
+                        # One atomic commit for both steps
                         await conn.commit()
-                        logger.debug(f"⏱️ DB ops timing - Pokestop: {pokestop_time:.4f}s, Quest: {quest_time:.4f}s")
+                        # restore autocommit for this connection
+                        await cur.execute("SET autocommit = 1")
+
+                        # timings (optional but helpful)
+                        logger.debug("⏱️ DB ops done for quest.")
                         return True
 
             except aiomysql.Error as e:
-                if e.args[0] == 1213:  # Deadlock error code
-                    wait = random.uniform(0.1, 0.5)
-                    logger.warning(f"⚠️ Deadlock detected processing quest. Retrying ({attempt+1}/{quest_data['max_retries']}) in {wait:.2f}s...")
-                    await asyncio.sleep(wait)
-                else:
-                    logger.error(f"❌ Database error processing quest: {e}", exc_info=True)
-                    return False
+                code = e.args[0] if e.args else None
+                if code in (1213, 1205):  # deadlock or lock wait
+                    # small jittered backoff; grows slightly each attempt
+                    backoff = min(2.0, 0.25 * (attempt + 1)) + random.uniform(0, 0.1)
+                    logger.warning(
+                        f"⚠️ Quest upsert {('deadlock' if code==1213 else 'lock timeout')}."
+                        f" Retrying {attempt+1}/{max_retries} in {backoff:.2f}s…"
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                logger.error(f"❌ Database error processing quest: {e}", exc_info=True)
+                return False
             except Exception as e:
                 logger.error(f"❌ Unexpected error processing quest: {e}", exc_info=True)
                 return False

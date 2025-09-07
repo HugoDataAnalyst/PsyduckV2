@@ -257,7 +257,7 @@ class WebhookFilter:
             if invasion_data:
                 return invasion_data
         else:
-            logger.warning(f"⚠️ Unhandled webhook type: {data_type}")
+            logger.debug(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
 
         #except Exception as e:
