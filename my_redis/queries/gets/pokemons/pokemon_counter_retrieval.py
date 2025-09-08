@@ -8,14 +8,35 @@ from my_redis.utils.counter_transformer import CounterTransformer
 redis_manager = RedisManager()
 
 class PokemonCounterRetrieval(CounterTransformer):
-    def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum", pokemon_id: str = "all", form: str = "all", metric: str = "all"):
-        self.area=area
-        self.start=start
-        self.end=end
-        self.mode=mode
-        self.pokemon_id=pokemon_id
-        self.form=form
-        self.metric=metric
+    def __init__(
+        self,
+        area: str,
+        start: datetime,
+        end: datetime,
+        mode: str = "sum",
+        pokemon_id: str | set[str] | None = "all",
+        form: str | set[str] | None = "all",
+        metric: str | set[str] | None = "all",
+    ):
+        self.area = area
+        self.start = start
+        self.end = end
+        self.mode = mode
+
+        def _norm(x):
+            # None or "all" => no filtering
+            if x is None or (isinstance(x, str) and x.lower() == "all"):
+                return None
+            if isinstance(x, str):
+                # single value -> {value}
+                return {x}
+            # iterable -> set of str
+            return set(map(str, x))
+
+        # store everything as sets (or None) with plural names
+        self.pokemon_ids = _norm(pokemon_id)
+        self.forms       = _norm(form)
+        self.metrics     = _norm(metric)
 
     def _filter_aggregated_data(self, raw_data: dict) -> dict:
         """
@@ -25,7 +46,11 @@ class PokemonCounterRetrieval(CounterTransformer):
         If the key does not match this format (or if the pokemon_id is non-numeric),
         the field is left unfiltered.
         """
-        # For flat dictionaries (sum mode)
+        def ok(pid, form_val, metric_val):
+            return ((self.pokemon_ids is None or pid in self.pokemon_ids) and
+                    (self.forms is None or form_val in self.forms) and
+                    (self.metrics is None or metric_val in self.metrics))
+
         if self.mode == "sum":
             filtered = {}
             for field, value in raw_data.items():
@@ -35,12 +60,9 @@ class PokemonCounterRetrieval(CounterTransformer):
                     filtered[field] = value
                     continue
                 pid, form_val, metric_val = parts[:3]
-                if ((self.pokemon_id == "all" or str(self.pokemon_id) == pid) and
-                    (self.form == "all" or self.form == form_val) and
-                    (self.metric == "all" or self.metric == metric_val)):
+                if ok(pid, form_val, metric_val):
                     filtered[field] = value
             return filtered
-        # For nested dictionaries (grouped or surged mode)
         else:
             filtered = {}
             for redis_key, fields in raw_data.items():
@@ -51,9 +73,7 @@ class PokemonCounterRetrieval(CounterTransformer):
                         filtered_fields[field] = value
                         continue
                     pid, form_val, metric_val = parts[:3]
-                    if ((self.pokemon_id == "all" or str(self.pokemon_id) == pid) and
-                        (self.form == "all" or self.form == form_val) and
-                        (self.metric == "all" or self.metric == metric_val)):
+                    if ok(pid, form_val, metric_val):
                         filtered_fields[field] = value
                 if filtered_fields:
                     filtered[redis_key] = filtered_fields
@@ -65,16 +85,14 @@ class PokemonCounterRetrieval(CounterTransformer):
         The expected inner field format is assumed to be "pokemon_id:form:metric" but
         only the metric component is checked.
         """
-        if self.metric == "all":
+        # metrics is a set or None now
+        if self.metrics is None:
             return fields
         filtered = {}
         for field, value in fields.items():
             parts = field.split(":")
-            if len(parts) < 3:
-                filtered[field] = value
-                continue
-            metric_val = parts[2]
-            if self.metric == metric_val:
+            metric_val = parts[2] if len(parts) >= 3 else None
+            if metric_val is None or metric_val in self.metrics:
                 filtered[field] = value
         return filtered
 
@@ -84,27 +102,17 @@ class PokemonCounterRetrieval(CounterTransformer):
         For 'sum' or 'grouped' modes, data is a flat dictionary with keys as TTH buckets.
         For 'surged' mode, data is a dictionary with hours as keys and nested dictionaries as values.
         """
-        if self.metric == "all":
+        if self.metrics is None:
             return data
 
-        # For flat dictionary results:
         if self.mode in ["sum", "grouped"]:
-            filtered = {}
-            for bucket, value in data.items():
-                if bucket == self.metric:
-                    filtered[bucket] = value
-            return filtered
-
-        # For surged mode (nested dictionary):
+            return {bucket: v for bucket, v in data.items() if bucket in self.metrics}
         if self.mode == "surged":
             filtered = {}
             for hour, buckets in data.items():
-                filtered_buckets = {}
-                for bucket, value in buckets.items():
-                    if bucket == self.metric:
-                        filtered_buckets[bucket] = value
-                if filtered_buckets:
-                    filtered[hour] = filtered_buckets
+                subset = {b: v for b, v in buckets.items() if b in self.metrics}
+                if subset:
+                    filtered[hour] = subset
             return filtered
 
         return data
@@ -112,6 +120,10 @@ class PokemonCounterRetrieval(CounterTransformer):
     # --- Retrieval functions for totals ---
 
     async def retrieve_totals_hourly(self) -> dict:
+        """
+        Retrieve hourly totals for Pokémon counters.
+        Key format: "counter:pokemon_total:{area}:{YYYYMMDDHH}"
+        """
         time_format = "%Y%m%d%H"
         client = await redis_manager.check_redis_connection()
         if not client:
@@ -255,13 +267,10 @@ class PokemonCounterRetrieval(CounterTransformer):
             logger.error("❌ Redis connection not available")
             return {"mode": self.mode, "data": {}}
 
-        if self.area.lower() in ["global", "all"]:
-            pattern = "counter:pokemon_weather_iv:*"
-        else:
-            pattern = f"counter:pokemon_weather_iv:{self.area}:*"
+        pattern = "counter:pokemon_weather_iv:*" if self.area.lower() in ["global", "all"] \
+                  else f"counter:pokemon_weather_iv:{self.area}:*"
 
         keys = await client.keys(pattern)
-        # For weather keys, use component_index=-2 to extract the YYYYMM part.
         keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end, component_index=-2)
         if not keys:
             return {"mode": self.mode, "data": {}}
@@ -269,17 +278,18 @@ class PokemonCounterRetrieval(CounterTransformer):
         if self.mode == "sum":
             aggregated = {}
             for key in keys:
-                # Expected key format: "counter:pokemon_weather_iv:{area}:{YYYYMM}:{weather_boost}"
                 parts = key.split(":")
                 if len(parts) < 5:
                     continue
-                weather_boost = parts[-1]
-                # Only process this key if it matches the metric filter (if not "all")
-                if self.metric != "all" and weather_boost != str(self.metric):
+                weather_boost = parts[-1]  # "0".."9"
+                # filter by selected weather flags
+                if self.metrics is not None and weather_boost not in self.metrics:
                     continue
+
                 data = await client.hgetall(key)
                 data = {k: int(v) for k, v in data.items()}
                 data = self._filter_weather_fields(data)
+
                 if weather_boost not in aggregated:
                     aggregated[weather_boost] = {}
                 for field, value in data.items():
@@ -292,15 +302,16 @@ class PokemonCounterRetrieval(CounterTransformer):
                 parts = key.split(":")
                 if len(parts) < 5:
                     continue
-                month = parts[-2]  # the YYYYMM part
+                month = parts[-2]
                 weather_boost = parts[-1]
-                # Only process this key if it matches the metric filter (if not "all")
-                if self.metric != "all" and weather_boost != str(self.metric):
+                if self.metrics is not None and weather_boost not in self.metrics:
                     continue
+
                 composite_key = f"{month}:{weather_boost}"
                 data = await client.hgetall(key)
                 data = {k: int(v) for k, v in data.items()}
                 data = self._filter_weather_fields(data)
+
                 if composite_key not in grouped:
                     grouped[composite_key] = {}
                 for field, value in data.items():

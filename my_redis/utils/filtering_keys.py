@@ -58,7 +58,7 @@ def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: date
                 logger.debug(f"Key: {key} with time {dt} is out of range.")
         except Exception as e:
             logger.warning(f"❌ Could not parse time from key {key}: {e}")
-    logger.info(f"✅ Filtered down to {len(filtered)} keys")
+    logger.debug(f"✅ Filtered down to {len(filtered)} keys")
     return filtered
 
 def parse_time_input(time_str: str, area_offset: int = 0) -> datetime:
@@ -138,3 +138,19 @@ def get_area_offset(area: str, geofences: list) -> int:
             return geofence.get("offset", 0)
 
     return 0
+
+def get_area_offsets_for_list(areas: list[str], geofences: list) -> dict[str, int]:
+    """
+    Map a list of area names to offsets using geofences.
+    Case-insensitive match; returns dict[name] = offset.
+    """
+    index = {g["name"].lower(): g for g in geofences}
+    out = {}
+    for raw in areas:
+        name = raw.strip()
+        if not name:
+            continue
+        g = index.get(name.lower())
+        if g:
+            out[g["name"]] = g.get("offset", 0)
+    return out

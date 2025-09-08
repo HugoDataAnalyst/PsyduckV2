@@ -7,42 +7,59 @@ from my_redis.utils import filtering_keys
 redis_manager = RedisManager()
 
 class QuestCounterRetrieval(CounterTransformer):
-    def __init__(self, area: str,
-                 start: datetime,
-                 end: datetime,
-                 mode: str = "sum",
-                 with_ar: str = "false",
-                 ar_type: str = "all",
-                 reward_ar_type: str = "all",
-                 reward_ar_item_id: str = "all",
-                 reward_ar_item_amount: str = "all",
-                 reward_ar_poke_id: str = "all",
-                 reward_ar_poke_form: str = "all",
-                 normal_type: str = "all",
-                 reward_normal_type: str = "all",
-                 reward_normal_item_id: str = "all",
-                 reward_normal_item_amount: str = "all",
-                 reward_normal_poke_id: str = "all",
-                 reward_normal_poke_form: str = "all"):
+    def __init__(
+        self,
+        area: str,
+        start: datetime,
+        end: datetime,
+        mode: str = "sum",
+        with_ar: str = "all",  # 'true' | 'false' | 'all'
+        # AR filters (CSV -> set[str] or None)
+        ar_type: str | set[str] | None = "all",
+        reward_ar_type: str | set[str] | None = "all",
+        reward_ar_item_id: str | set[str] | None = "all",
+        reward_ar_item_amount: str | set[str] | None = "all",
+        reward_ar_poke_id: str | set[str] | None = "all",
+        reward_ar_poke_form: str | set[str] | None = "all",
+        # Normal filters (CSV -> set[str] or None)
+        normal_type: str | set[str] | None = "all",
+        reward_normal_type: str | set[str] | None = "all",
+        reward_normal_item_id: str | set[str] | None = "all",
+        reward_normal_item_amount: str | set[str] | None = "all",
+        reward_normal_poke_id: str | set[str] | None = "all",
+        reward_normal_poke_form: str | set[str] | None = "all",
+    ):
         self.area = area
         self.start = start
         self.end = end
         self.mode = mode.lower()
-        self.with_ar = with_ar.lower()  # "true", "false", or "all"
-        # AR filtering parameters
-        self.ar_type = ar_type
-        self.reward_ar_type = reward_ar_type
-        self.reward_ar_item_id = reward_ar_item_id
-        self.reward_ar_item_amount = reward_ar_item_amount
-        self.reward_ar_poke_id = reward_ar_poke_id
-        self.reward_ar_poke_form = reward_ar_poke_form
-        # Normal filtering parameters
-        self.normal_type = normal_type
-        self.reward_normal_type = reward_normal_type
-        self.reward_normal_item_id = reward_normal_item_id
-        self.reward_normal_item_amount = reward_normal_item_amount
-        self.reward_normal_poke_id = reward_normal_poke_id
-        self.reward_normal_poke_form = reward_normal_poke_form
+        self.with_ar = with_ar  # leave scalar
+
+        def _norm(x):
+            if x is None or (isinstance(x, str) and x.lower() == "all"):
+                return None
+            if isinstance(x, str):
+                return {x}
+            return set(map(str, x))
+
+        # AR side -> sets or None
+        self.ar_types               = _norm(ar_type)
+        self.reward_ar_types        = _norm(reward_ar_type)
+        self.reward_ar_item_ids     = _norm(reward_ar_item_id)
+        self.reward_ar_item_amounts = _norm(reward_ar_item_amount)
+        self.reward_ar_poke_ids     = _norm(reward_ar_poke_id)
+        self.reward_ar_poke_forms   = _norm(reward_ar_poke_form)
+
+        # Normal side -> sets or None
+        self.normal_types               = _norm(normal_type)
+        self.reward_normal_types        = _norm(reward_normal_type)
+        self.reward_normal_item_ids     = _norm(reward_normal_item_id)
+        self.reward_normal_item_amounts = _norm(reward_normal_item_amount)
+        self.reward_normal_poke_ids     = _norm(reward_normal_poke_id)
+        self.reward_normal_poke_forms   = _norm(reward_normal_poke_form)
+
+    def _match_any(self, val: str, allowed: set[str] | None) -> bool:
+        return True if allowed is None else val in allowed
 
     def filter_quest_field(self, parts: list) -> bool:
         """
@@ -52,74 +69,46 @@ class QuestCounterRetrieval(CounterTransformer):
         """
         if len(parts) < 7:
             return False
-        quest_mode_key = parts[0]
+
+        quest_mode_key = parts[0]          # "ar" | "normal"
         f1, f2, f3, f4, f5, f6 = parts[1:7]
+
         if self.with_ar == "true":
             if quest_mode_key != "ar":
                 return False
-            if self.ar_type != "all" and self.ar_type != f1:
-                return False
-            if self.reward_ar_type != "all" and self.reward_ar_type != f2:
-                return False
-            if self.reward_ar_item_id != "all" and self.reward_ar_item_id != f3:
-                return False
-            if self.reward_ar_item_amount != "all" and self.reward_ar_item_amount != f4:
-                return False
-            if self.reward_ar_poke_id != "all" and self.reward_ar_poke_id != f5:
-                return False
-            if self.reward_ar_poke_form != "all" and self.reward_ar_poke_form != f6:
-                return False
-            return True
-        elif self.with_ar == "false":
+            return (self._match_any(f1, self.ar_types)
+                    and self._match_any(f2, self.reward_ar_types)
+                    and self._match_any(f3, self.reward_ar_item_ids)
+                    and self._match_any(f4, self.reward_ar_item_amounts)
+                    and self._match_any(f5, self.reward_ar_poke_ids)
+                    and self._match_any(f6, self.reward_ar_poke_forms))
+
+        if self.with_ar == "false":
             if quest_mode_key != "normal":
                 return False
-            if self.normal_type != "all" and self.normal_type != f1:
-                return False
-            if self.reward_normal_type != "all" and self.reward_normal_type != f2:
-                return False
-            if self.reward_normal_item_id != "all" and self.reward_normal_item_id != f3:
-                return False
-            if self.reward_normal_item_amount != "all" and self.reward_normal_item_amount != f4:
-                return False
-            if self.reward_normal_poke_id != "all" and self.reward_normal_poke_id != f5:
-                return False
-            if self.reward_normal_poke_form != "all" and self.reward_normal_poke_form != f6:
-                return False
-            return True
-        elif self.with_ar == "all":
-            # Accept both; apply AR filters for ar keys, normal filters for normal keys.
-            if quest_mode_key == "ar":
-                if self.ar_type != "all" and self.ar_type != f1:
-                    return False
-                if self.reward_ar_type != "all" and self.reward_ar_type != f2:
-                    return False
-                if self.reward_ar_item_id != "all" and self.reward_ar_item_id != f3:
-                    return False
-                if self.reward_ar_item_amount != "all" and self.reward_ar_item_amount != f4:
-                    return False
-                if self.reward_ar_poke_id != "all" and self.reward_ar_poke_id != f5:
-                    return False
-                if self.reward_ar_poke_form != "all" and self.reward_ar_poke_form != f6:
-                    return False
-                return True
-            elif quest_mode_key == "normal":
-                if self.normal_type != "all" and self.normal_type != f1:
-                    return False
-                if self.reward_normal_type != "all" and self.reward_normal_type != f2:
-                    return False
-                if self.reward_normal_item_id != "all" and self.reward_normal_item_id != f3:
-                    return False
-                if self.reward_normal_item_amount != "all" and self.reward_normal_item_amount != f4:
-                    return False
-                if self.reward_normal_poke_id != "all" and self.reward_normal_poke_id != f5:
-                    return False
-                if self.reward_normal_poke_form != "all" and self.reward_normal_poke_form != f6:
-                    return False
-                return True
-            else:
-                return False
-        else:
-            return False
+            return (self._match_any(f1, self.normal_types)
+                    and self._match_any(f2, self.reward_normal_types)
+                    and self._match_any(f3, self.reward_normal_item_ids)
+                    and self._match_any(f4, self.reward_normal_item_amounts)
+                    and self._match_any(f5, self.reward_normal_poke_ids)
+                    and self._match_any(f6, self.reward_normal_poke_forms))
+
+        # with_ar == "all": accept both modes, apply respective filters
+        if quest_mode_key == "ar":
+            return (self._match_any(f1, self.ar_types)
+                    and self._match_any(f2, self.reward_ar_types)
+                    and self._match_any(f3, self.reward_ar_item_ids)
+                    and self._match_any(f4, self.reward_ar_item_amounts)
+                    and self._match_any(f5, self.reward_ar_poke_ids)
+                    and self._match_any(f6, self.reward_ar_poke_forms))
+        if quest_mode_key == "normal":
+            return (self._match_any(f1, self.normal_types)
+                    and self._match_any(f2, self.reward_normal_types)
+                    and self._match_any(f3, self.reward_normal_item_ids)
+                    and self._match_any(f4, self.reward_normal_item_amounts)
+                    and self._match_any(f5, self.reward_normal_poke_ids)
+                    and self._match_any(f6, self.reward_normal_poke_forms))
+        return False
 
     async def quest_retrieve_totals_weekly(self) -> dict:
         client = await redis_manager.check_redis_connection()

@@ -31,6 +31,19 @@ dependencies_list = [
 if AppConfig.api_secret_key:
     dependencies_list.append(Depends(secure_api.verify_token))
 
+def _parse_csv_param(v: str):
+    """
+    Accepts 'all' or a comma-separated list.
+    Returns None for 'all' (meaning no filtering), otherwise a set of strings.
+    Trims whitespace and drops empty items.
+    """
+    if v is None:
+        return None
+    s = v.strip()
+    if not s or s.lower() == "all":
+        return None
+    return {part.strip() for part in s.split(",") if part.strip()}
+
 
 @router.get(
     "/api/redis/get_cached_pokestops",
@@ -127,6 +140,7 @@ async def get_pokemon_counterseries(
     counter_type = counter_type.lower()
     interval = interval.lower()
     mode = mode.lower()
+    resp_fmt = response_format.lower()
     if counter_type not in ["totals", "tth", "weather"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals, tth, or weather.")
     if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
@@ -139,75 +153,68 @@ async def get_pokemon_counterseries(
         raise HTTPException(status_code=400, detail="❌ Surged mode is only supported for hourly intervals.")
     if response_format.lower() not in ["json", "text"]:
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+    if resp_fmt not in ["json", "text"]:
+        raise HTTPException(400, "❌ Invalid response_format. Must be json or text.")
 
-    # Get area offset(s)
-    area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
 
-    # Handle global case (multiple areas)
-    if isinstance(area_offset, dict):
-        results = {}
-        for area_name, offset in area_offset.items():
-            try:
-                start_dt = filtering_keys.parse_time_input(start_time, offset)
-                end_dt = filtering_keys.parse_time_input(end_time, offset)
+    # Parse multi-select params (None means "all")
+    metrics_set     = _parse_csv_param(metric)
+    pokemon_ids_set = _parse_csv_param(pokemon_id)
+    forms_set       = _parse_csv_param(form)
 
-                # Initialize the counter retrieval object
-                pokemon_counter_retrieval = PokemonCounterRetrieval(
-                    area_name, start_dt, end_dt, mode, pokemon_id, form, metric
-                )
+    # Area handling
+    area_is_global = area.strip().lower() in ["global", "all"]
+    area_list = None if area_is_global else _parse_csv_param(area)
 
-                # Retrieve data dynamically based on counter type and interval
-                retrieval_methods = {
-                    ("totals", "hourly"): pokemon_counter_retrieval.retrieve_totals_hourly,
-                    ("totals", "weekly"): pokemon_counter_retrieval.retrieve_totals_weekly,
-                    ("tth", "hourly"): pokemon_counter_retrieval.retrieve_tth_hourly,
-                    ("tth", "weekly"): pokemon_counter_retrieval.retrieve_tth_weekly,
-                    ("weather", "monthly"): pokemon_counter_retrieval.retrieve_weather_monthly,
-                }
-
-                retrieval_method = retrieval_methods.get((counter_type, interval))
-                result = await retrieval_method() if retrieval_method else {}
-                results[area_name] = result
-
-            except Exception as e:
-                results[area_name] = {"error": str(e)}
-
-        if response_format.lower() == "json":
-            return results
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in results.items())
-            return text_output
-
-    # Handle single area case
+    # Resolve areas -> offsets
+    if area_is_global:
+        # all areas
+        area_offsets = filtering_keys.get_area_offset("global", global_state.geofences)
+    elif area_list:
+        area_offsets = filtering_keys.get_area_offsets_for_list(list(area_list), global_state.geofences)
+        if not area_offsets:
+            raise HTTPException(400, "❌ None of the requested areas were found.")
     else:
+        # single area string
+        offset = filtering_keys.get_area_offset(area, global_state.geofences)
+        area_offsets = {area: offset}
+
+    # retrieval method mapping
+    def _method(obj):
+        return {
+            ("totals", "hourly"): obj.retrieve_totals_hourly,
+            ("totals", "weekly"): obj.retrieve_totals_weekly,
+            ("tth", "hourly"): obj.retrieve_tth_hourly,
+            ("tth", "weekly"): obj.retrieve_tth_weekly,
+            ("weather", "monthly"): obj.retrieve_weather_monthly,
+        }.get((counter_type, interval))
+
+    # Run per-area
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
-            start_dt = filtering_keys.parse_time_input(start_time, area_offset)
-            end_dt = filtering_keys.parse_time_input(end_time, area_offset)
+            start_dt = filtering_keys.parse_time_input(start_time, offset)
+            end_dt   = filtering_keys.parse_time_input(end_time,   offset)
+
+            retr = PokemonCounterRetrieval(
+                area=area_name,
+                start=start_dt,
+                end=end_dt,
+                mode=mode,
+                pokemon_id=pokemon_ids_set,   # sets or None
+                form=forms_set,
+                metric=metrics_set,
+            )
+            method = _method(retr)
+            results[area_name] = await method() if method else {}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+            results[area_name] = {"error": str(e)}
 
-        # Initialize the counter retrieval object
-        pokemon_counter_retrieval = PokemonCounterRetrieval(
-            area, start_dt, end_dt, mode, pokemon_id, form, metric
-        )
-
-        # Retrieve data dynamically based on counter type and interval
-        retrieval_methods = {
-            ("totals", "hourly"): pokemon_counter_retrieval.retrieve_totals_hourly,
-            ("totals", "weekly"): pokemon_counter_retrieval.retrieve_totals_weekly,
-            ("tth", "hourly"): pokemon_counter_retrieval.retrieve_tth_hourly,
-            ("tth", "weekly"): pokemon_counter_retrieval.retrieve_tth_weekly,
-            ("weather", "monthly"): pokemon_counter_retrieval.retrieve_weather_monthly,
-        }
-
-        retrieval_method = retrieval_methods.get((counter_type, interval))
-        result = await retrieval_method() if retrieval_method else {}
-
-        if response_format.lower() == "json":
-            return result
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-            return text_output
+    if resp_fmt == "json":
+        return results if area_is_global or (area_list and len(area_list) > 1) else next(iter(results.values()))
+    else:
+        text_output = "\n".join(f"{k}: {v}" for k, v in results.items())
+        return text_output
 
 
 @router.get(
@@ -238,6 +245,8 @@ async def get_counter_raids(
     counter_type = counter_type.lower()
     interval = interval.lower()
     mode = mode.lower()
+    resp_fmt = response_format.lower()
+
     if counter_type not in ["totals"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals.")
     if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
@@ -249,71 +258,67 @@ async def get_counter_raids(
     if response_format.lower() not in ["json", "text"]:
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
-    # Get area offset(s) (single int or dict of {area: offset})
-    area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+    # Parse multi-select filters (None means "all")
+    raid_pokemon_set     = _parse_csv_param(raid_pokemon)
+    raid_form_set        = _parse_csv_param(raid_form)
+    raid_level_set       = _parse_csv_param(raid_level)
+    raid_costume_set     = _parse_csv_param(raid_costume)
+    raid_is_exc_set      = _parse_csv_param(raid_is_exclusive)
+    raid_ex_eligible_set = _parse_csv_param(raid_ex_eligible)
 
-    # --- Global Area Logic ---
-    if isinstance(area_offset, dict):
-        results = {}
-        for area_name, offset in area_offset.items():
-            try:
-                start_dt = filtering_keys.parse_time_input(start_time, offset)
-                end_dt = filtering_keys.parse_time_input(end_time, offset)
+    # Area handling (case-insensitive; returns canonical names)
+    area_is_global = area.strip().lower() in ["global", "all"]
+    area_list = None if area_is_global else _parse_csv_param(area)
 
-                # Initialize retrieval for this area
-                raid_counter_retrieval = RaidCounterRetrieval(
-                    area_name, start_dt, end_dt, mode,
-                    raid_pokemon, raid_form, raid_level,
-                    raid_costume, raid_is_exclusive, raid_ex_eligible
-                )
-
-                # Dynamically call retrieval method
-                retrieval_methods = {
-                    ("totals", "hourly"): raid_counter_retrieval.raid_retrieve_totals_hourly,
-                    ("totals", "weekly"): raid_counter_retrieval.raid_retrieve_totals_weekly
-                }
-                retrieval_method = retrieval_methods.get((counter_type, interval))
-                result = await retrieval_method() if retrieval_method else {}
-                results[area_name] = result
-
-            except Exception as e:
-                results[area_name] = {"error": str(e)}
-
-        if response_format.lower() == "json":
-            return results
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in results.items())
-            return text_output
-    # Single Area Logic Cupcake
+    if area_is_global:
+        area_offsets = filtering_keys.get_area_offset("global", global_state.geofences)
+    elif area_list:
+        area_offsets = filtering_keys.get_area_offsets_for_list(list(area_list), global_state.geofences)
+        if not area_offsets:
+            raise HTTPException(400, "❌ None of the requested areas were found.")
     else:
+        # single area -> resolve via list helper to get canonical name
+        resolved = filtering_keys.get_area_offsets_for_list([area], global_state.geofences)
+        if not resolved:
+            raise HTTPException(400, f"❌ Area not found: {area}")
+        area_offsets = resolved
+
+    # Select retrieval method
+    def _method(obj):
+        return {
+            ("totals", "hourly"): obj.raid_retrieve_totals_hourly,
+            ("totals", "weekly"): obj.raid_retrieve_totals_weekly,
+        }.get((counter_type, interval))
+
+    # Run per-area
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
-            start_dt = filtering_keys.parse_time_input(start_time, area_offset)
-            end_dt = filtering_keys.parse_time_input(end_time, area_offset)
+            start_dt = filtering_keys.parse_time_input(start_time, offset)
+            end_dt   = filtering_keys.parse_time_input(end_time,   offset)
+
+            retr = RaidCounterRetrieval(
+                area=area_name,
+                start=start_dt,
+                end=end_dt,
+                mode=mode,
+                raid_pokemon=raid_pokemon_set,
+                raid_form=raid_form_set,
+                raid_level=raid_level_set,
+                raid_costume=raid_costume_set,
+                raid_is_exclusive=raid_is_exc_set,
+                raid_ex_eligible=raid_ex_eligible_set,
+            )
+            method = _method(retr)
+            results[area_name] = await method() if method else {}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+            results[area_name] = {"error": str(e)}
 
-        # Initialize the counter retrieval object
-        raid_counter_retrieval = RaidCounterRetrieval(
-            area, start_dt, end_dt,
-            mode, raid_pokemon, raid_form,
-            raid_level, raid_costume, raid_is_exclusive,
-            raid_ex_eligible
-        )
-
-        # Retrieve data dynamically based on counter type and interval
-        retrieval_methods = {
-            ("totals", "hourly"): raid_counter_retrieval.raid_retrieve_totals_hourly,
-            ("totals", "weekly"): raid_counter_retrieval.raid_retrieve_totals_weekly
-        }
-
-        retrieval_method = retrieval_methods.get((counter_type, interval))
-        result = await retrieval_method() if retrieval_method else {}
-
-        if response_format.lower() == "json":
-            return result
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-            return text_output
+    if resp_fmt == "json":
+        # If multiple areas, return the dict; if only one, return that single result.
+        return results if len(results) != 1 else next(iter(results.values()))
+    else:
+        return "\n".join(f"{k}: {v}" for k, v in results.items())
 
 @router.get(
     "/api/redis/get_invasions_counterseries",
@@ -341,6 +346,8 @@ async def get_counter_invasions(
     counter_type = counter_type.lower()
     interval = interval.lower()
     mode = mode.lower()
+    resp_fmt = response_format.lower()
+
     if counter_type not in ["totals"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals.")
     if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
@@ -352,68 +359,60 @@ async def get_counter_invasions(
     if response_format.lower() not in ["json", "text"]:
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
-    # Get timezone offset (None means use machine timezone)
-    area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
-    # handle global case (multiple areas)
-    if isinstance(area_offset, dict):
-        results = {}
-        for area_name, offset in area_offset.items():
-            try:
-                start_dt = filtering_keys.parse_time_input(start_time, offset)
-                end_dt = filtering_keys.parse_time_input(end_time, offset)
+    # Parse multi-select filters (None => no filtering)
+    display_types_set = _parse_csv_param(display_type)
+    characters_set    = _parse_csv_param(character)
+    grunts_set        = _parse_csv_param(grunt)
 
-                # Initialize the counter retrieval object
-                invasion_counter_retrieval = InvasionCounterRetrieval(
-                    area_name, start_dt, end_dt,
-                    mode, display_type, character,
-                    grunt, confirmed
-                )
+    # Areas (case-insensitive; canonical names out)
+    area_is_global = area.strip().lower() in ["global", "all"]
+    area_list = None if area_is_global else _parse_csv_param(area)
 
-                # Retrieve data dynamically based on counter type and interval
-                retrieval_methods = {
-                    ("totals", "hourly"): invasion_counter_retrieval.invasion_retrieve_totals_hourly,
-                    ("totals", "weekly"): invasion_counter_retrieval.invasion_retrieve_totals_weekly
-                }
-                retrieval_method = retrieval_methods.get((counter_type, interval))
-                result = await retrieval_method() if retrieval_method else {}
-                results[area_name] = result
-            except Exception as e:
-                results[area_name] = {"error": str(e)}
-
-        if response_format.lower() == "json":
-            return results
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in results.items())
-            return text_output
-    # Single Area Logic Cupcake
+    if area_is_global:
+        area_offsets = filtering_keys.get_area_offset("global", global_state.geofences)
+    elif area_list:
+        area_offsets = filtering_keys.get_area_offsets_for_list(list(area_list), global_state.geofences)
+        if not area_offsets:
+            raise HTTPException(400, "❌ None of the requested areas were found.")
     else:
+        resolved = filtering_keys.get_area_offsets_for_list([area], global_state.geofences)
+        if not resolved:
+            raise HTTPException(400, f"❌ Area not found: {area}")
+        area_offsets = resolved
+
+    # Choose retrieval method
+    def _method(obj):
+        return {
+            ("totals", "hourly"): obj.invasion_retrieve_totals_hourly,
+            ("totals", "weekly"): obj.invasion_retrieve_totals_weekly,
+        }.get((counter_type, interval))
+
+    # Per-area execution (keeps your per-area offset semantics)
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
-            start_dt = filtering_keys.parse_time_input(start_time, area_offset)
-            end_dt = filtering_keys.parse_time_input(end_time, area_offset)
+            start_dt = filtering_keys.parse_time_input(start_time, offset)
+            end_dt   = filtering_keys.parse_time_input(end_time,   offset)
+
+            retr = InvasionCounterRetrieval(
+                area=area_name,
+                start=start_dt,
+                end=end_dt,
+                mode=mode,
+                display_type=display_types_set,
+                character=characters_set,
+                grunt=grunts_set,
+                confirmed=confirmed,
+            )
+            method = _method(retr)
+            results[area_name] = await method() if method else {}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+            results[area_name] = {"error": str(e)}
 
-        # Initialize the counter retrieval object
-        invasion_counter_retrieval = InvasionCounterRetrieval(
-            area, start_dt, end_dt,
-            mode, display_type, character,
-            grunt, confirmed
-        )
-
-        # Retrieve data dynamically based on counter type and interval
-        retrieval_methods = {
-            ("totals", "hourly"): invasion_counter_retrieval.invasion_retrieve_totals_hourly,
-            ("totals", "weekly"): invasion_counter_retrieval.invasion_retrieve_totals_weekly
-        }
-
-        retrieval_method = retrieval_methods.get((counter_type, interval))
-        result = await retrieval_method() if retrieval_method else {}
-
-        if response_format.lower() == "json":
-            return result
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-            return text_output
+    if resp_fmt == "json":
+        return results if len(results) != 1 else next(iter(results.values()))
+    else:
+        return "\n".join(f"{k}: {v}" for k, v in results.items())
 
 
 @router.get(
@@ -451,6 +450,8 @@ async def get_counter_quests(
     counter_type = counter_type.lower()
     interval = interval.lower()
     mode = mode.lower()
+    resp_fmt = response_format.lower()
+
     if counter_type not in ["totals"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals.")
     if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
@@ -462,75 +463,83 @@ async def get_counter_quests(
     if response_format.lower() not in ["json", "text"]:
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
-    # Get timezone offset (None means use machine timezone)
-    area_offset = filtering_keys.get_area_offset(area, global_state.geofences)
+    with_ar_l = with_ar.strip().lower()
+    if with_ar_l not in ("true", "false", "all"):
+        raise HTTPException(400, "❌ with_ar must be 'true', 'false', or 'all'.")
 
-    # Handle global case (multiple areas)
-    if isinstance(area_offset, dict):
-        results = {}
-        for area_name, offset in area_offset.items():
-            try:
-                start_dt = filtering_keys.parse_time_input(start_time, offset)
-                end_dt = filtering_keys.parse_time_input(end_time, offset)
+    # Parse CSV → sets (None means no filter)
+    ar_type_set                 = _parse_csv_param(ar_type)
+    reward_ar_type_set          = _parse_csv_param(reward_ar_type)
+    reward_ar_item_id_set       = _parse_csv_param(reward_ar_item_id)
+    reward_ar_item_amount_set   = _parse_csv_param(reward_ar_item_amount)
+    reward_ar_poke_id_set       = _parse_csv_param(reward_ar_poke_id)
+    reward_ar_poke_form_set     = _parse_csv_param(reward_ar_poke_form)
 
-                # Initialize the counter retrieval object
-                quest_counter_retrieval = QuestCounterRetrieval(
-                    area_name, start_dt, end_dt,
-                    mode, with_ar, ar_type,
-                    reward_ar_type, reward_ar_item_id, reward_ar_item_amount,
-                    reward_ar_poke_id, reward_ar_poke_form, normal_type,
-                    reward_normal_type, reward_normal_item_id, reward_normal_item_amount,
-                    reward_normal_poke_id, reward_normal_poke_form
-                )
+    normal_type_set             = _parse_csv_param(normal_type)
+    reward_normal_type_set      = _parse_csv_param(reward_normal_type)
+    reward_normal_item_id_set   = _parse_csv_param(reward_normal_item_id)
+    reward_normal_item_amount_set = _parse_csv_param(reward_normal_item_amount)
+    reward_normal_poke_id_set   = _parse_csv_param(reward_normal_poke_id)
+    reward_normal_poke_form_set = _parse_csv_param(reward_normal_poke_form)
 
-                # Retrieve data dynamically based on counter type and interval
-                retrieval_methods = {
-                    ("totals", "hourly"): quest_counter_retrieval.quest_retrieve_totals_hourly,
-                    ("totals", "weekly"): quest_counter_retrieval.quest_retrieve_totals_weekly
-                }
-                retrieval_method = retrieval_methods.get((counter_type, interval))
-                result = await retrieval_method() if retrieval_method else {}
-                results[area_name] = result
-            except Exception as e:
-                results[area_name] = {"error": str(e)}
+    # Area handling (case-insensitive; canonical names)
+    area_is_global = area.strip().lower() in ["global", "all"]
+    area_list = None if area_is_global else _parse_csv_param(area)
 
-        if response_format.lower() == "json":
-            return results
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in results.items())
-            return text_output
-
-    # Single Area Logic Cupcake
+    if area_is_global:
+        area_offsets = filtering_keys.get_area_offset("global", global_state.geofences)  # dict[name]=offset
+    elif area_list:
+        area_offsets = filtering_keys.get_area_offsets_for_list(list(area_list), global_state.geofences)
+        if not area_offsets:
+            raise HTTPException(400, "❌ None of the requested areas were found.")
     else:
+        resolved = filtering_keys.get_area_offsets_for_list([area], global_state.geofences)
+        if not resolved:
+            raise HTTPException(400, f"❌ Area not found: {area}")
+        area_offsets = resolved
+
+    # Method
+    def _method(obj):
+        return {
+            ("totals", "hourly"): obj.quest_retrieve_totals_hourly,
+            ("totals", "weekly"): obj.quest_retrieve_totals_weekly,
+        }.get((counter_type, interval))
+
+    # Per-area run
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
-            start_dt = filtering_keys.parse_time_input(start_time, area_offset)
-            end_dt = filtering_keys.parse_time_input(end_time, area_offset)
+            start_dt = filtering_keys.parse_time_input(start_time, offset)
+            end_dt   = filtering_keys.parse_time_input(end_time,   offset)
+
+            retr = QuestCounterRetrieval(
+                area=area_name,
+                start=start_dt,
+                end=end_dt,
+                mode=mode,
+                with_ar=with_ar_l,
+                ar_type=ar_type_set,
+                reward_ar_type=reward_ar_type_set,
+                reward_ar_item_id=reward_ar_item_id_set,
+                reward_ar_item_amount=reward_ar_item_amount_set,
+                reward_ar_poke_id=reward_ar_poke_id_set,
+                reward_ar_poke_form=reward_ar_poke_form_set,
+                normal_type=normal_type_set,
+                reward_normal_type=reward_normal_type_set,
+                reward_normal_item_id=reward_normal_item_id_set,
+                reward_normal_item_amount=reward_normal_item_amount_set,
+                reward_normal_poke_id=reward_normal_poke_id_set,
+                reward_normal_poke_form=reward_normal_poke_form_set,
+            )
+            method = _method(retr)
+            results[area_name] = await method() if method else {}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+            results[area_name] = {"error": str(e)}
 
-        # Initialize the counter retrieval object
-        quest_counter_retrieval = QuestCounterRetrieval(
-            area, start_dt, end_dt, mode, with_ar,
-            ar_type, reward_ar_type, reward_ar_item_id,
-            reward_ar_item_amount, reward_ar_poke_id, reward_ar_poke_form,
-            normal_type, reward_normal_type, reward_normal_item_id,
-            reward_normal_item_amount, reward_normal_poke_id, reward_normal_poke_form
-        )
-
-        # Retrieve data dynamically based on counter type and interval
-        retrieval_methods = {
-            ("totals", "hourly"): quest_counter_retrieval.quest_retrieve_totals_hourly,
-            ("totals", "weekly"): quest_counter_retrieval.quest_retrieve_totals_weekly
-        }
-
-        retrieval_method = retrieval_methods.get((counter_type, interval))
-        result = await retrieval_method() if retrieval_method else {}
-
-        if response_format.lower() == "json":
-            return result
-        else:
-            text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-            return text_output
+    if resp_fmt == "json":
+        return results if len(results) != 1 else next(iter(results.values()))
+    else:
+        return "\n".join(f"{k}: {v}" for k, v in results.items())
 
 
 @router.get(
