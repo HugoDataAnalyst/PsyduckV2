@@ -1,7 +1,7 @@
 import asyncio
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Iterable, Union
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
@@ -99,8 +99,16 @@ end
 """
 
 class InvasionTimeSeries:
-    def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
-                 display_type: str = "all", grunt: str = "all", confirmed: str = "all"):
+    def __init__(
+        self,
+        area: str,
+        start: datetime,
+        end: datetime,
+        mode: str = "sum",
+        display: Union[str, Iterable[str], None] = "all",
+        grunt: Union[str, Iterable[str], None] = "all",
+        confirmed: str = "all",  # keep single
+    ):
         """
         Parameters:
           - area: Area name filter. Use "all" or "global" to match every area.
@@ -113,15 +121,23 @@ class InvasionTimeSeries:
         self.start = start
         self.end = end
         self.mode = mode.lower()
-        self.display_type = display_type
-        self.grunt = grunt
         self.confirmed = confirmed
         self.script_sha = None
 
+        def _norm(x):
+            if x is None or (isinstance(x, str) and x.lower() == "all"):
+                return None
+            if isinstance(x, str):
+                return {x}
+            return set(map(str, x))
+
+        self.displays = _norm(display)
+        self.grunts   = _norm(grunt)
+
         logger.info(
-            f"▶️ Initialized InvasionTimeSeries with area: {self.area}, mode: {self.mode}, "
-            f"🕴️ Display type: {self.display_type}, grunt: {self.grunt}, confirmed: {self.confirmed}, "
-            f"▶️ Start: {self.start}, ⏸️ End: {self.end}"
+            f"▶️ Initialized 🕴️ InvasionTimeSeries area={self.area}, mode={self.mode}, "
+            f"displays={self.displays or 'ALL'}, grunts={self.grunts or 'ALL'}, confirmed={self.confirmed}, "
+            f"start={self.start}, end={self.end}"
         )
 
     async def _load_script(self, client):
@@ -133,15 +149,22 @@ class InvasionTimeSeries:
             logger.debug("🕴️ Invasion Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
-    def _build_key_pattern(self) -> str:
-        # Key format: ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}
+    def _build_key_patterns(self) -> list[str]:
+        """
+        Build cartesian patterns.
+        Key: ts:invasion:total:{area}:{display}:{grunt}:{confirmed}
+        """
         area = "*" if self.area.lower() in ["all", "global"] else self.area
-        display_type = "*" if self.display_type.lower() in ["all"] else self.display_type
-        grunt = "*" if self.grunt.lower() in ["all"] else self.grunt
-        confirmed = "*" if self.confirmed.lower() in ["all"] else self.confirmed
-        pattern = f"ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}"
-        logger.debug(f"Built 🕴️ Invasion 🔑 key pattern: {pattern}")
-        return pattern
+        displays = list(self.displays) if self.displays is not None else ["*"]
+        grunts   = list(self.grunts)   if self.grunts   is not None else ["*"]
+        confirmed = "*" if str(self.confirmed).lower() == "all" else str(self.confirmed)
+
+        patterns = []
+        for d in displays:
+            for g in grunts:
+                patterns.append(f"ts:invasion:total:{area}:{d}:{g}:{confirmed}")
+        logger.debug(f"Built 🕴️ Invasion {len(patterns)} key pattern(s): {patterns[:5]}{'...' if len(patterns)>5 else ''}")
+        return patterns
 
     async def invasion_retrieve_timeseries(self) -> Dict[str, Any]:
         client = await redis_manager.check_redis_connection()
@@ -157,68 +180,86 @@ class InvasionTimeSeries:
                     return [convert_redis_result(item) for item in res]
             return res
 
+        # Accumulators across multiple patterns
+        acc_total = 0
+        acc_confirmed: Dict[str, int] = {}
+        acc_grouped: Dict[str, Dict[str, int]] = {}
+        acc_surged: Dict[str, Dict[str, int]] = {}
+
         try:
-            pattern = self._build_key_pattern()
             start_ts = int(self.start.timestamp())
-            end_ts = int(self.end.timestamp())
-            logger.debug(f"🕴️ Invasion ⏱️ Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            end_ts   = int(self.end.timestamp())
+            logger.debug(f"🕴️ Invasion ⏱️ Time range: start_ts={start_ts}, end_ts={end_ts}")
 
-            # Start timing right before loading/executing the script
             request_start = time.monotonic()
+            sha = await self._load_script(client)
 
-            script_sha = await self._load_script(client)
-            logger.debug("Executing 🕴️ Invasion Lua script with evalsha...")
-            raw_data = await client.evalsha(
-                script_sha,
-                0,  # No keys, only ARGV
-                pattern,
-                str(start_ts),
-                str(end_ts),
-                self.mode
-            )
+            for pattern in self._build_key_patterns():
+                raw = await client.evalsha(
+                    sha, 0,
+                    pattern,
+                    str(start_ts),
+                    str(end_ts),
+                    self.mode
+                )
+                data = convert_redis_result(raw)
 
-            logger.debug(f"Raw 🕴️ Invasion data from Lua script (pre-conversion): {raw_data}")
-            raw_data = convert_redis_result(raw_data)
-            logger.debug(f"Converted 🕴️ Invasion raw data: {raw_data}")
+                if self.mode == "sum":
+                    # {"total": int, "confirmed": { "0": int, "1": int } }
+                    acc_total += int(data.get("total", 0) or 0)
+                    conf = data.get("confirmed", {}) or {}
+                    for k, v in conf.items():
+                        acc_confirmed[k] = acc_confirmed.get(k, 0) + int(v)
+                elif self.mode == "grouped":
+                    # { "display:grunt:confirmed": { "ts": count, ... }, ... }
+                    for group_key, groups in data.items():
+                        # Ensure 'groups' is dict
+                        if isinstance(groups, list):
+                            groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
+                        bucket = acc_grouped.setdefault(group_key, {})
+                        for ts_str, cnt in groups.items():
+                            bucket[ts_str] = bucket.get(ts_str, 0) + int(cnt)
+                elif self.mode == "surged":
+                    # { "display:grunt:confirmed": { "hour": count, ... }, ... }
+                    for group_key, inner in data.items():
+                        if isinstance(inner, list):
+                            inner = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
+                        bucket = acc_surged.setdefault(group_key, {})
+                        for hour, cnt in inner.items():
+                            bucket[hour] = bucket.get(hour, 0) + int(cnt)
 
-            formatted_data = {}
+            # Final formatting/sorting
             if self.mode == "sum":
-                # For mode "sum", raw_data is now a dictionary with keys "total" and "confirmed".
-                formatted_data = raw_data
-                logger.debug(f"Formatted 🕴️ Invasion 'sum' data: {formatted_data}")
+                formatted = {"total": acc_total, "confirmed": dict(sorted(acc_confirmed.items()))}
             elif self.mode == "grouped":
-                formatted_data = {}
-                for group_key, groups in raw_data.items():
-                    if isinstance(groups, list):
-                        groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                    # Order inner dictionary by timestamp (as integer)
-                    ordered_groups = dict(sorted(groups.items(), key=lambda x: int(x[0])))
-                    formatted_data[group_key] = ordered_groups
-                formatted_data = dict(
-                    sorted(formatted_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
-                )
-                logger.debug(f"Formatted 🕴️ Invasion 'grouped' data: {formatted_data}")
-            elif self.mode == "surged":
-                formatted_data = {}
-                for group_key, inner in raw_data.items():
-                    if isinstance(inner, list):
-                        hours = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
-                    else:
-                        hours = inner
-                    formatted_data[group_key] = dict(
-                        sorted({f"hour {int(h)}": v for h, v in hours.items()}.items(), key=lambda x: int(x[0].split()[1]))
+                formatted = {}
+                for group_key, groups in acc_grouped.items():
+                    ordered = dict(sorted(groups.items(), key=lambda x: int(x[0])))
+                    formatted[group_key] = ordered
+                # sort outer by numeric tuple (display, grunt, confirmed)
+                formatted = dict(
+                    sorted(
+                        formatted.items(),
+                        key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":"))
                     )
-                formatted_data = dict(
-                    sorted(formatted_data.items(), key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":")))
                 )
-                logger.debug(f"Formatted 🕴️ Invasion 'surged' data: {formatted_data}")
+            elif self.mode == "surged":
+                formatted = {}
+                for group_key, hours in acc_surged.items():
+                    labeled = {f"hour {int(h)}": v for h, v in hours.items()}
+                    formatted[group_key] = dict(sorted(labeled.items(), key=lambda kv: int(kv[0].split()[1])))
+                formatted = dict(
+                    sorted(
+                        formatted.items(),
+                        key=lambda item: tuple(int(x) if x.isdigit() else x for x in item[0].split(":"))
+                    )
+                )
+            else:
+                formatted = {}
 
-            # End timing after script execution
-            request_end = time.monotonic()
-            elapsed_time = request_end - request_start
-            logger.info(f"🕴️ Invasion retrieval execution took ⏱️ {elapsed_time:.3f} seconds")
-
-            return {"mode": self.mode, "data": formatted_data}
+            elapsed = time.monotonic() - request_start
+            logger.info(f"🕴️ Invasion retrieval execution took ⏱️ {elapsed:.3f} seconds")
+            return {"mode": self.mode, "data": formatted}
         except Exception as e:
             logger.error(f"❌ 🕴️ Invasion Lua script execution failed: {e}")
             return {"mode": self.mode, "data": {}}

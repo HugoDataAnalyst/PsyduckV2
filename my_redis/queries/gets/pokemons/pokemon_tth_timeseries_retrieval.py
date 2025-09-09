@@ -1,7 +1,7 @@
 import asyncio
 import time
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Union, Iterable
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 
@@ -92,7 +92,14 @@ end
 """
 
 class PokemonTTHTimeSeries:
-    def __init__(self, area: str, start: datetime, end: datetime, tth_bucket: str = "all", mode: str = "sum"):
+    def __init__(
+        self,
+        area: str,
+        start: datetime,
+        end: datetime,
+        tth_bucket: Union[str, Iterable[str], None] = "all",
+        mode: str = "sum",
+    ):
         """
         Parameters:
           - area: The area filter. Use "all" or "global" to match every area.
@@ -102,13 +109,22 @@ class PokemonTTHTimeSeries:
         self.area = area
         self.start = start
         self.end = end
-        self.tth_bucket = tth_bucket
         self.mode = mode.lower()
         self.script_sha = None
 
+        def _norm(x):
+            if x is None or (isinstance(x, str) and x.lower() == "all"):
+                return None
+            if isinstance(x, str):
+                return {x}
+            return set(map(str, x))
+
+        self.tth_buckets = _norm(tth_bucket)
+
         logger.info(
             f"👻⏱️ Initialized PokemonTTHTimeSeries with area: {self.area}, "
-            f"⏱️ tth_bucket: {self.tth_bucket}, ▶️ Start: {self.start}, ⏸️ End: {self.end}, Mode: {self.mode}"
+            f"tth_buckets: {self.tth_buckets or 'ALL'}, ▶️ Start: {self.start}, "
+            f"⏸️ End: {self.end}, Mode: {self.mode}"
         )
 
     async def _load_script(self, client):
@@ -120,13 +136,16 @@ class PokemonTTHTimeSeries:
             logger.debug("👻⏱️ TTH Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
-    def _build_key_pattern(self) -> str:
-        # Replace "all" or "global" with wildcard for both area and tth_bucket.
+    def _build_key_patterns(self) -> list[str]:
+        # "all/global" -> wildcard; expand buckets into multiple patterns
         area = "*" if self.area.lower() in ["all", "global"] else self.area
-        bucket = "*" if self.tth_bucket.lower() in ["all"] else self.tth_bucket
-        pattern = f"ts:tth_pokemon:{area}:{bucket}"
-        logger.debug(f"Built 👻⏱️ TTH 🔑 key pattern: {pattern}")
-        return pattern
+        buckets = list(self.tth_buckets) if self.tth_buckets is not None else ["*"]
+        patterns = [f"ts:tth_pokemon:{area}:{b}" for b in buckets]
+        logger.debug(
+            f"Built 👻⏱️ TTH {len(patterns)} key pattern(s): "
+            f"{patterns[:5]}{'...' if len(patterns)>5 else ''}"
+        )
+        return patterns
 
     async def retrieve_timeseries(self) -> Dict:
         client = await redis_manager.check_redis_connection()
@@ -142,77 +161,81 @@ class PokemonTTHTimeSeries:
                     return [convert_redis_result(item) for item in res]
             return res
 
+        # helpers for sorting
+        def _bucket_key(bucket: str) -> int:
+            try:
+                return int(bucket.split("_")[0])
+            except Exception:
+                return 10**9  # push unknowns to end
+
+        start_ts = int(self.start.timestamp())
+        end_ts   = int(self.end.timestamp())
+
+        # accumulators
+        acc_sum: Dict[str, int] = {}
+        acc_grouped: Dict[str, Dict[str, int]] = {}  # bucket -> { time_bucket_ts: count }
+        acc_surged: Dict[str, Dict[str, int]] = {}   # bucket -> { hour_str: count }
+
         try:
-            pattern = self._build_key_pattern()
-            start_ts = int(self.start.timestamp())
-            end_ts = int(self.end.timestamp())
-            logger.debug(f"👻⏱️ TTH ⏱️ Time range for query: start_ts={start_ts}, end_ts={end_ts}")
-
-            # Start timing right before loading/executing the script
             request_start = time.monotonic()
+            sha = await self._load_script(client)
 
-            script_sha = await self._load_script(client)
-            logger.debug("Executing 👻⏱️ TTH Lua script with evalsha...")
-            raw_data = await client.evalsha(
-                script_sha,
-                0,  # No keys, only ARGV
-                pattern,
-                str(start_ts),
-                str(end_ts),
-                self.mode
-            )
-            logger.debug(f"Raw 👻⏱️ TTH data from Lua script (pre-conversion): {raw_data}")
-            raw_data = convert_redis_result(raw_data)
-            logger.debug(f"Converted 👻⏱️ TTH raw data: {raw_data}")
+            for pattern in self._build_key_patterns():
+                raw = await client.evalsha(
+                    sha, 0,
+                    pattern,
+                    str(start_ts),
+                    str(end_ts),
+                    self.mode
+                )
+                data = convert_redis_result(raw)
 
-            formatted_data = {}
+                if self.mode == "sum":
+                    # data: { bucket: count }
+                    for b, v in data.items():
+                        acc_sum[b] = acc_sum.get(b, 0) + int(v)
+                elif self.mode == "grouped":
+                    # data: { bucket: { time_bucket_ts: count } }
+                    for b, groups in data.items():
+                        if isinstance(groups, list):
+                            groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
+                        bucket = acc_grouped.setdefault(b, {})
+                        for t, v in groups.items():
+                            bucket[t] = bucket.get(t, 0) + int(v)
+                elif self.mode == "surged":
+                    # data: { bucket: { hour_str: count } }
+                    for b, hours in data.items():
+                        if isinstance(hours, list):
+                            hours = {hours[i]: hours[i+1] for i in range(0, len(hours), 2)}
+                        bucket = acc_surged.setdefault(b, {})
+                        for h, v in hours.items():
+                            bucket[h] = bucket.get(h, 0) + int(v)
+
+            # Final formatting
             if self.mode == "sum":
-                # raw_data is a dict mapping tth_bucket -> count.
-                # Order by the numeric value of the lower bound of the bucket.
-                formatted_data = dict(
-                    sorted(raw_data.items(), key=lambda item: int(item[0].split('_')[0]))
-                )
-                logger.debug(f"Formatted 👻⏱️ TTH 'sum' data: {formatted_data}")
+                formatted = dict(sorted(acc_sum.items(), key=lambda kv: _bucket_key(kv[0])))
+
             elif self.mode == "grouped":
-                formatted_data = {}
-                for bucket, groups in raw_data.items():
-                    if isinstance(groups, list):
-                        groups = {groups[i]: groups[i + 1] for i in range(0, len(groups), 2)}
-                    # Order inner dictionary by timestamp (converted to int)
-                    ordered_groups = dict(sorted(groups.items(), key=lambda x: int(x[0])))
-                    formatted_data[bucket] = ordered_groups
-                # Order the outer dictionary by the lower bound of each bucket.
-                formatted_data = dict(
-                    sorted(formatted_data.items(), key=lambda item: int(item[0].split('_')[0]))
-                )
-                logger.debug(f"Formatted 👻⏱️ TTH 'grouped' data: {formatted_data}")
+                formatted: Dict[str, Dict[str, int]] = {}
+                for b, groups in acc_grouped.items():
+                    # sort inner by timestamp numeric
+                    formatted[b] = dict(sorted(groups.items(), key=lambda kv: int(kv[0])))
+                # sort outer by bucket lower bound
+                formatted = dict(sorted(formatted.items(), key=lambda kv: _bucket_key(kv[0])))
+
             elif self.mode == "surged":
-                # For surged mode, assume your existing logic works (grouping by hour, etc.).
-                formatted_data = {}
-                for bucket, inner in raw_data.items():
-                    if isinstance(inner, list):
-                        hours = {inner[i]: inner[i + 1] for i in range(0, len(inner), 2)}
-                    else:
-                        hours = inner
-                    formatted_data[bucket] = dict(
-                        sorted(
-                            {f"hour {int(h)}": v for h, v in hours.items()}.items(),
-                            key=lambda x: int(x[0].split()[1])
-                        )
-                    )
-                # Optionally, order the outer dictionary by bucket as well.
-                formatted_data = dict(
-                    sorted(formatted_data.items(), key=lambda item: int(item[0].split('_')[0]))
-                )
-                logger.debug(f"Formatted 👻⏱️ TTH 'surged' data: {formatted_data}")
+                formatted: Dict[str, Dict[str, int]] = {}
+                for b, hours in acc_surged.items():
+                    labeled = {f"hour {int(h)}": v for h, v in hours.items()}
+                    formatted[b] = dict(sorted(labeled.items(), key=lambda kv: int(kv[0].split()[1])))
+                formatted = dict(sorted(formatted.items(), key=lambda kv: _bucket_key(kv[0])))
 
-            # End timing after script execution
-            request_end = time.monotonic()
-            elapsed_time = request_end - request_start
-            logger.info(f"👻⏱️ Pokémon TTH retrieval execution took {elapsed_time:.3f} seconds")
+            else:
+                formatted = {}
 
-            logger.debug(f"Finished processing 👻⏱️ TTH timeseries data for pattern: {pattern}")
-            return {"mode": self.mode, "data": formatted_data}
+            elapsed = time.monotonic() - request_start
+            logger.info(f"👻⏱️ Pokémon TTH retrieval execution took {elapsed:.3f} seconds")
+            return {"mode": self.mode, "data": formatted}
 
         except Exception as e:
             logger.error(f"TTH Lua script execution failed: {e}")

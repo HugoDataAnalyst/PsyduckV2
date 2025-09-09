@@ -1,7 +1,7 @@
 import asyncio
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Iterable, Union
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 from server_fastapi import global_state
@@ -83,8 +83,15 @@ end
 """
 
 class QuestTimeSeries:
-    def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
-                 quest_mode: str = "normal", field_details: str = "all"):
+    def __init__(
+        self,
+        area: str,
+        start: datetime,
+        end: datetime,
+        mode: str = "sum",
+        quest_mode: str = "all",
+        field_details: Union[str, Iterable[str], None] = "all",
+    ):
         """
         Parameters:
           - area: Area name filter. Use "all" or "global" to match every area.
@@ -105,16 +112,23 @@ class QuestTimeSeries:
         self.end = end
         self.mode = mode.lower()
         self.quest_mode = quest_mode.lower()
-        # Here, self.field_details represents the quest_type filter.
-        self.field_details = field_details
         self.script_sha = None
 
-        logger.info(
-            f"▶️ Initialized 🔎 QuestTimeSeries with area: {self.area}, mode: {self.mode}, "
-            f"🔎 Quest Mode: {self.quest_mode}, field_details: {self.field_details}, "
-            f"▶️ Time Range: {self.start} ⏸️ to {self.end}"
-        )
+        def _norm(x):
+            if x is None or (isinstance(x, str) and x.lower() == "all"):
+                return None
+            if isinstance(x, str):
+                return {x}
+            return set(map(str, x))
 
+        # multi-select quest types (we only constrain f1 in the 6-field segment)
+        self.quest_types = _norm(field_details)
+
+        logger.info(
+            f"▶️ Initialized 🔎 QuestTimeSeries area={self.area}, mode={self.mode}, "
+            f"quest_mode={self.quest_mode}, quest_types={self.quest_types or 'ALL'}, "
+            f"range={self.start}..{self.end}"
+        )
     async def _load_script(self, client):
         if not self.script_sha:
             logger.debug("🔄 Loading 🔎 Quest Lua script into Redis...")
@@ -124,23 +138,21 @@ class QuestTimeSeries:
             logger.debug("🔎 Quest Lua script already loaded, reusing cached SHA.")
         return self.script_sha
 
-    def _build_key_pattern(self) -> str:
-        # Replace any filter equal to "all" or "global" with wildcard "*"
+    def _build_key_patterns(self) -> list[str]:
+        # Replace "all"/"global" with wildcard for area; wildcard quest_mode if "all"
         area = "*" if self.area.lower() in ["all", "global"] else self.area
-        quest_mode = "*" if self.quest_mode.lower() == "all" else self.quest_mode
+        quest_mode = "*" if self.quest_mode == "all" else self.quest_mode
 
-        # For field_details, which in this case is used for filtering the quest type (the first field),
-        # if it is "all" we match any field_details in the 6-field string.
-        # Otherwise, we require the key to start with the given quest type, followed by five colon-separated wildcards.
-        if self.field_details.lower() == "all":
-            field_details_pattern = "*:*:*:*:*:*"
+        # field_details pattern: if quest_types is None -> "*:*:*:*:*:*"
+        # else -> for each quest_type -> "{quest_type}:*:*:*:*:*"
+        if self.quest_types is None:
+            fd_patterns = ["*:*:*:*:*:*"]
         else:
-            field_details_pattern = f"{self.field_details}:*:*:*:*:*"
+            fd_patterns = [f"{qt}:*:*:*:*:*" for qt in self.quest_types]
 
-        # New key format: ts:quests_total:{quest_mode}:{area}:{field_details_pattern}
-        pattern = f"ts:quests_total:{quest_mode}:{area}:{field_details_pattern}"
-        logger.debug(f"Built 🔎 Quest 🔑 key pattern: {pattern}")
-        return pattern
+        patterns = [f"ts:quests_total:{quest_mode}:{area}:{fd}" for fd in fd_patterns]
+        logger.debug(f"Built 🔎 Quest {len(patterns)} key pattern(s): {patterns[:5]}{'...' if len(patterns)>5 else ''}")
+        return patterns
 
     async def quest_retrieve_timeseries(self) -> Dict[str, Any]:
         client = await redis_manager.check_redis_connection()
@@ -156,84 +168,95 @@ class QuestTimeSeries:
                     return [convert_redis_result(item) for item in res]
             return res
 
+        # accumulators to merge across multiple patterns
+        acc_sum: Dict[str, int] = {}
+        acc_grouped: Dict[str, Dict[str, int]] = {}
+        acc_surged: Dict[str, Dict[str, int]] = {}
+
         try:
-            pattern = self._build_key_pattern()
             start_ts = int(self.start.timestamp())
-            end_ts = int(self.end.timestamp())
-            logger.debug(f"🔎 Quest ⏱️ Time range for query: start_ts={start_ts}, end_ts={end_ts}")
+            end_ts   = int(self.end.timestamp())
+            logger.debug(f"🔎 Quest ⏱️ Time range: start_ts={start_ts}, end_ts={end_ts}")
 
             request_start = time.monotonic()
-            script_sha = await self._load_script(client)
-            logger.debug("Executing 🔎 Quest Lua script with evalsha...")
-            raw_data = await client.evalsha(
-                script_sha,
-                0,
-                pattern,
-                str(start_ts),
-                str(end_ts),
-                self.mode
-            )
+            sha = await self._load_script(client)
 
-            logger.debug(f"Raw 🔎 Quest data from Lua script (pre-conversion): {raw_data}")
-            raw_data = convert_redis_result(raw_data)
-            logger.debug(f"Converted 🔎 Quest raw data: {raw_data}")
+            for pattern in self._build_key_patterns():
+                raw = await client.evalsha(
+                    sha,
+                    0,
+                    pattern,
+                    str(start_ts),
+                    str(end_ts),
+                    self.mode
+                )
+                data = convert_redis_result(raw)
 
-            formatted_data = {}
+                if self.mode == "sum":
+                    # data: { full_key: count, ... }
+                    for k, v in data.items():
+                        acc_sum[k] = acc_sum.get(k, 0) + int(v)
+                elif self.mode == "grouped":
+                    # data: { full_key: { ts_bucket: count, ... }, ... }
+                    for k, groups in data.items():
+                        bucket = acc_grouped.setdefault(k, {})
+                        # groups might be list -> convert to dict
+                        if isinstance(groups, list):
+                            groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
+                        for tb, cnt in groups.items():
+                            bucket[tb] = bucket.get(tb, 0) + int(cnt)
+                elif self.mode == "surged":
+                    # data: { full_key: { hour: count, ... }, ... }
+                    for k, hours in data.items():
+                        bucket = acc_surged.setdefault(k, {})
+                        if isinstance(hours, list):
+                            hours = {hours[i]: hours[i+1] for i in range(0, len(hours), 2)}
+                        for h, cnt in hours.items():
+                            bucket[h] = bucket.get(h, 0) + int(cnt)
+
+            # Final formatting
             if self.mode == "sum":
-                # If the area filter is "all" or "global", group quest totals per area
                 if self.area.lower() in ["all", "global"]:
-                    area_totals = {}
+                    area_totals: Dict[str, int] = {}
                     quest_grand_total = 0
-                    for key, v in raw_data.items():
-                        try:
-                            # Our key format: ts:quests_total:{quest_mode}:{area}:{field_details}
-                            parts = key.split(":")
-                            # The area is at index 3
-                            key_area = parts[3] if len(parts) > 3 else "unknown"
-                        except Exception:
-                            key_area = "unknown"
-                        count = int(v)
-                        area_totals[key_area] = area_totals.get(key_area, 0) + count
-                        quest_grand_total += count
-                    # Retrieve cached pokestops from global_state (which is periodically updated)
+                    for key, v in acc_sum.items():
+                        parts = key.split(":")
+                        key_area = parts[3] if len(parts) > 3 else "unknown"
+                        val = int(v)
+                        area_totals[key_area] = area_totals.get(key_area, 0) + val
+                        quest_grand_total += val
                     pokestops_data = global_state.cached_pokestops or {"areas": {}, "pokestop_grand_total": 0}
-                    formatted_data = {
+                    formatted = {
                         "areas": area_totals,
                         "quest_grand_total": quest_grand_total,
-                        "total pokestops": pokestops_data
+                        "total pokestops": pokestops_data,
                     }
-                    logger.debug(f"Formatted 🔎 Quest 'sum' data (by area): {formatted_data}")
                 else:
-                    # Otherwise, compute a single total sum.
-                    total_sum = sum(int(v) for v in raw_data.values())
-                    formatted_data = {"total": total_sum}
-                    logger.debug(f"Formatted 🔎 Quest 'sum' data (total): {formatted_data}")
+                    total_sum = sum(int(v) for v in acc_sum.values())
+                    formatted = {"total": total_sum}
+
             elif self.mode == "grouped":
-                # Detailed breakdown per key remains unchanged.
-                formatted_data = {}
-                for k, groups in raw_data.items():
-                    if isinstance(groups, list):
-                        groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                    ordered_groups = dict(sorted(groups.items(), key=lambda x: int(x[0])))
-                    formatted_data[k] = ordered_groups
-                formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
-                logger.debug(f"Formatted 🔎 Quest 'grouped' data: {formatted_data}")
+                formatted = {}
+                for k, groups in acc_grouped.items():
+                    ordered = dict(sorted(groups.items(), key=lambda x: int(x[0])))
+                    formatted[k] = ordered
+                formatted = dict(sorted(formatted.items(), key=lambda item: item[0]))
+
             elif self.mode == "surged":
-                formatted_data = {}
-                for k, inner in raw_data.items():
-                    if isinstance(inner, list):
-                        hours = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
-                    else:
-                        hours = inner
-                    formatted_data[k] = dict(sorted({f"hour {int(h)}": v for h, v in hours.items()}.items(), key=lambda x: int(x[0].split()[1])))
-                formatted_data = dict(sorted(formatted_data.items(), key=lambda item: item[0]))
-                logger.debug(f"Formatted 🔎 Quest 'surged' data: {formatted_data}")
+                formatted = {}
+                for k, hours in acc_surged.items():
+                    labeled = {f"hour {int(h)}": v for h, v in hours.items()}
+                    formatted[k] = dict(sorted(labeled.items(), key=lambda x: int(x[0].split()[1])))
+                formatted = dict(sorted(formatted.items(), key=lambda item: item[0]))
 
-            request_end = time.monotonic()
-            elapsed_time = request_end - request_start
-            logger.info(f"🔎 Quest retrieval execution took ⏱️ {elapsed_time:.3f} seconds")
+            else:
+                formatted = {}
 
-            return {"mode": self.mode, "data": formatted_data}
+            elapsed = time.monotonic() - request_start
+            logger.info(f"🔎 Quest retrieval execution took ⏱️ {elapsed:.3f} seconds")
+
+            return {"mode": self.mode, "data": formatted}
+
         except Exception as e:
             logger.error(f"❌ 🔎 Quest Lua script execution failed: {e}", exc_info=True)
             return {"mode": self.mode, "data": {}}

@@ -2,7 +2,7 @@ import asyncio
 import re
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, Iterable
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 try:
@@ -105,20 +105,36 @@ end
 """
 
 class PokemonTimeSeries:
-    def __init__(self, area: str, start: datetime, end: datetime, mode: str = "sum",
-                 pokemon_id: str = "all", form: str = "all"):
-        # Ensure that the provided area exactly matches the stored key convention.
+    def __init__(
+        self,
+        area: str,
+        start: datetime,
+        end: datetime,
+        mode: str = "sum",
+        pokemon_id: Union[str, Iterable[str], None] = "all",
+        form: Union[str, Iterable[str], None] = "all",
+    ):
         self.area = area
         self.start = start
         self.end = end
         self.mode = mode.lower()
-        self.pokemon_id = pokemon_id
-        self.form = form
         self.script_sha = None
 
-        logger.info(f"👻 Initialized PokemonTimeSeries with area: {self.area}, "
-                     f"▶️ Start: {self.start}, ⏸️ End: {self.end}, Mode: {self.mode}, "
-                     f"pokemon_id: {self.pokemon_id}, form: {self.form}")
+        def _norm(x):
+            if x is None or (isinstance(x, str) and x.lower() == "all"):
+                return None
+            if isinstance(x, str):
+                return {x}
+            return set(map(str, x))
+
+        self.pokemon_ids = _norm(pokemon_id)
+        self.forms       = _norm(form)
+
+        logger.info(
+            f"👻 Initialized PokemonTimeSeries area={self.area} "
+            f"start={self.start} end={self.end} mode={self.mode} "
+            f"pokemon_ids={self.pokemon_ids or 'ALL'} forms={self.forms or 'ALL'}"
+        )
 
     async def _load_script(self, client):
         """Load Lua script into Redis if not already cached"""
@@ -146,90 +162,88 @@ class PokemonTimeSeries:
                     return [convert_redis_result(item) for item in res]
             return res
 
+        # accumulators
+        acc_sum: Dict[str, int] = {}
+        acc_grouped: Dict[str, Dict[str, int]] = {}
+        acc_surged: Dict[str, Dict[str, int]] = {}
+
+        start_ts = int(self.start.timestamp())
+        end_ts   = int(self.end.timestamp())
+
         try:
-            # Build the key pattern based on filters.
-            pattern = self._build_key_pattern()
-            logger.debug(f"Built 👻 Pokémon 🔑 Key pattern: {pattern}")
+            sha = await self._load_script(client)
+            for pattern in self._build_key_patterns():
+                raw = await client.evalsha(
+                    sha, 0,
+                    pattern,
+                    str(start_ts),
+                    str(end_ts),
+                    self.mode
+                )
+                data = convert_redis_result(raw)
 
-            # Convert datetime objects to Unix timestamps.
-            start_ts = int(self.start.timestamp())
-            end_ts = int(self.end.timestamp())
-            logger.debug(f"👻 Time range ⏱️ for query: start_ts={start_ts}, end_ts={end_ts}")
+                # Merge into accumulators
+                if self.mode == "sum":
+                    for metric, cnt in data.items():
+                        acc_sum[metric] = acc_sum.get(metric, 0) + int(cnt)
+                elif self.mode == "grouped":
+                    # data: { metric: { "pid:form": count, ... } }
+                    for metric, groups in data.items():
+                        bucket = acc_grouped.setdefault(metric, {})
+                        for k, v in groups.items():
+                            bucket[k] = bucket.get(k, 0) + int(v)
+                elif self.mode == "surged":
+                    # data: { metric: { hour_str: count, ... } }  (hours are "0".."23")
+                    for metric, hours in data.items():
+                        bucket = acc_surged.setdefault(metric, {})
+                        for h, v in hours.items():
+                            bucket[h] = bucket.get(h, 0) + int(v)
 
-            # Start timing right before loading/executing the script
-            request_start = time.monotonic()
-
-            # Load and execute Lua script.
-            script_sha = await self._load_script(client)
-            logger.debug("Executing 👻 Pokémon Lua script with evalsha...")
-            raw_data = await client.evalsha(
-                script_sha,
-                0,  # No keys, only ARGV
-                pattern,
-                str(start_ts),
-                str(end_ts),
-                self.mode
-            )
-            logger.debug(f"Raw 👻 Pokémon data from Lua script (pre-conversion): {raw_data}")
-
-            raw_data = convert_redis_result(raw_data)
-            logger.debug(f"Converted 👻 Pokémon raw data: {raw_data}")
-
-            # Format results based on mode.
-            formatted_data = {}
+            # Final formatting
             if self.mode == "sum":
-                formatted_data = {k: v for k, v in raw_data.items()}
-                logger.debug(f"Formatted 👻 Pokémon 'sum' data: {formatted_data}")
+                formatted = dict(sorted(acc_sum.items()))
             elif self.mode == "grouped":
-                for metric, groups in raw_data.items():
-                    formatted_data[metric] = dict(
-                        sorted(
-                            groups.items(),
-                            key=lambda x: (int(x[0].split(':')[0]), int(x[0].split(':')[1]))
-                        )
-                    )
-                logger.debug(f"Formatted 👻 Pokémon 'grouped' data: {formatted_data}")
+                formatted = {}
+                for metric, groups in acc_grouped.items():
+                    # sort by pid then form numerically if possible
+                    def _key(x):
+                        pid, frm = x.split(":")
+                        try:
+                            return (int(pid), int(frm))
+                        except:
+                            return (pid, frm)
+                    formatted[metric] = dict(sorted(groups.items(), key=lambda kv: _key(kv[0])))
             elif self.mode == "surged":
-                formatted_data = {}
-                # raw_data is expected to be a dict mapping metric -> flat list [hour, count, hour, count, ...]
-                for metric, inner in raw_data.items():
-                    if isinstance(inner, list):
-                        # Convert the flat list into a dictionary: { hour: count, ... }
-                        hours = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
-                    else:
-                        hours = inner
-                    # Re-label each hour (if desired) and sort by hour (numeric order)
-                    formatted_data[metric] = dict(
-                        sorted(
-                            {f"hour {int(h)}": v for h, v in hours.items()}.items(),
-                            key=lambda x: int(x[0].split()[1])
-                        )
-                    )
-                logger.debug(f"Formatted 👻 Pokémon 'surged' data: {formatted_data}")
+                formatted = {}
+                for metric, hours in acc_surged.items():
+                    # label "hour N" and sort numerically by N
+                    labeled = {f"hour {int(h)}": v for h, v in hours.items()}
+                    formatted[metric] = dict(sorted(labeled.items(), key=lambda kv: int(kv[0].split()[1])))
+            else:
+                formatted = {}
 
-            # End timing after script execution
-            request_end = time.monotonic()
-            elapsed_time = request_end - request_start
-            logger.info(f"👻 Pokémon retrieval execution took ⏱️ {elapsed_time:.3f} seconds")
-
-            logger.debug(f"Finished processing timeseries data for pattern: {pattern}")
-            return {"mode": self.mode, "data": formatted_data}
+            return {"mode": self.mode, "data": formatted}
 
         except Exception as e:
             logger.error(f"❌ Lua Pokémon 👻 script execution failed: {e}")
             return {"mode": self.mode, "data": {}}
 
-    def _build_key_pattern(self) -> str:
+    def _build_key_patterns(self) -> list[str]:
         """
-        Build Redis key pattern based on filters.
-        When area is not "all", the pattern is built from area, pokemon_id, and form.
+        Build a list of Redis MATCH patterns for SCAN.
+        Key format: ts:pokemon:{metric}:{area}:{pokemon_id}:{form}
+        We always wildcard metric ('*'). For pokemon_id/form we expand cartesian
+        product if sets are provided; otherwise wildcard that slot.
         """
-        # For the metric we always want to match all, so it's always "*"
         metric = "*"
-        # For each filter, if the user set it to "all" or "global", substitute with the wildcard "*"
         area = "*" if self.area.lower() in ["all", "global"] else self.area
-        pokemon_id = "*" if self.pokemon_id.lower() in ["all"] else self.pokemon_id
-        form = "*" if self.form.lower() in ["all"] else self.form
-        pattern = f"ts:pokemon:{metric}:{area}:{pokemon_id}:{form}"
-        logger.debug(f"Built key pattern: {pattern}")
-        return pattern
+
+        pids  = list(self.pokemon_ids) if self.pokemon_ids is not None else ["*"]
+        forms = list(self.forms)       if self.forms is not None       else ["*"]
+
+        patterns = []
+        for pid in pids:
+            for frm in forms:
+                patterns.append(f"ts:pokemon:{metric}:{area}:{pid}:{frm}")
+        logger.debug(f"Built {len(patterns)} key pattern(s): {patterns[:5]}{'...' if len(patterns)>5 else ''}")
+        return patterns
