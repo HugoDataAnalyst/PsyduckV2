@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
+from sql.tasks.partition_ensurer import PokemonIVDailyPartitionEnsurer
 from sql.tasks.golbat_pokestops import GolbatSQLPokestops
 from server_fastapi.routes import data_api, webhook_router
 from server_fastapi import global_state
@@ -18,7 +19,7 @@ from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
 from tzlocal import get_localzone
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 redis_manager = RedisManager()
@@ -96,9 +97,17 @@ async def lifespan(app: FastAPI):
     # Initialize and start buffer flushers
     pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)
     shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)
+    partition_ensurer = PokemonIVDailyPartitionEnsurer(
+        ensure_interval=86400,
+        days_back=2,
+        days_forward=30,
+        table="pokemon_iv_daily_events",
+        column="day_date",
+    )
 
     # Start the flusher tasks
     if AppConfig.store_sql_pokemon_aggregation:
+        await partition_ensurer.start()
         await pokemon_buffer_flusher.start()
     if AppConfig.store_sql_pokemon_shiny:
         await shiny_rate_buffer_flusher.start()
@@ -132,6 +141,7 @@ async def lifespan(app: FastAPI):
 
     # Stop the flusher tasks
     if AppConfig.store_sql_pokemon_aggregation:
+        await partition_ensurer.stop()
         await pokemon_buffer_flusher.stop()
     if AppConfig.store_sql_pokemon_shiny:
         await shiny_rate_buffer_flusher.stop()

@@ -14,7 +14,7 @@ class PokemonIVBufferFlusher:
         """Periodically flush the Pokémon IV buffer."""
         self._running = True
         await asyncio.sleep(5)  # Initial delay
-        logger.info(f"⏳ Starting Pokémon IV aggregated buffer flusher every {self.flush_interval}s")
+        logger.info(f"⏳ Starting Pokémon IV events buffer flusher every {self.flush_interval}s")
 
         cycle = 0
         while self._running:
@@ -38,9 +38,9 @@ class PokemonIVBufferFlusher:
                 duration = time.perf_counter() - start
 
                 if added:
-                    logger.success(f"👻 Pokémon heatmap flush ({mode}): +{added} rows in {duration:.2f}s ⏱️")
+                    logger.success(f"👻 Pokémon IV Events flush ({mode}): +{added} rows in {duration:.2f}s ⏱️")
                 else:
-                    logger.info(f"👻 No new Pokémon heatmap rows to flush ({mode}). Took {duration:.2f}s ⏱️")
+                    logger.info(f"👻 No new Pokémon IV events rows to flush ({mode}). Took {duration:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Pokémon IV buffer flusher loop was cancelled.")

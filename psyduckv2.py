@@ -5,7 +5,6 @@ import subprocess
 import config as AppConfig
 from pathlib import Path
 from sql.connect_db import init_db, close_db
-from sql.utils.create_partitions import ensure_iv_partitions
 from alembic.config import Config as AlembicConfig
 from alembic import command as alembic_command
 from utils.logger import setup_logging, logger
@@ -65,19 +64,8 @@ async def start_servers():
 
 async def main():
     apply_migrations()  # Apply any new migrations
-    await init_db()  # Initialize DB (Automatically creates tables if needed)
-    """
-    try:
-        back = 24
-        forward = 24
-        summary = await ensure_iv_partitions(back, forward)
-        logger.info(
-            "🧾 Partition ensure summary — added=%d, skipped=%d",
-            len(summary.get("added", [])), len(summary.get("skipped", []))
-        )
-    except Exception as e:
-        logger.error(f"⚠️ ensure_iv_partitions failed: {e}", exc_info=True)
-    """
+    await init_db()  # Initialize DB
+
     logger.info("✅ Psyduck is ready to process data!")
 
     # Start both API servers concurrently
