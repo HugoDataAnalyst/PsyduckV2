@@ -7,11 +7,17 @@ import config as AppConfig
 from datetime import datetime, timedelta
 from utils.logger import logger
 from my_redis.connect_redis import RedisManager
-from sql.models import AreaNames
+from sql.connect_db import execute, fetch_one
+from dataclasses import dataclass
 from server_fastapi import global_state
 from timezonefinder import TimezoneFinder
 from shapely.geometry import Polygon
 import pytz
+
+@dataclass
+class _AreaObj:
+    id: int
+    name: str
 
 class KojiGeofences:
     """Koji Geofences class.
@@ -33,6 +39,31 @@ class KojiGeofences:
             cls._instance.refresh_interval = refresh_interval
         return cls._instance
 
+
+    @staticmethod
+    async def _get_or_create_area(area_name: str) -> tuple[_AreaObj, bool]:
+        """
+        Ensure an area exists and return (area_obj, created).
+        - area_obj is a tiny object with .id and .name
+        - created is True if we inserted, False if it existed
+        """
+        # Normalize whitespace (collation handles case insensitivity)
+        name = " ".join(area_name.split())
+
+        # 1) Fast path: try read
+        row = await fetch_one("SELECT id FROM area_names WHERE name = %s", (name,))
+        if row and "id" in row:
+            return _AreaObj(id=int(row["id"]), name=name), False
+
+        # 2) Insert if missing (race-safe); INSERT IGNORE avoids dup errors
+        ins = await execute("INSERT IGNORE INTO area_names (name) VALUES (%s)", (name,))
+        created = ins.rowcount == 1  # 1 if we actually inserted, 0 if another worker raced us
+
+        # 3) Fetch id (now guaranteed to exist)
+        row2 = await fetch_one("SELECT id FROM area_names WHERE name = %s", (name,))
+        if not row2 or "id" not in row2:
+            raise RuntimeError(f"Failed to ensure area '{name}' in area_names.")
+        return _AreaObj(id=int(row2["id"]), name=name), created
 
     @classmethod
     async def get_redis_client(cls):
@@ -69,7 +100,7 @@ class KojiGeofences:
                     if geometry.get("type") == "Polygon":
                         area_name = properties.get("name", "Unknown")
                         # Check if the area exists; if not, insert it.
-                        area_obj, created = await AreaNames.get_or_create(name=area_name)
+                        area_obj, created = await cls._get_or_create_area(area_name)
                         if created:
                             logger.debug(f"✅ Created new area: {area_name}")
                         else:
