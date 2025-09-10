@@ -1,221 +1,305 @@
 import asyncio
 import random
 import aiomysql
+from sql.connect_db import transaction
 from datetime import datetime
 import time
 from utils.logger import logger
 import config as AppConfig
 
-async def get_mysql_pool():
-    pool = await aiomysql.create_pool(
-        host=AppConfig.db_host,
-        port=AppConfig.db_port,
-        user=AppConfig.db_user,
-        password=AppConfig.db_password,
-        db=AppConfig.db_name,
-        autocommit=True,
-        loop=asyncio.get_running_loop()
-    )
-    return pool
+def _to_int(v, default=0):
+    try:
+        if v is None:
+            return default
+        if isinstance(v, str) and not v.strip():
+            return default
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+def _to_float(v, default=None):
+    try:
+        if v is None:
+            return default
+        if isinstance(v, str) and not v.strip():
+            return default
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+def _form_str(v) -> str:
+    if v is None:
+        return ""
+    s = str(v).strip()
+    try:
+        s = s.encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        pass
+    return s[:15]  # enforce column length
+
+
 
 class QuestSQLProcessor:
+    @staticmethod
+    def _parse_row(d: dict):
+        """
+        Normalize one quest payload into a tuple for tmp_aq or return None if invalid.
+
+        tmp_aq layout:
+          (pokestop, pokestop_name, latitude, longitude,
+           area_id, month_year,
+           mode,            -- 0=normal, 1=ar
+           task_type,       -- ar_type or normal_type based on mode
+           reward_kind,     -- 0=item, 1=pokemon
+           item_id, item_amount,
+           poke_id, poke_form,
+           inc)
+        """
+        pokestop = str(d.get("pokestop_id") or "").strip()
+        if not pokestop:
+            return None
+
+        lat = _to_float(d.get("latitude"))
+        lon = _to_float(d.get("longitude"))
+        if lat is None or lon is None:
+            return None
+
+        area_id = _to_int(d.get("area_id"), 0)
+        if area_id == 0:
+            return None
+
+        ts = _to_int(d.get("first_seen"), 0)
+        if ts <= 0:
+            return None
+        month_year = int(datetime.fromtimestamp(ts).strftime("%y%m"))
+
+        name = (d.get("pokestop_name") or "").strip()
+        inc  = _to_int(d.get("increment"), 1)
+        if inc <= 0:
+            inc = 1
+
+        # Determine mode (AR vs NORMAL)
+        ar_type     = _to_int(d.get("ar_type"), 0)
+        normal_type = _to_int(d.get("normal_type"), 0)
+
+        has_any_ar_reward = (
+            _to_int(d.get("reward_ar_type"), 0) > 0 or
+            _to_int(d.get("reward_ar_item_id"), 0) > 0 or
+            _to_int(d.get("reward_ar_item_amount"), 0) > 0 or
+            _to_int(d.get("reward_ar_poke_id"), 0) > 0 or
+            bool(_form_str(d.get("reward_ar_poke_form")))
+        )
+
+        if ar_type > 0 or has_any_ar_reward:
+            mode = 1
+            task_type = ar_type
+        else:
+            mode = 0
+            task_type = normal_type
+
+        if task_type == 0:
+            # no valid task
+            return None
+
+        # Determine reward kind + values
+        poke_id   = _to_int(d.get("reward_ar_poke_id" if mode == 1 else "reward_normal_poke_id"), 0)
+        poke_form = _form_str(d.get("reward_ar_poke_form" if mode == 1 else "reward_normal_poke_form"))
+
+        item_id     = _to_int(d.get("reward_ar_item_id" if mode == 1 else "reward_normal_item_id"), 0)
+        item_amount = _to_int(d.get("reward_ar_item_amount" if mode == 1 else "reward_normal_item_amount"), 0)
+
+        if poke_id > 0:
+            reward_kind = 1
+            # ensure consistency
+            item_id = 0
+            item_amount = 0
+            if not poke_form:
+                poke_form = "0"
+        elif item_id > 0:
+            reward_kind = 0
+            poke_id = 0
+            poke_form = ""
+            if item_amount <= 0:
+                item_amount = 1
+        else:
+            # no usable reward
+            return None
+
+        return (
+            pokestop, name, lat, lon,
+            area_id, month_year,
+            mode, task_type,
+            reward_kind,
+            item_id, item_amount,
+            poke_id, poke_form,
+            inc
+        )
+
     @classmethod
-    async def upsert_aggregated_quest_from_filtered(cls, filtered_data, increment: int = 1, pool=None):
-        """
-        Upsert a single quest with robust session settings and retries.
-        Keeps pokestops fresh and bumps aggregated_quests.total_count.
-        """
-        created_pool = False
-        try:
-            if pool is None:
-                pool = await get_mysql_pool()
-                created_pool = True
-
-            # --- Validate required fields ---
-            pokestop_id = filtered_data.get('pokestop_id')
-            if not pokestop_id:
-                logger.warning("⚠️ Missing pokestop_id in quest data")
-                return 0
-
-            # Coordinates (required for pokestops, but don't crash on weird values)
-            try:
-                latitude = float(filtered_data.get('latitude'))
-                longitude = float(filtered_data.get('longitude'))
-            except (TypeError, ValueError):
-                logger.warning(f"⚠️ Invalid coordinates for pokestop {pokestop_id}")
-                return 0
-
-            area_id = filtered_data.get('area_id')
-            if area_id is None:
-                logger.warning(f"⚠️ Missing area_id for pokestop {pokestop_id}")
-                return 0
-
-            # month_year from first_seen
-            try:
-                first_seen = int(filtered_data.get('first_seen'))
-                dt = datetime.fromtimestamp(first_seen)
-                month_year = int(dt.strftime("%y%m"))
-            except Exception:
-                logger.warning(f"⚠️ Invalid first_seen timestamp for pokestop {pokestop_id}")
-                return 0
-
-            inc = int(increment)
-
-            # --- Execute with retry ---
-            start_time = time.perf_counter()
-            success = await cls._upsert_quest_with_retry(
-                pool=pool,
-                pokestop_id=str(pokestop_id),
-                pokestop_name=str(filtered_data.get('pokestop_name') or ""),
-                latitude=latitude,
-                longitude=longitude,
-                ar_type=filtered_data.get('ar_type', 0),
-                normal_type=filtered_data.get('normal_type', 0),
-                reward_ar_type=filtered_data.get('reward_ar_type', 0),
-                reward_normal_type=filtered_data.get('reward_normal_type', 0),
-                reward_ar_item_id=filtered_data.get('reward_ar_item_id', 0),
-                reward_ar_item_amount=filtered_data.get('reward_ar_item_amount', 0),
-                reward_normal_item_id=filtered_data.get('reward_normal_item_id', 0),
-                reward_normal_item_amount=filtered_data.get('reward_normal_item_amount', 0),
-                reward_ar_poke_id=filtered_data.get('reward_ar_poke_id', 0),
-                reward_ar_poke_form=str(filtered_data.get('reward_ar_poke_form') or ""),
-                reward_normal_poke_id=filtered_data.get('reward_normal_poke_id', 0),
-                reward_normal_poke_form=str(filtered_data.get('reward_normal_poke_form') or ""),
-                area_id=int(area_id),
-                month_year=month_year,
-                increment=inc,
-                max_retries=10
-            )
-            elapsed = time.perf_counter() - start_time
-
-            if success:
-                logger.debug(f"✅ Processed quest for pokestop {pokestop_id} in area {area_id} in {elapsed:.4f}s")
-                return 1
+    async def bulk_upsert_aggregated_quests_batch(cls, data_batch: list[dict], max_retries: int = 8) -> int:
+        rows = []
+        dropped = 0
+        for d in data_batch:
+            r = cls._parse_row(d)
+            if r is None:
+                dropped += 1
             else:
-                logger.warning(f"⚠️ Failed to process quest for pokestop {pokestop_id} after {elapsed:.4f}s")
-                return 0
+                rows.append(r)
 
-        except Exception as e:
-            logger.error(f"❌ Unexpected error processing quest for pokestop {filtered_data.get('pokestop_id')}: {e}", exc_info=True)
+        if dropped:
+            logger.debug(f"🧪 quests: parsed={len(rows)}, dropped={dropped}")
+        if not rows:
             return 0
-        finally:
-            if created_pool and pool is not None:
-                pool.close()
-                await pool.wait_closed()
 
-    @classmethod
-    async def _upsert_quest_with_retry(cls, pool, **q):
-        """
-        Do the two-step upsert inside a short, atomic transaction with good session knobs.
-        Retries on 1213 (deadlock) and 1205 (lock wait timeout).
-        """
-        max_retries = int(q.get('max_retries', 8))
-        inc = int(q.get('increment', 1))
+        BATCH = 5000
+        attempt = 0
 
-        for attempt in range(max_retries):
+        while attempt < max_retries:
             try:
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        # Session tuning: keep waits short and reduce gap locks
-                        await cur.execute("SET SESSION innodb_lock_wait_timeout = 10")
-                        await cur.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
-                        await cur.execute("SET autocommit = 0")
+                async with transaction(dict_cursor=False, isolation="READ COMMITTED", lock_wait_timeout=10) as cur:
+                    # 1) temp table
+                    await cur.execute("""
+                        CREATE TEMPORARY TABLE IF NOT EXISTS tmp_aq (
+                          pokestop       VARCHAR(50)  NOT NULL,
+                          pokestop_name  VARCHAR(255) NOT NULL,
+                          latitude       DOUBLE NOT NULL,
+                          longitude      DOUBLE NOT NULL,
 
-                        # ---- Step 1: upsert pokestop (id/name/coords) ----
-                        pokestop_sql = """
-                            INSERT INTO pokestops (pokestop, pokestop_name, latitude, longitude)
-                            VALUES (%s, %s, %s, %s)
-                            ON DUPLICATE KEY UPDATE
-                                pokestop_name = VALUES(pokestop_name),
-                                latitude     = VALUES(latitude),
-                                longitude    = VALUES(longitude)
-                        """
-                        await cur.execute(
-                            pokestop_sql,
-                            (q['pokestop_id'], q['pokestop_name'], q['latitude'], q['longitude'])
+                          area_id        SMALLINT NOT NULL,
+                          month_year     SMALLINT NOT NULL,
+
+                          mode           TINYINT  NOT NULL,  -- 0=normal,1=ar
+                          task_type      SMALLINT NOT NULL,
+
+                          reward_kind    TINYINT  NOT NULL,  -- 0=item,1=pokemon
+                          item_id        SMALLINT NOT NULL,
+                          item_amount    SMALLINT NOT NULL,
+                          poke_id        SMALLINT NOT NULL,
+                          poke_form      VARCHAR(15) NOT NULL,
+
+                          inc            INT      NOT NULL,
+
+                          INDEX idx_tmp_aq_pokestop (pokestop),
+                          INDEX idx_tmp_aq_month    (month_year)
+                        ) ENGINE=InnoDB
+                    """)
+
+                    # 2) bulk insert
+                    placeholders = "(" + ",".join(["%s"] * 14) + ")"
+                    inserted_tmp = 0
+                    for i in range(0, len(rows), BATCH):
+                        chunk = rows[i:i+BATCH]
+                        flat = tuple(v for row in chunk for v in row)
+                        values = ",".join([placeholders] * len(chunk))
+                        await cur.execute(f"INSERT INTO tmp_aq VALUES {values}", flat)
+                        inserted_tmp += len(chunk)
+
+                    # 3) pokestops upsert (natural PK= pokestop)
+                    await cur.execute("""
+                        INSERT IGNORE INTO pokestops (pokestop, pokestop_name, latitude, longitude)
+                        SELECT
+                          t.pokestop,
+                          ANY_VALUE(t.pokestop_name),
+                          ANY_VALUE(t.latitude),
+                          ANY_VALUE(t.longitude)
+                        FROM tmp_aq t
+                        GROUP BY t.pokestop
+                    """)
+                    new_ps = cur.rowcount
+
+                    await cur.execute("""
+                        UPDATE pokestops p
+                        JOIN (
+                          SELECT
+                            t.pokestop,
+                            ANY_VALUE(t.pokestop_name) AS pokestop_name,
+                            ANY_VALUE(t.latitude)      AS latitude,
+                            ANY_VALUE(t.longitude)     AS longitude
+                          FROM tmp_aq t
+                          GROUP BY t.pokestop
+                        ) x ON x.pokestop = p.pokestop
+                        SET
+                          p.pokestop_name = x.pokestop_name,
+                          p.latitude      = x.latitude,
+                          p.longitude     = x.longitude
+                        WHERE
+                          p.pokestop_name <> x.pokestop_name
+                          OR p.latitude  <> x.latitude
+                          OR p.longitude <> x.longitude
+                    """)
+                    upd_ps = cur.rowcount
+
+                    # 4a) items aggregate
+                    await cur.execute("""
+                        INSERT INTO aggregated_quests_item (
+                          pokestop, area_id, month_year, mode, task_type,
+                          item_id, item_amount, total_count
                         )
+                        SELECT
+                          t.pokestop, t.area_id, t.month_year, t.mode, t.task_type,
+                          t.item_id, t.item_amount,
+                          SUM(t.inc) AS total_count
+                        FROM tmp_aq t
+                        WHERE t.reward_kind = 0
+                        GROUP BY
+                          t.pokestop, t.area_id, t.month_year, t.mode, t.task_type,
+                          t.item_id, t.item_amount
+                        ON DUPLICATE KEY UPDATE
+                          total_count = total_count + VALUES(total_count)
+                    """)
+                    agg_items_rc = cur.rowcount
 
-                        # ---- Step 2: bump aggregated_quests via SELECT p.id ----
-                        quest_sql = """
-                            INSERT INTO aggregated_quests (
-                                pokestop_id,
-                                ar_type, normal_type,
-                                reward_ar_type,   reward_normal_type,
-                                reward_ar_item_id,    reward_ar_item_amount,
-                                reward_normal_item_id, reward_normal_item_amount,
-                                reward_ar_poke_id,     reward_ar_poke_form,
-                                reward_normal_poke_id, reward_normal_poke_form,
-                                area_id, month_year, total_count
-                            )
-                            SELECT
-                                p.id,
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, ''),
-                                COALESCE(%s, 0),
-                                COALESCE(%s, ''),
-                                %s,
-                                %s,
-                                %s
-                            FROM pokestops p
-                            WHERE p.pokestop = %s
-                            ON DUPLICATE KEY UPDATE
-                                total_count = total_count + VALUES(total_count)
-                        """
-                        await cur.execute(
-                            quest_sql,
-                            (
-                                q['ar_type'],
-                                q['normal_type'],
-                                q['reward_ar_type'],
-                                q['reward_normal_type'],
-                                q['reward_ar_item_id'],
-                                q['reward_ar_item_amount'],
-                                q['reward_normal_item_id'],
-                                q['reward_normal_item_amount'],
-                                q['reward_ar_poke_id'],
-                                q['reward_ar_poke_form'],
-                                q['reward_normal_poke_id'],
-                                q['reward_normal_poke_form'],
-                                q['area_id'],
-                                q['month_year'],
-                                inc,
-                                q['pokestop_id']
-                            )
+                    # 4b) pokemon aggregate
+                    await cur.execute("""
+                        INSERT INTO aggregated_quests_pokemon (
+                          pokestop, area_id, month_year, mode, task_type,
+                          poke_id, poke_form, total_count
                         )
+                        SELECT
+                          t.pokestop, t.area_id, t.month_year, t.mode, t.task_type,
+                          t.poke_id, t.poke_form,
+                          SUM(t.inc) AS total_count
+                        FROM tmp_aq t
+                        WHERE t.reward_kind = 1
+                        GROUP BY
+                          t.pokestop, t.area_id, t.month_year, t.mode, t.task_type,
+                          t.poke_id, t.poke_form
+                        ON DUPLICATE KEY UPDATE
+                          total_count = total_count + VALUES(total_count)
+                    """)
+                    agg_poke_rc = cur.rowcount
 
-                        # One atomic commit for both steps
-                        await conn.commit()
-                        # restore autocommit for this connection
-                        await cur.execute("SET autocommit = 1")
+                    # cleanup temp
+                    await cur.execute("DROP TEMPORARY TABLE IF EXISTS tmp_aq")
 
-                        # timings (optional but helpful)
-                        logger.debug("⏱️ DB ops done for quest.")
-                        return True
+                    logger.debug(
+                        f"🧮 Quests batch | in={len(rows)} dropped={dropped} tmp={inserted_tmp} "
+                        f"new_ps={new_ps} upd_ps={upd_ps} items_rc={agg_items_rc} poke_rc={agg_poke_rc}"
+                    )
+                    return len(rows)
 
             except aiomysql.Error as e:
                 code = e.args[0] if e.args else None
-                if code in (1213, 1205):  # deadlock or lock wait
-                    # small jittered backoff; grows slightly each attempt
-                    backoff = min(2.0, 0.25 * (attempt + 1)) + random.uniform(0, 0.1)
+                if code in (1213, 1205):
+                    attempt += 1
+                    backoff = min(2.0, 0.25 * attempt) + random.uniform(0, 0.1)
                     logger.warning(
-                        f"⚠️ Quest upsert {('deadlock' if code==1213 else 'lock timeout')}."
-                        f" Retrying {attempt+1}/{max_retries} in {backoff:.2f}s…"
+                        f"⚠️ quests upsert {('deadlock' if code==1213 else 'timeout')}, "
+                        f"retry {attempt}/{max_retries} in {backoff:.2f}s"
                     )
                     await asyncio.sleep(backoff)
                     continue
-                logger.error(f"❌ Database error processing quest: {e}", exc_info=True)
-                return False
+                logger.error(f"❌ DB error (quests bulk): {e}", exc_info=True)
+                return 0
             except Exception as e:
-                logger.error(f"❌ Unexpected error processing quest: {e}", exc_info=True)
-                return False
+                logger.error(f"❌ Unexpected (quests bulk): {e}", exc_info=True)
+                return 0
 
-        logger.error("❌ Max retries reached for quest upsert")
-        return False
+        logger.error("❌ quests bulk: max retries reached")
+        return 0
+
+    @classmethod
+    async def upsert_aggregated_quest_from_filtered(cls, filtered_data: dict, increment: int = 1) -> int:
+        d = dict(filtered_data)
+        d["increment"] = increment
+        n = await cls.bulk_upsert_aggregated_quests_batch([d], max_retries=8)
+        return 1 if n > 0 else 0
