@@ -101,18 +101,17 @@ async def acquire_cursor(dict_cursor: bool = True):
 
 
 @asynccontextmanager
-async def transaction(dict_cursor: bool = True):
-    """
-    Manual transaction (autocommit OFF inside).
-    Usage:
-        async with transaction() as cur:
-            await cur.execute("INSERT ...", params)
-            await cur.execute("UPDATE ...", params)
-    """
+async def transaction(dict_cursor: bool = True, isolation: str | None = None, lock_wait_timeout: int | None = None):
     pool = _require_pool()
     conn = await pool.acquire()
     try:
         await conn.ping(reconnect=True)
+        if isolation:
+            async with conn.cursor() as c:
+                await c.execute(f"SET SESSION TRANSACTION ISOLATION LEVEL {isolation}")
+        if lock_wait_timeout is not None:
+            async with conn.cursor() as c:
+                await c.execute("SET SESSION innodb_lock_wait_timeout = %s", (int(lock_wait_timeout),))
         conn.autocommit = False
         cursor_cls = aiomysql.DictCursor if dict_cursor else aiomysql.Cursor
         async with conn.cursor(cursor_cls) as cur:
@@ -123,7 +122,6 @@ async def transaction(dict_cursor: bool = True):
                 await conn.rollback()
                 raise
     finally:
-        # Restore autocommit and release
         try:
             conn.autocommit = True
         except Exception:
