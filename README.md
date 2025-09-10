@@ -32,6 +32,8 @@ Example:
 
 ## Redis Tuning (Recommended for Production)
 
+`Redis doesn’t run well on VPS setups that rely on virtual memory. For large-scale webhook feeding into PsyduckV2, it needs guaranteed physical RAM to perform reliably.`
+
 To ensure Redis performs well under high load, apply the following **system-level** and **Redis config** optimizations:
 
 ### System-Level Optimizations
