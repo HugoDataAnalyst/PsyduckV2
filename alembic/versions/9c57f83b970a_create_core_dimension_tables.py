@@ -31,12 +31,12 @@ def upgrade():
         mysql_collate="utf8mb4_0900_ai_ci",
     )
 
-    # spawnpoints: natural PK on spawnpoint (BIGINT)
+    # spawnpoints: natural PK on spawnpoint (BIGINT) - store lat/lon as DOUBLE
     op.create_table(
         "spawnpoints",
         sa.Column("spawnpoint", mysql.BIGINT(unsigned=True), primary_key=True, nullable=False),
-        sa.Column("latitude", sa.Float(asdecimal=False), nullable=False),
-        sa.Column("longitude", sa.Float(asdecimal=False), nullable=False),
+        sa.Column("latitude",  mysql.DOUBLE(asdecimal=False), nullable=False),
+        sa.Column("longitude", mysql.DOUBLE(asdecimal=False), nullable=False),
         mysql_engine="InnoDB",
         mysql_charset="utf8mb4",
         mysql_collate="utf8mb4_0900_ai_ci",
@@ -48,8 +48,8 @@ def upgrade():
         "pokestops",
         sa.Column("pokestop", sa.String(50), primary_key=True, nullable=False),
         sa.Column("pokestop_name", sa.String(255), nullable=False),
-        sa.Column("latitude", sa.Float(asdecimal=False), nullable=False),
-        sa.Column("longitude", sa.Float(asdecimal=False), nullable=False),
+        sa.Column("latitude",  mysql.DOUBLE(asdecimal=False), nullable=False),
+        sa.Column("longitude", mysql.DOUBLE(asdecimal=False), nullable=False),
         mysql_engine="InnoDB",
         mysql_charset="utf8mb4",
         mysql_collate="utf8mb4_0900_ai_ci",
@@ -60,8 +60,8 @@ def upgrade():
         "gyms",
         sa.Column("gym", sa.String(50), primary_key=True, nullable=False),
         sa.Column("gym_name", sa.String(255), nullable=False),
-        sa.Column("latitude", sa.Float(asdecimal=False), nullable=False),
-        sa.Column("longitude", sa.Float(asdecimal=False), nullable=False),
+        sa.Column("latitude",  mysql.DOUBLE(asdecimal=False), nullable=False),
+        sa.Column("longitude", mysql.DOUBLE(asdecimal=False), nullable=False),
         mysql_engine="InnoDB",
         mysql_charset="utf8mb4",
         mysql_collate="utf8mb4_0900_ai_ci",
