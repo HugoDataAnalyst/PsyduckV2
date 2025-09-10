@@ -19,8 +19,8 @@
     "flusher": {
         "pokemon_max_threshold": 10000,
         "shiny_max_threshold": 10000,
-        "shiny_flush_interval": 20,
-        "pokemon_flush_interval": 20
+        "shiny_flush_interval": 15,
+        "pokemon_flush_interval": 15
     },
     "geofences": {
         "expire_cache_seconds": 3600,

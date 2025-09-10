@@ -84,11 +84,16 @@ save 60 10000                  # Save if at least 10k keys changed in 1 min
 
 ## Development
 
-Database migrations are handled by Tortoise ORM with Aerich.
+Database migrations are handled by Alembic
 
-After making changes to the models, run the following command to apply the migrations:
+Create an alembic file to create the migration:
 
-```aerich migrate --name "name_your_migration"```
+```alembic revision -m "my_cool_migration_name"```
+
+Run the migration locally before pushing to the repository:
+
+```alembic upgrade head```
+
 
 > This command will create a new migration file in the migrations/models directory.
 > Make sure to commit the migration file to the repository.
