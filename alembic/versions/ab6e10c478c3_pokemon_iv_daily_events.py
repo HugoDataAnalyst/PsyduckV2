@@ -28,18 +28,18 @@ def upgrade():
       level       TINYINT  UNSIGNED NOT NULL,
       area_id     SMALLINT UNSIGNED NOT NULL,
       seen_at     DATETIME NOT NULL,
-      day_date    DATE NOT NULL,                 -- partition key (from seen_at)
+      day_date    DATE NOT NULL,
       PRIMARY KEY (day_date, spawnpoint, seen_at),
       KEY ix_ev_area_day         (area_id, day_date),
       KEY ix_ev_species_day      (pokemon_id, form, day_date),
-      KEY ix_ev_iv_day           (iv, day_date)
+      KEY ix_ev_iv_day           (iv, day_date),
+      KEY ix_ev_lvl_day          (level, day_date),
+      KEY ix_ev_sp_day           (spawnpoint, day_date)
     )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
     PARTITION BY RANGE COLUMNS (day_date) (
-      PARTITION p2025_09_10 VALUES LESS THAN ('2025-09-11'),
-      PARTITION p2025_09_11 VALUES LESS THAN ('2025-09-12'),
       PARTITION pMAX        VALUES LESS THAN (MAXVALUE)
     );
     """)
