@@ -7,6 +7,15 @@ from datetime import datetime
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
 import config as AppConfig
 
+def _safe_int(v, default=None):
+    try:
+        # handle bools, numeric strings, numbers
+        if v is None:
+            return default
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
 class PokemonIVRedisBuffer:
     redis_key = "buffer:agg_pokemon_iv"
     redis_coords_key = "buffer:agg_pokemon_iv:coords"
@@ -330,7 +339,12 @@ class ShinyRateRedisBuffer:
             username = event_data.get("username")
             pokemon_id = event_data.get("pokemon_id")
             form = event_data.get("form", 0)
-            shiny = int(event_data.get("shiny", 0))
+            shiny_raw = event_data.get("shiny", 0)
+            if isinstance(shiny_raw, bool):
+                shiny = 1 if shiny_raw else 0
+            else:
+                shiny_num = _safe_int(shiny_raw, 0)
+                shiny = 1 if shiny_num and shiny_num != 0 else 0
             area_id = event_data.get("area_id")
             first_seen = event_data.get("first_seen")
             if None in [username, pokemon_id, area_id, first_seen]:
