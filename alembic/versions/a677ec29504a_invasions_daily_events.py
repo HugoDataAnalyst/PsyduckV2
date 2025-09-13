@@ -21,29 +21,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade():
     op.execute("""
-    CREATE TABLE IF NOT EXISTS aggregated_invasions (
+    CREATE TABLE IF NOT EXISTS invasions_daily_events (
         pokestop     VARCHAR(50) NOT NULL,
         display_type SMALLINT UNSIGNED NOT NULL,
         `character`  SMALLINT UNSIGNED NOT NULL,
         grunt        SMALLINT UNSIGNED NOT NULL,
         confirmed    TINYINT  UNSIGNED NOT NULL,
         area_id      SMALLINT UNSIGNED NOT NULL,
-        month_year   SMALLINT UNSIGNED NOT NULL,
-        total_count  INT      UNSIGNED NOT NULL DEFAULT 0,
-        PRIMARY KEY (month_year, pokestop, display_type, `character`, grunt, confirmed, area_id),
-        KEY ix_ai_month_area     (month_year, area_id),
-        KEY ix_ai_pokestop_month (pokestop, month_year)
+        seen_at      DATETIME NOT NULL,
+        day_date     DATE NOT NULL,
+        PRIMARY KEY (day_date, pokestop, seen_at),
+        KEY ix_idv_daily_area     (day_date, area_id),
+        KEY ix_idv_pokestop_daily (pokestop, day_date),
+        KEY ix_idv_area_species_daily (area_id, display_type, `character`, grunt, confirmed, seen_at, day_date),
+        KEY ix_idv_pokestop_species_daily (area_id, pokestop, display_type, `character`, grunt, confirmed, seen_at, day_date)
     )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
-    PARTITION BY RANGE (month_year) (
-        PARTITION p2508 VALUES LESS THAN (2509),
-        PARTITION p2509 VALUES LESS THAN (2510),
-        PARTITION p2510 VALUES LESS THAN (2511),
+    PARTITION BY RANGE (day_date) (
         PARTITION pMAX  VALUES LESS THAN (MAXVALUE)
     );
     """)
 
 def downgrade():
-    op.execute("DROP TABLE IF EXISTS aggregated_invasions;")
+    op.execute("DROP TABLE IF EXISTS invasions_daily_events;")

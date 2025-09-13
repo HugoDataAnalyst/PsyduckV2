@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade():
     op.execute("""
-    CREATE TABLE IF NOT EXISTS aggregated_raids (
+    CREATE TABLE IF NOT EXISTS raids_daily_events (
         gym                 VARCHAR(50) NOT NULL,
         raid_pokemon        SMALLINT UNSIGNED NOT NULL,
         raid_level          SMALLINT UNSIGNED NOT NULL,
@@ -30,31 +30,22 @@ def upgrade():
         raid_is_exclusive   TINYINT  UNSIGNED NOT NULL,
         raid_ex_raid_eligible TINYINT UNSIGNED NOT NULL,
         area_id             SMALLINT UNSIGNED NOT NULL,
-        month_year          SMALLINT UNSIGNED NOT NULL,
-        total_count         INT      UNSIGNED NOT NULL DEFAULT 0,
+        seen_at             DATETIME NOT NULL,
+        day_date          DATE NOT NULL,
 
-        -- make month_year first for pruning
-        PRIMARY KEY (
-          month_year, gym,
-          raid_pokemon, raid_level, raid_form, raid_team,
-          raid_costume, raid_is_exclusive, raid_ex_raid_eligible,
-          area_id
-        ),
-
-        KEY ix_ar_month_area   (month_year, area_id),
-        KEY ix_ar_gym_month    (gym, month_year),
-        KEY ix_ar_area_species_month (area_id, raid_pokemon, raid_form, month_year)
+        PRIMARY KEY (day_date, gym, seen_at)
+        KEY ix_rdv_month_area   (day_date, area_id),
+        KEY ix_rdv_gym_daily    (gym, day_date),
+        KEY ix_rdv_area_species_daily (area_id, raid_pokemon, raid_form, day_date, seen_at),
+        KEY ix_rdv_gym_species_daily (area_id, gym, raid_pokemon, raid_form, day_date, seen_at)
     )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
-    PARTITION BY RANGE (month_year) (
-        PARTITION p2508 VALUES LESS THAN (2509),
-        PARTITION p2509 VALUES LESS THAN (2510),
-        PARTITION p2510 VALUES LESS THAN (2511),
+    PARTITION BY RANGE (day_date) (
         PARTITION pMAX  VALUES LESS THAN (MAXVALUE)
     );
     """)
 
 def downgrade():
-    op.execute("DROP TABLE IF EXISTS aggregated_raids;")
+    op.execute("DROP TABLE IF EXISTS raids_daily_events;")
