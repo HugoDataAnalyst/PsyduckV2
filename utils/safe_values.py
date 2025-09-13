@@ -64,3 +64,14 @@ def _username_str(v: object) -> str:
     # keep up to 255 chars; allow utf8 (table is utf8mb4)
     s = "" if v is None else str(v).strip()
     return s[:255]
+
+def _valid_coords(lat: float | None, lon: float | None) -> bool:
+    if lat is None or lon is None:
+        return False
+    # Treat 0/0 as invalid for your use-case
+    if lat == 0.0 or lon == 0.0:
+        return False
+    # Basic range checks
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return False
+    return True
