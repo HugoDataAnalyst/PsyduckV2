@@ -55,7 +55,7 @@ async def ensure_daily_partitions(
             existing = {r[0] for r in rows}
             logger.debug(f"🔎 existing partitions ({len(rows)}): {rows}")
 
-            # If we don't see partitions or pMAX, show CREATE TABLE for clarity
+            # No partitions or pMAX, show CREATE TABLE for clarity
             if not rows or "pMAX" not in existing:
                 await cur.execute(f"SHOW CREATE TABLE `{table}`")
                 show = await cur.fetchone()
@@ -89,11 +89,11 @@ async def ensure_daily_partitions(
                     f")"
                 )
                 try:
-                    logger.debug(f"🧱 creating partition {pname} < '{upper}'")
+                    logger.debug(f"🧱 creating partition for {table} {pname} < '{upper}'")
                     await cur.execute(sql)
                     existing.add(pname)
                     added.append(pname)
-                    logger.info(f"➕ Created partition `{pname}` (VALUES LESS THAN '{upper}')")
+                    logger.info(f"➕ Created partition `{pname}` for {table} (VALUES LESS THAN '{upper}')")
                 except Exception as e:
                     # Log full exception info (class + args)
                     logger.error(
