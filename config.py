@@ -62,7 +62,7 @@ def retention_ms(hours: int) -> int:
 # DUCKDB Settings
 duckdb_cores = int(config.get('DUCKDB', {}).get("max_cpu_cores", 2))
 duckdb_max_ram = int(config.get('DUCKDB', {}).get("max_memory_ram_gb", 2))
-duckdb_path = str(config.get('DUCKDB', {}).get("duckdb_path", "/app/data/analytics.duckdb"))
+duckdb_path = str(config.get('DUCKDB', {}).get("duckdb_path", "data/analytics.duckdb"))
 duckdb_poke_clean_days = int(config.get('DUCKDB', {}).get("clean_pokemon_data_older_than_x_days", 30))
 duckdb_raid_clean_days = int(config.get('DUCKDB', {}).get("clean_raids_data_older_than_x_days", 30))
 duckdb_quest_clean_days = int(config.get('DUCKDB', {}).get("clean_quests_data_older_than_x_days", 30))
@@ -80,11 +80,19 @@ db_rest_betwen_connection = 5
 db_container_name = get_env_var('DB_CONTAINER_NAME')
 db_container_port = get_env_int('DB_CONTAINER_PORT')
 
+# SQL Settings
 store_sql_pokemon_aggregation = str(config.get('SQL', {}).get('store_sql_pokemon_aggregation', True)).upper() == "TRUE"
 store_sql_pokemon_shiny = str(config.get('SQL', {}).get('store_sql_pokemon_shiny', True)).upper() == "TRUE"
 store_sql_raid_aggregation = str(config.get('SQL', {}).get('store_sql_raid_aggregation', True)).upper() == "TRUE"
 store_sql_quest_aggregation = str(config.get('SQL', {}).get('store_sql_quest_aggregation', True)).upper() == "TRUE"
 store_sql_invasion_aggregation = str(config.get('SQL', {}).get('store_sql_invasion_aggregation', True)).upper() == "TRUE"
+
+# Clean SQL Settings
+clean_pokemon_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_older_than_x_days", 15))
+clean_raid_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_raid_older_than_x_days", 15))
+clean_quest_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_quest_older_than_x_days", 15))
+clean_invasion_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_invasion_older_than_x_days", 15))
+clean_pokemon_shiny_older_than_x_months = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_shiny_older_than_x_months", 3))
 
 # Redis
 redis_password = get_env_var("REDIS_PASSWORD", "myveryredisstrongpassword")

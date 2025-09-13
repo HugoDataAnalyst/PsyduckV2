@@ -2,7 +2,7 @@
     "DUCKDB": {
         "max_memory_ram_gb": 2,
         "max_cpu_cores": 2,
-        "duckdb_path": "/app/data/analytics.duckdb",
+        "duckdb_path": "data/analytics.duckdb",
         "clean_pokemon_data_older_than_x_days": 30,
         "clean_raids_data_older_than_x_days": 30,
         "clean_quests_data_older_than_x_days": 30,
@@ -14,6 +14,13 @@
         "store_sql_raid_aggregation": true,
         "store_sql_quest_aggregation": true,
         "store_sql_invasion_aggregation": true
+    },
+    "CLEAN_SQL": {
+        "clean_pokemon_older_than_x_days": 15,
+        "clean_raid_older_than_x_days": 15,
+        "clean_quest_older_than_x_days": 15,
+        "clean_invasion_older_than_x_days": 15,
+        "clean_pokemon_shiny_older_than_x_months": 3
     },
     "IN-MEMORY":{
         "store_pokemon_timeseries": true,
