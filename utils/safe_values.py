@@ -59,3 +59,8 @@ def _form_str(v) -> str:
     except Exception:
         pass
     return s[:15]  # enforce column length
+
+def _username_str(v: object) -> str:
+    # keep up to 255 chars; allow utf8 (table is utf8mb4)
+    s = "" if v is None else str(v).strip()
+    return s[:255]
