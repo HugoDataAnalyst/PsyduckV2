@@ -1,20 +1,9 @@
-import json
-import asyncio
 from redis.asyncio.client import Redis
+from utils.safe_values import _safe_int, _to_float
 from utils.logger import logger
-from utils.calc_iv_bucket import get_iv_bucket
 from datetime import datetime
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
 import config as AppConfig
-
-def _safe_int(v, default=None):
-    try:
-        # handle bools, numeric strings, numbers
-        if v is None:
-            return default
-        return int(v)
-    except (TypeError, ValueError):
-        return default
 
 class PokemonIVRedisBuffer:
     redis_key = "buffer:pokemon_iv_events"
@@ -24,16 +13,17 @@ class PokemonIVRedisBuffer:
     @classmethod
     async def increment_event(cls, redis_client: Redis, event_data: dict):
         try:
-            # Construct a unique key based on your event fields
+            # Construct a unique key based on event fields
             spawnpoint = event_data.get("spawnpoint")
             pokemon_id = int(event_data.get("pokemon_id"))
-            form = str(event_data.get("form", 0))
-            round_iv = int(round(event_data.get("iv")))
-            level = int(event_data.get("level"))
-            area_id = int(event_data.get("area_id"))
+            form       = str(event_data.get("form", 0))
+            round_iv   = int(round(event_data.get("iv")))
+            level      = int(event_data.get("level"))
+            area_id    = int(event_data.get("area_id"))
             first_seen = int(event_data.get("first_seen"))
-            latitude = event_data.get("latitude")
-            longitude = event_data.get("longitude")
+            latitude   = _to_float(event_data.get("latitude"))
+            longitude  = _to_float(event_data.get("longitude"))
+
             if None in [spawnpoint, pokemon_id, round_iv, area_id, first_seen]:
                 logger.warning("❌ Event missing required fields. Skipping.")
                 return
