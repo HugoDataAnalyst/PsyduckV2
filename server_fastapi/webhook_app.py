@@ -5,9 +5,10 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
-from sql.utils.create_partitions import ensure_daily_partitions
-from sql.tasks.partition_ensurer import DailyPartitionEnsurer
+from sql.utils.create_partitions import ensure_daily_partitions, ensure_monthly_partitions
+from sql.tasks.partition_ensurer import DailyPartitionEnsurer, MonthlyPartitionEnsurer
 from sql.tasks.golbat_pokestops import GolbatSQLPokestops
+from sql.tasks.cleaners.global_partition_cleaner import build_default_cleaner
 from myduckdb.ingestors.daily_pokemon_ingestor import PokemonIVDuckIngestor
 from server_fastapi.routes import data_api, webhook_router
 from server_fastapi import global_state
@@ -141,12 +142,22 @@ async def lifespan(app: FastAPI):
         table="invasions_daily_events",
         column="day_date",
     )
+    partition_shiny_rates_ensurer = MonthlyPartitionEnsurer(
+        ensure_interval=86400,
+        months_back=2,
+        months_forward=12,
+        table="shiny_username_rates",
+        column="month_year",
+    )
     duck_pokemon_ingestor = PokemonIVDuckIngestor(
         interval_sec=3600,
         days_back=2,
         min_age_days=2,
         min_stable_runs=2,
     )
+
+    # Partition Cleaner
+    partition_cleaner = build_default_cleaner()
 
     # Important to ensure the first time run of daily partitions with no major backlash into the DB.
     for tbl in (
@@ -157,6 +168,14 @@ async def lifespan(app: FastAPI):
         "invasions_daily_events",
     ):
         await ensure_daily_partitions(tbl, "day_date", days_back=2, days_forward=30)
+
+    # Ensure monthly partitions for Shiny Rates
+    await ensure_monthly_partitions(
+        table="shiny_username_rates",
+        column="month_year",
+        months_back=2,
+        months_forward=12,
+    )
 
     # Register all services.
     services = [
@@ -180,6 +199,12 @@ async def lifespan(app: FastAPI):
             duck_pokemon_ingestor.stop
         ),
         # Shiny
+        Service(
+            "partitions:shiny_rates_month",
+            AppConfig.store_sql_pokemon_shiny,
+            partition_shiny_rates_ensurer.start,
+            partition_shiny_rates_ensurer.stop
+        ),
         Service(
             "flusher:shiny_rates",
             AppConfig.store_sql_pokemon_shiny,
@@ -230,6 +255,13 @@ async def lifespan(app: FastAPI):
             AppConfig.store_sql_invasion_aggregation,
             invasions_buffer_flusher.start,
             invasions_buffer_flusher.stop
+        ),
+        # Partition Cleaner
+        Service(
+            "partitions:cleaner",
+            True,
+            partition_cleaner.start,
+            partition_cleaner.stop
         ),
     ]
 
