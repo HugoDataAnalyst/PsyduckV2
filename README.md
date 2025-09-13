@@ -97,7 +97,7 @@ Run the migration locally before pushing to the repository:
 ```alembic upgrade head```
 
 
-> This command will create a new migration file in the migrations/models directory.
+> This command will create a new migration file in the alembic/versions/ directory.
 > Make sure to commit the migration file to the repository.
 
 ## API Documentation
