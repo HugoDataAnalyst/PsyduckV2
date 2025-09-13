@@ -1,5 +1,6 @@
 import json
 import config as AppConfig
+from my_redis.queries.buffer import raids_bulk_buffer
 from my_redis.queries.updates.pokemons import (
     pokemon_timeseries,
     pokemon_counterseries,
@@ -24,22 +25,20 @@ from my_redis.queries.updates.quests import (
     quests_counterseries,
     quests_hourly_counterseries
 )
-from sql.tasks.pokemon_processor import PokemonSQLProcessor
-from sql.tasks.raids_processor import RaidSQLProcessor
-from sql.tasks.invasions_processor import InvasionSQLProcessor
-from sql.tasks.quests_processor import QuestSQLProcessor
 from my_redis.connect_redis import RedisManager
 from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer, ShinyRateRedisBuffer
+from my_redis.queries.buffer.quests_bulk_buffer import QuestsRedisBuffer
+from my_redis.queries.buffer.raids_bulk_buffer import RaidsRedisBuffer
+from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsRedisBuffer
 from utils.logger import logger
 from utils.retry_functions import retry
 
 redis_manager = RedisManager()
-pokemon_sql = PokemonSQLProcessor()
-raid_sql = RaidSQLProcessor()
-invasion_sql = InvasionSQLProcessor()
-quest_sql = QuestSQLProcessor()
 pokemon_buffer = PokemonIVRedisBuffer()
 shiny_buffer = ShinyRateRedisBuffer()
+quests_buffer = QuestsRedisBuffer()
+raids_buffer = RaidsRedisBuffer()
+invasions_buffer = InvasionsRedisBuffer()
 
 async def process_pokemon_data(filtered_data):
     """
@@ -142,8 +141,9 @@ async def process_raid_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_raid_aggregation:
+            get_client = await redis_manager.check_redis_connection()
             logger.debug("🔃 Processing Raid Aggregation...")
-            await raid_sql.upsert_aggregated_raid_from_filtered(filtered_data)
+            await raids_buffer.increment_event(get_client, filtered_data)
         else:
             logger.debug("⚠️ SQL Raid Aggregation is disabled.")
 
@@ -192,8 +192,9 @@ async def process_quest_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_quest_aggregation:
+            get_client = await redis_manager.check_redis_connection()
             logger.debug("🔃 Processing Quest Aggregation...")
-            await quest_sql.upsert_aggregated_quest_from_filtered(filtered_data)
+            await quests_buffer.increment_event(get_client, filtered_data)
         else:
             logger.debug("⚠️ SQL Quest Aggregation is disabled.")
 
@@ -248,8 +249,9 @@ async def process_invasion_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_invasion_aggregation:
+            get_client = await redis_manager.check_redis_connection()
             logger.debug("🔃 Processing Invasion Aggregation...")
-            await invasion_sql.upsert_aggregated_invasion_from_filtered(filtered_data)
+            await invasions_buffer.increment_event(get_client, filtered_data)
         else:
             logger.debug("⚠️ SQL Invasion Aggregation is disabled.")
 
