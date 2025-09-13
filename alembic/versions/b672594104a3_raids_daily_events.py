@@ -1,4 +1,4 @@
-"""aggregated_raids partitioned
+"""raids_daily_events partitioned
 
 Revision ID: b672594104a3
 Revises: 1de6f00bdda8
@@ -33,7 +33,7 @@ def upgrade():
         seen_at             DATETIME NOT NULL,
         day_date          DATE NOT NULL,
 
-        PRIMARY KEY (day_date, gym, seen_at)
+        PRIMARY KEY (day_date, gym, seen_at),
         KEY ix_rdv_month_area   (day_date, area_id),
         KEY ix_rdv_gym_daily    (gym, day_date),
         KEY ix_rdv_area_species_daily (area_id, raid_pokemon, raid_form, day_date, seen_at),
@@ -42,7 +42,7 @@ def upgrade():
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
-    PARTITION BY RANGE (day_date) (
+    PARTITION BY RANGE COLUMNS (day_date) (
         PARTITION pMAX  VALUES LESS THAN (MAXVALUE)
     );
     """)

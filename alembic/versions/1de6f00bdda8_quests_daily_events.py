@@ -1,4 +1,4 @@
-"""aggregated_quests partitioned
+"""quests_pokemon_items_daily_events partitioned
 
 Revision ID: 1de6f00bdda8
 Revises: a677ec29504a
@@ -35,7 +35,7 @@ def upgrade():
 
         KEY ix_qidv_daily_area     (day_date, seen_at, area_id),
         KEY ix_qidv_pokestop_daily (pokestop, seen_at, day_date),
-        KEY ix_qidv_task_daily    (task_type, seen_at day_date),
+        KEY ix_qidv_task_daily    (task_type, seen_at, day_date),
         KEY ix_qidv_item_daily    (item_id, item_amount, day_date),
         KEY ix_qidv_pokestop_item_daily (pokestop, item_id, item_amount, seen_at, day_date),
         KEY ix_qidv_task_item_daily (task_type, item_id, item_amount, seen_at, day_date),
@@ -46,7 +46,7 @@ def upgrade():
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
-    PARTITION BY RANGE (day_date) (
+    PARTITION BY RANGE COLUMNS (day_date) (
       PARTITION pMAX  VALUES LESS THAN (MAXVALUE)
     );
     """)
@@ -79,7 +79,7 @@ def upgrade():
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
-    PARTITION BY RANGE (day_date) (
+    PARTITION BY RANGE COLUMNS (day_date) (
       PARTITION pMAX  VALUES LESS THAN (MAXVALUE)
     );
     """)

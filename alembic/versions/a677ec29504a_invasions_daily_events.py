@@ -1,4 +1,4 @@
-"""aggregated_invasions partitioned
+"""invasions_daily_events partitioned
 
 Revision ID: a677ec29504a
 Revises: dcd1a7aa8227
@@ -39,7 +39,7 @@ def upgrade():
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
-    PARTITION BY RANGE (day_date) (
+    PARTITION BY RANGE COLUMNS (day_date) (
         PARTITION pMAX  VALUES LESS THAN (MAXVALUE)
     );
     """)
