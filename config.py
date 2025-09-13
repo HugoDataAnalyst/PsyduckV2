@@ -59,6 +59,15 @@ def get_env_int(name: str, default = None) -> Optional[int]:
 def retention_ms(hours: int) -> int:
     return hours * 3600 * 1000
 
+# DUCKDB Settings
+duckdb_cores = int(config.get('DUCKDB', {}).get("max_cpu_cores", 2))
+duckdb_max_ram = int(config.get('DUCKDB', {}).get("max_memory_ram_gb", 2))
+duckdb_path = str(config.get('DUCKDB', {}).get("duckdb_path", "/app/data/analytics.duckdb"))
+duckdb_poke_clean_days = int(config.get('DUCKDB', {}).get("clean_pokemon_data_older_than_x_days", 30))
+duckdb_raid_clean_days = int(config.get('DUCKDB', {}).get("clean_raids_data_older_than_x_days", 30))
+duckdb_quest_clean_days = int(config.get('DUCKDB', {}).get("clean_quests_data_older_than_x_days", 30))
+duckdb_invasion_clean_days = int(config.get('DUCKDB', {}).get("clean_invasions_data_older_than_x_days", 30))
+
 # Database Settings
 db_host = get_env_var('DB_HOST')
 db_port = get_env_int('DB_PORT', 3306)
@@ -68,6 +77,9 @@ db_user = get_env_var('DB_USER', "root")
 db_password = get_env_var('DB_PASSWORD', "root_password")
 db_retry_connection = 5
 db_rest_betwen_connection = 5
+db_container_name = get_env_var('DB_CONTAINER_NAME')
+db_container_port = get_env_int('DB_CONTAINER_PORT')
+
 store_sql_pokemon_aggregation = str(config.get('SQL', {}).get('store_sql_pokemon_aggregation', True)).upper() == "TRUE"
 store_sql_pokemon_shiny = str(config.get('SQL', {}).get('store_sql_pokemon_shiny', True)).upper() == "TRUE"
 store_sql_raid_aggregation = str(config.get('SQL', {}).get('store_sql_raid_aggregation', True)).upper() == "TRUE"
@@ -89,8 +101,15 @@ redis_max_connections = int(config.get("REDIS", {}).get("redis_connections", 30)
 # Flusher settings
 pokemon_max_threshold = config.get("flusher", {}).get("pokemon_max_threshold", 10000)
 shiny_max_threshold = config.get("flusher", {}).get("shiny_max_threshold", 10000)
+quest_max_threshold = config.get("flusher", {}).get("quest_max_threshold", 10000)
+raid_max_threshold = config.get("flusher", {}).get("raid_max_threshold", 10000)
+invasion_max_threshold = config.get("flusher", {}).get("invasion_max_threshold", 10000)
+quest_flush_interval = config.get("flusher", {}).get("quest_flush_interval", 60)
+raid_flush_interval = config.get("flusher", {}).get("raid_flush_interval", 60)
+invasion_flush_interval = config.get("flusher", {}).get("invasion_flush_interval", 60)
 shiny_flush_interval = config.get("flusher", {}).get("shiny_flush_interval", 60)
 pokemon_flush_interval = config.get("flusher", {}).get("pokemon_flush_interval", 60)
+
 
 # Redis retention settings
 timeseries_pokemon_retention_ms  = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 72))

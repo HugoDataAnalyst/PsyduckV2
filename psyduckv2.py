@@ -5,7 +5,7 @@ import subprocess
 import config as AppConfig
 from pathlib import Path
 from sql.connect_db import init_db, close_db
-from alembic.config import Config as AlembicConfig
+from alembic.config import Config as AlembicConfig #type: ignore
 from alembic import command as alembic_command
 from utils.logger import setup_logging, logger
 from utils.koji_geofences import KojiGeofences

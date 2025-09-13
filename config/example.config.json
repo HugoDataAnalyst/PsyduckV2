@@ -1,4 +1,13 @@
 {
+    "DUCKDB": {
+        "max_memory_ram_gb": 2,
+        "max_cpu_cores": 2,
+        "duckdb_path": "/app/data/analytics.duckdb",
+        "clean_pokemon_data_older_than_x_days": 30,
+        "clean_raids_data_older_than_x_days": 30,
+        "clean_quests_data_older_than_x_days": 30,
+        "clean_invasions_data_older_than_x_days": 30
+    },
     "SQL": {
         "store_sql_pokemon_aggregation": true,
         "store_sql_pokemon_shiny": true,
@@ -19,8 +28,14 @@
     "flusher": {
         "pokemon_max_threshold": 10000,
         "shiny_max_threshold": 10000,
+        "raid_max_threshold": 10000,
+        "invasion_max_threshold": 10000,
+        "quest_max_threshold": 10000,
         "shiny_flush_interval": 15,
-        "pokemon_flush_interval": 15
+        "pokemon_flush_interval": 15,
+        "raid_flush_interval": 15,
+        "invasion_flush_interval": 15,
+        "quest_flush_interval": 15
     },
     "geofences": {
         "expire_cache_seconds": 3600,
