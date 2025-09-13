@@ -62,7 +62,6 @@ class PokemonIVDuckIngestor:
             logger.error(f"❌ DuckDB ingest [{tag}] failed: {e}", exc_info=True)
 
     # internal sync
-
     def _ingest_window(self, tag: str):
         con = connect_duck(read_only=False)
         try:
@@ -87,6 +86,7 @@ class PokemonIVDuckIngestor:
             except Exception:
                 pass
 
+    # core
     def _ensure_duck_schema(self, con: duckdb.DuckDBPyConnection):
         con.execute(f"""
             CREATE TABLE IF NOT EXISTS {DUCK_TABLE} (
