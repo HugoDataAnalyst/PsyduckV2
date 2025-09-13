@@ -5,8 +5,10 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
-from sql.tasks.partition_ensurer import PokemonIVDailyPartitionEnsurer
+from sql.utils.create_partitions import ensure_daily_partitions
+from sql.tasks.partition_ensurer import DailyPartitionEnsurer
 from sql.tasks.golbat_pokestops import GolbatSQLPokestops
+from myduckdb.ingestors.daily_pokemon_ingestor import PokemonIVDuckIngestor
 from server_fastapi.routes import data_api, webhook_router
 from server_fastapi import global_state
 from my_redis.connect_redis import RedisManager
@@ -17,10 +19,13 @@ from server_fastapi.utils import (
 from fastapi.openapi.docs import get_swagger_ui_html
 from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
+from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
+from sql.tasks.quest_stops_flusher import QuestsBufferFlusher
+from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
 from tzlocal import get_localzone
 from datetime import datetime, timedelta
-
+from utils.supersivor import Service, start_services, stop_services
 
 redis_manager = RedisManager()
 
@@ -97,20 +102,139 @@ async def lifespan(app: FastAPI):
     # Initialize and start buffer flushers
     pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)
     shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)
-    partition_ensurer = PokemonIVDailyPartitionEnsurer(
+    quests_buffer_flusher = QuestsBufferFlusher(flush_interval=AppConfig.quest_flush_interval)
+    raids_buffer_flusher = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
+    invasions_buffer_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
+    # Initalize and start partition ensurer for each table
+    partition_pokemon_ensurer = DailyPartitionEnsurer(
         ensure_interval=86400,
         days_back=2,
         days_forward=30,
         table="pokemon_iv_daily_events",
         column="day_date",
     )
+    partition_quests_items_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400,
+        days_back=2,
+        days_forward=30,
+        table="quests_item_daily_events",
+        column="day_date",
+    )
+    partition_quests_pokemon_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400,
+        days_back=2,
+        days_forward=30,
+        table="quests_pokemon_daily_events",
+        column="day_date",
+    )
+    partition_raids_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400,
+        days_back=2,
+        days_forward=30,
+        table="raids_daily_events",
+        column="day_date",
+    )
+    partition_invasions_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400,
+        days_back=2,
+        days_forward=30,
+        table="invasions_daily_events",
+        column="day_date",
+    )
+    duck_pokemon_ingestor = PokemonIVDuckIngestor(
+        interval_sec=3600,
+        days_back=2,
+        min_age_days=2,
+        min_stable_runs=2,
+    )
 
-    # Start the flusher tasks
-    if AppConfig.store_sql_pokemon_aggregation:
-        await partition_ensurer.start()
-        await pokemon_buffer_flusher.start()
-    if AppConfig.store_sql_pokemon_shiny:
-        await shiny_rate_buffer_flusher.start()
+    # Important to ensure the first time run of daily partitions with no major backlash into the DB.
+    for tbl in (
+        "pokemon_iv_daily_events",
+        "quests_item_daily_events",
+        "quests_pokemon_daily_events",
+        "raids_daily_events",
+        "invasions_daily_events",
+    ):
+        await ensure_daily_partitions(tbl, "day_date", days_back=2, days_forward=30)
+
+    # Register all services.
+    services = [
+        # Pokémon IV daily
+        Service(
+            "partitions:pokemon_iv_daily",
+            AppConfig.store_sql_pokemon_aggregation,
+            partition_pokemon_ensurer.start,
+            partition_pokemon_ensurer.stop
+        ),
+        Service(
+            "flusher:pokemon_iv_daily",
+            AppConfig.store_sql_pokemon_aggregation,
+            pokemon_buffer_flusher.start,
+            pokemon_buffer_flusher.stop
+        ),
+        Service(
+            "ingestor:pokemon_iv_duck",
+            AppConfig.store_sql_pokemon_aggregation,
+            duck_pokemon_ingestor.start,
+            duck_pokemon_ingestor.stop
+        ),
+        # Shiny
+        Service(
+            "flusher:shiny_rates",
+            AppConfig.store_sql_pokemon_shiny,
+            shiny_rate_buffer_flusher.start,
+            shiny_rate_buffer_flusher.stop
+        ),
+        # Quests (items + pokemon)
+        Service(
+            "partitions:quests_item_daily",
+            AppConfig.store_sql_quest_aggregation,
+            partition_quests_items_ensurer.start,
+            partition_quests_items_ensurer.stop
+        ),
+        Service(
+            "partitions:quests_poke_daily",
+            AppConfig.store_sql_quest_aggregation,
+            partition_quests_pokemon_ensurer.start,
+            partition_quests_pokemon_ensurer.stop
+        ),
+        Service(
+            "flusher:quests_daily",
+            AppConfig.store_sql_quest_aggregation,
+            quests_buffer_flusher.start,
+            quests_buffer_flusher.stop
+        ),
+        # Raids
+        Service(
+            "partitions:raids_daily",
+            AppConfig.store_sql_raid_aggregation,
+            partition_raids_ensurer.start,
+            partition_raids_ensurer.stop
+        ),
+        Service(
+            "flusher:raids_daily",
+            AppConfig.store_sql_raid_aggregation,
+            raids_buffer_flusher.start,
+            raids_buffer_flusher.stop
+        ),
+        # Invasions
+        Service(
+            "partitions:invasions_daily",
+            AppConfig.store_sql_invasion_aggregation,
+            partition_invasions_ensurer.start,
+            partition_invasions_ensurer.stop
+        ),
+        Service(
+            "flusher:invasions_daily",
+            AppConfig.store_sql_invasion_aggregation,
+            invasions_buffer_flusher.start,
+            invasions_buffer_flusher.stop
+        ),
+    ]
+
+    # Start all enabled services.
+    await start_services(services)
 
     # Yield control back to FastAPI
     yield
@@ -118,33 +242,18 @@ async def lifespan(app: FastAPI):
     # Shutdown logic
     logger.info("👋 Shutting down Webhook Receiver application.")
 
-    # Cancel and await the refresh task
-    refresh_task.cancel()
-    try:
-        await refresh_task
-    except asyncio.CancelledError:
-        logger.info("🛑 Geofence refresh task cancelled.")
+    await stop_services(services)
 
-    # Cancel and await the cleanup task.
-    cleanup_timeseries_task.cancel()
-    try:
-        await cleanup_timeseries_task
-    except asyncio.CancelledError:
-        logger.info("🛑 Periodic cleanup task cancelled.")
-
-    # Cancel and await the pokestop refresh task.
-    pokestop_refresh_task.cancel()
-    try:
-        await pokestop_refresh_task
-    except asyncio.CancelledError:
-        logger.info("🛑 Pokestop refresh task cancelled.")
-
-    # Stop the flusher tasks
-    if AppConfig.store_sql_pokemon_aggregation:
-        await partition_ensurer.stop()
-        await pokemon_buffer_flusher.stop()
-    if AppConfig.store_sql_pokemon_shiny:
-        await shiny_rate_buffer_flusher.stop()
+    for t, name in [
+        (refresh_task, "geofence refresh"),
+        (cleanup_timeseries_task, "periodic cleanup"),
+        (pokestop_refresh_task, "pokestop refresh"),
+    ]:
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            logger.info(f"🛑 {name} task cancelled.")
 
     # Close Redis pools
     await redis_manager.close_redis()
