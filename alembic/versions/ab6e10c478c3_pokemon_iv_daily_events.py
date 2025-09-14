@@ -30,12 +30,10 @@ def upgrade():
       seen_at     DATETIME NOT NULL,
       day_date    DATE NOT NULL,
       PRIMARY KEY (day_date, spawnpoint, seen_at),
-      KEY ix_ev_area_day         (area_id, day_date),
-      KEY ix_ev_species_day      (pokemon_id, form, day_date),
-      KEY ix_ev_iv_day           (iv, day_date),
-      KEY ix_ev_lvl_day          (level, day_date),
-      KEY ix_ev_sp_day           (spawnpoint, day_date)
-    )
+      KEY ix_ev_area_day_sp_pkf   (area_id, day_date, spawnpoint, pokemon_id, form),
+      KEY ix_ev_area_day_iv_sp_pkf  (area_id, day_date, iv, spawnpoint, pokemon_id, form),
+      KEY ix_ev_area_day_pid_iv_sp_f  (area_id, day_date, pokemon_id, iv, spawnpoint, pokemon_id, form)
+  )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
     COLLATE=utf8mb4_0900_ai_ci
