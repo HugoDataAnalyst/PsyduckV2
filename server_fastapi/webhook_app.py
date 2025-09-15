@@ -9,14 +9,10 @@ from sql.utils.create_partitions import ensure_daily_partitions, ensure_monthly_
 from sql.tasks.partition_ensurer import DailyPartitionEnsurer, MonthlyPartitionEnsurer
 from sql.tasks.golbat_pokestops import GolbatSQLPokestops
 from sql.tasks.cleaners.global_partition_cleaner import build_default_cleaner
-from myduckdb.ingestors.daily_pokemon_ingestor import PokemonIVDuckIngestor
 from server_fastapi.routes import data_api, webhook_router
 from server_fastapi import global_state
 from my_redis.connect_redis import RedisManager
-from server_fastapi.utils import (
-    details,
-    secure_api,
-)
+from server_fastapi.utils import details, secure_api
 from fastapi.openapi.docs import get_swagger_ui_html
 from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
@@ -149,13 +145,6 @@ async def lifespan(app: FastAPI):
         table="shiny_username_rates",
         column="month_year",
     )
-    duck_pokemon_ingestor = PokemonIVDuckIngestor(
-        interval_sec=3600,
-        days_back=2,
-        min_age_days=2,
-        min_stable_runs=2,
-    )
-
     # Partition Cleaner
     partition_cleaner = build_default_cleaner()
 
@@ -191,12 +180,6 @@ async def lifespan(app: FastAPI):
             AppConfig.store_sql_pokemon_aggregation,
             pokemon_buffer_flusher.start,
             pokemon_buffer_flusher.stop
-        ),
-        Service(
-            "ingestor:pokemon_iv_duck",
-            AppConfig.store_sql_pokemon_aggregation,
-            duck_pokemon_ingestor.start,
-            duck_pokemon_ingestor.stop
         ),
         # Shiny
         Service(
