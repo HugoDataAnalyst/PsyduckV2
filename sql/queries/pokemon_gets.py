@@ -1,6 +1,6 @@
+from __future__ import annotations
 import re
 import asyncio
-from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple

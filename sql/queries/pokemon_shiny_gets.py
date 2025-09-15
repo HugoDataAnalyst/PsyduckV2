@@ -1,6 +1,6 @@
+from __future__ import annotations
 import asyncio
 from datetime import date
-from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from sql.utils.sql_parsers import _build_in_clause, _iter_months_inclusive, _csv_to_int_list, _csv_to_str_list
 from sql.connect_db import fetch_all
