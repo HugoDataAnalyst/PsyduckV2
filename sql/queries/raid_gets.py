@@ -1,101 +1,131 @@
-from datetime import datetime
-from utils.logger import logger
-from sql import models
-from tortoise.expressions import Q, F
+import asyncio
+from __future__ import annotations
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from sql.connect_db import fetch_all
+from sql.utils.sql_parsers import _build_in_clause
+from sql.utils.time_parser import daterange_inclusive_days, clip_seen_window_for_day
 
-class RaidSQLQueries():
-    def __init__(self, area: str, start: datetime, end: datetime,
-                 gym_id: str = "all", raid_pokemon: str = "all",
-                 raid_level: str = "all", raid_form: str = "all",
-                 raid_team: str = "all", raid_costume: str = "all",
-                 raid_is_exclusive: str = "all",
-                 raid_ex_raid_eligible: str = "all",
-                 limit: int = 0):
-        self.area = area
-        self.start = start
-        self.end = end
-        self.gym_id = gym_id
-        self.raid_pokemon = raid_pokemon
-        self.raid_level = raid_level
-        self.raid_form = raid_form
-        self.raid_team = raid_team
-        self.raid_costume = raid_costume
-        self.raid_is_exclusive = raid_is_exclusive
-        self.raid_ex_raid_eligible = raid_ex_raid_eligible
-        self.limit = limit
+@dataclass(frozen=True)
+class RaidFilters:
+    gyms: Optional[List[str]] = None
+    raid_pokemon: Optional[List[int]] = None
+    raid_form: Optional[List[int]] = None
+    raid_level: Optional[List[int]] = None
+    raid_team: Optional[List[int]] = None
+    raid_costume: Optional[List[int]] = None
+    raid_is_exclusive: Optional[List[int]] = None
+    raid_ex_raid_eligible: Optional[List[int]] = None
 
-    async def raid_sql_data(self) -> dict:
-        filters = Q(month_year__gte=self.start) & Q(month_year__lte=self.end)
+# per-day SQL
+async def fetch_raids_day(
+    *,
+    area_id: int,
+    day: date,
+    filters: RaidFilters,
+    seen_from: Optional[datetime] = None,
+    seen_to: Optional[datetime] = None,
+    limit: int = 0,
+) -> List[Dict[str, Any]]:
+    where: List[str] = ["r.area_id = %s", "r.day_date = %s"]
+    params: List[Any] = [area_id, day]
 
-        if self.area.lower() != "global":
-            filters &= Q(area__name=self.area)
+    def _maybe(col: str, vals: Optional[List[Any]]):
+        if vals:
+            clause, v = _build_in_clause(col, vals)
+            where.append(clause)
+            params.extend(v)
 
-        if self.gym_id != "all":
-            filters &= Q(gym__gym=self.gym_id)
+    _maybe("r.gym", filters.gyms)
+    _maybe("r.raid_pokemon", filters.raid_pokemon)
+    _maybe("r.raid_form", filters.raid_form)
+    _maybe("r.raid_level", filters.raid_level)
+    _maybe("r.raid_team", filters.raid_team)
+    _maybe("r.raid_costume", filters.raid_costume)
+    _maybe("r.raid_is_exclusive", filters.raid_is_exclusive)
+    _maybe("r.raid_ex_raid_eligible", filters.raid_ex_raid_eligible)
 
-        if self.raid_pokemon != "all":
-            filters &= Q(raid_pokemon=int(self.raid_pokemon))
+    clipped = clip_seen_window_for_day(day, seen_from, seen_to)
+    if clipped:
+        where.append("r.seen_at BETWEEN %s AND %s")
+        params.extend([clipped[0], clipped[1]])
 
-        if self.raid_level != "all":
-            filters &= Q(raid_level=int(self.raid_level))
+    where_sql = " AND ".join(where)
+    limit_sql = f" LIMIT {int(limit)}" if limit and limit > 0 else ""
 
-        if self.raid_form != "all":
-            filters &= Q(raid_form=self.raid_form)
+    sql = f"""
+        SELECT
+          r.gym,
+          r.raid_pokemon,
+          r.raid_form,
+          r.raid_level,
+          ANY_VALUE(g.latitude)  AS latitude,
+          ANY_VALUE(g.longitude) AS longitude,
+          COUNT(*) AS cnt
+        FROM raids_daily_events AS r
+        JOIN gyms AS g
+          ON g.gym = r.gym
+        WHERE {where_sql}
+        GROUP BY r.gym, r.raid_pokemon, r.raid_form, r.raid_level
+        ORDER BY cnt DESC, r.raid_pokemon ASC{limit_sql}
+    """
+    return await fetch_all(sql, params)
 
-        if self.raid_team != "all":
-            filters &= Q(raid_team=int(self.raid_team))
+# range orchestrator
+async def fetch_raids_range(
+    *,
+    area_id: int,
+    area_name: str,
+    seen_from: datetime,
+    seen_to: datetime,
+    filters: RaidFilters,
+    limit_per_day: int = 0,
+    concurrency: int = 4,
+) -> Dict[str, Any]:
+    days = daterange_inclusive_days(seen_from, seen_to)
+    sem = asyncio.Semaphore(max(1, int(concurrency)))
 
-        if self.raid_costume != "all":
-            filters &= Q(raid_costume=self.raid_costume)
-
-        if self.raid_is_exclusive != "all":
-            filters &= Q(raid_is_exclusive=int(self.raid_is_exclusive))
-
-        if self.raid_ex_raid_eligible != "all":
-            filters &= Q(raid_ex_raid_eligible=int(self.raid_ex_raid_eligible))
-
-        try:
-            query = models.AggregatedRaids.filter(filters).order_by(
-                "gym__gym",
-                "raid_pokemon",
-                "raid_level",
-                "raid_form",
-                "raid_team",
-                "raid_costume",
-                "raid_is_exclusive",
-                "raid_ex_raid_eligible",
-                "area__name",
-                "month_year"
-            ).annotate(
-                gym_id=F("gym__gym"),
-                gym_name=F("gym__gym_name"),
-                gym_latitude=F("gym__latitude"),
-                gym_longitude=F("gym__longitude"),
-                area_name=F("area__name")
+    async def _task(d: date) -> List[Dict[str, Any]]:
+        async with sem:
+            return await fetch_raids_day(
+                area_id=area_id,
+                day=d,
+                filters=filters,
+                seen_from=seen_from,
+                seen_to=seen_to,
+                limit=limit_per_day,
             )
 
-            if self.limit > 0:
-                query = query.limit(self.limit)
+    per_day_lists = await asyncio.gather(*[asyncio.create_task(_task(d)) for d in days])
 
-            results = await query.values(
-                "gym_id",
-                "gym_name",
-                "gym_latitude",
-                "gym_longitude",
-                "raid_pokemon",
-                "raid_level",
-                "raid_form",
-                "raid_team",
-                "raid_costume",
-                "raid_is_exclusive",
-                "raid_ex_raid_eligible",
-                "area_name",
-                "total_count",
-                "month_year"
-            )
+    # merge on gym, raid_pokemon, raid_form, raid_level
+    acc: Dict[Tuple[str, int, int, int], Dict[str, Any]] = {}
+    for rows in per_day_lists:
+        for r in rows:
+            key = (str(r["gym"]), int(r["raid_pokemon"]), int(r["raid_form"]), int(r["raid_level"]))
+            if key not in acc:
+                acc[key] = {
+                    "gym": key[0],
+                    "raid_pokemon": key[1],
+                    "raid_form": key[2],
+                    "raid_level": key[3],
+                    "latitude": r.get("latitude"),
+                    "longitude": r.get("longitude"),
+                    "count": int(r.get("cnt", 0)),
+                }
+            else:
+                acc[key]["count"] += int(r.get("cnt", 0))
 
-            logger.info(f"✅ Retrieved {len(results)} raid rows (limit={self.limit}).")
-            return {"results": results}
-        except Exception as e:
-            logger.error(f"❌ Error in raid_sql_data: {e}")
-            return {"error": str(e)}
+    data = list(acc.values())
+    data.sort(key=lambda x: (-x["count"], x["raid_pokemon"]))
+
+    return {
+        "start_time": seen_from.isoformat(sep=" "),
+        "end_time":   seen_to.isoformat(sep=" "),
+        "start_date": days[0].isoformat(),
+        "end_date":   days[-1].isoformat(),
+        "area": area_name,
+        "rows": len(data),
+        "data": data,
+    }

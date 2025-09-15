@@ -1,80 +1,123 @@
-from datetime import datetime
-from utils.logger import logger
-from sql import models
-from tortoise.expressions import Q, F
+import asyncio
+from __future__ import annotations
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Tuple
+from sql.connect_db import fetch_all
+from sql.utils.sql_parsers import _build_in_clause
+from sql.utils.time_parser import daterange_inclusive_days, clip_seen_window_for_day
 
-class InvasionSQLQueries():
-    def __init__(self, area: str, start: datetime, end: datetime,
-                 pokestop_id: str = "all", display_type: str = "all",
-                 character: str = "all", grunt: str = "all",
-                 confirmed: str = "all", limit: int = 0):
-        self.area = area
-        self.start = start
-        self.end = end
-        self.pokestop_id = pokestop_id
-        self.display_type = display_type
-        self.character = character
-        self.grunt = grunt
-        self.confirmed = confirmed
-        self.limit = limit
+@dataclass(frozen=True)
+class InvasionFilters:
+    pokestops: Optional[List[str]] = None
+    display_types: Optional[List[int]] = None
+    characters: Optional[List[int]] = None
+    grunts: Optional[List[int]] = None
+    confirmed: Optional[List[int]] = None          # 0/1
 
-    async def invasion_sql_data(self) -> dict:
-        filters = Q(month_year__gte=self.start) & Q(month_year__lte=self.end)
+# per-day SQL
+async def fetch_invasions_day(
+    *,
+    area_id: int,
+    day: date,
+    filters: InvasionFilters,
+    seen_from: Optional[datetime] = None,
+    seen_to: Optional[datetime] = None,
+    limit: int = 0,
+) -> List[Dict[str, Any]]:
+    where: List[str] = ["i.area_id = %s", "i.day_date = %s"]
+    params: List[Any] = [area_id, day]
 
-        if self.area.lower() != "global":
-            filters &= Q(area__name=self.area)
+    def _maybe(col: str, vals: Optional[List[Any]]):
+        if vals:
+            clause, v = _build_in_clause(col, vals)
+            where.append(clause)
+            params.extend(v)
 
-        if self.pokestop_id != "all":
-            filters &= Q(pokestop__pokestop=self.pokestop_id)
+    _maybe("i.pokestop", filters.pokestops)
+    _maybe("i.display_type", filters.display_types)
+    _maybe("i.`character`", filters.characters)
+    _maybe("i.grunt", filters.grunts)
+    _maybe("i.confirmed", filters.confirmed)
 
-        if self.display_type != "all":
-            filters &= Q(display_type=int(self.display_type))
+    clipped = clip_seen_window_for_day(day, seen_from, seen_to)
+    if clipped:
+        where.append("i.seen_at BETWEEN %s AND %s")
+        params.extend([clipped[0], clipped[1]])
 
-        if self.character != "all":
-            filters &= Q(character=int(self.character))
+    where_sql = " AND ".join(where)
+    limit_sql = f" LIMIT {int(limit)}" if limit and limit > 0 else ""
 
-        if self.grunt != "all":
-            filters &= Q(grunt=int(self.grunt))
+    sql = f"""
+        SELECT
+          i.pokestop,
+          i.display_type,
+          i.`character`,
+          ANY_VALUE(p.latitude)  AS latitude,
+          ANY_VALUE(p.longitude) AS longitude,
+          COUNT(*) AS cnt
+        FROM invasions_daily_events AS i
+        JOIN pokestops AS p
+          ON p.pokestop = i.pokestop
+        WHERE {where_sql}
+        GROUP BY i.pokestop, i.display_type, i.`character`
+        ORDER BY cnt DESC, i.display_type ASC{limit_sql}
+    """
+    return await fetch_all(sql, params)
 
-        if self.confirmed != "all":
-            filters &= Q(confirmed=int(self.confirmed))
+# range orchestrator
+async def fetch_invasions_range(
+    *,
+    area_id: int,
+    area_name: str,
+    seen_from: datetime,
+    seen_to: datetime,
+    filters: InvasionFilters,
+    limit_per_day: int = 0,
+    concurrency: int = 4,
+) -> Dict[str, Any]:
+    days = daterange_inclusive_days(seen_from, seen_to)
+    sem = asyncio.Semaphore(max(1, int(concurrency)))
 
-        try:
-            query = models.AggreagatedInvasions.filter(filters).order_by(
-                "pokestop__pokestop",
-                "display_type",
-                "character",
-                "grunt",
-                "confirmed",
-                "area__name",
-                "month_year"
-            ).annotate(
-                pokestop_id=F("pokestop__pokestop"),
-                pokestop_name=F("pokestop__pokestop_name"),
-                pokestop_latitude=F("pokestop__latitude"),
-                pokestop_longitude=F("pokestop__longitude"),
-                area_name=F("area__name")
+    async def _task(d: date) -> List[Dict[str, Any]]:
+        async with sem:
+            return await fetch_invasions_day(
+                area_id=area_id,
+                day=d,
+                filters=filters,
+                seen_from=seen_from,
+                seen_to=seen_to,
+                limit=limit_per_day,
             )
 
-            if self.limit > 0:
-                query = query.limit(self.limit)
+    per_day_lists = await asyncio.gather(*[asyncio.create_task(_task(d)) for d in days])
 
-            results = await query.values(
-                "pokestop_id",
-                "pokestop_name",
-                "pokestop_latitude",
-                "pokestop_longitude",
-                "display_type",
-                "character",
-                "grunt",
-                "confirmed",
-                "area_name",
-                "total_count",
-                "month_year"
-            )
+    # merge on pokestop, display_type, character
+    acc: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
+    for rows in per_day_lists:
+        for r in rows:
+            key = (str(r["pokestop"]), int(r["display_type"]), int(r["character"]))
+            if key not in acc:
+                acc[key] = {
+                    "pokestop": key[0],
+                    "display_type": key[1],
+                    "character": key[2],
+                    "latitude": r.get("latitude"),
+                    "longitude": r.get("longitude"),
+                    "count": int(r.get("cnt", 0)),
+                }
+            else:
+                acc[key]["count"] += int(r.get("cnt", 0))
 
-            logger.info(f"✅ Retrieved {len(results)} invasion rows (limit={self.limit}).")
-            return {"results": results}
-        except Exception as e:
-            logger.error(f"❌ Error in invasion_sql_data: {e}")
-            return {"error": str(e)}
+    data = list(acc.values())
+    data.sort(key=lambda x: (-x["count"], x["display_type"]))
+
+    return {
+        "start_time": seen_from.isoformat(sep=" "),
+        "end_time":   seen_to.isoformat(sep=" "),
+        "start_date": days[0].isoformat(),
+        "end_date":   days[-1].isoformat(),
+        "area": area_name,
+        "rows": len(data),
+        "data": data,
+    }
