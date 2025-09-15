@@ -3,8 +3,8 @@ import asyncio, random
 from typing import Callable, Awaitable, List, Tuple
 from utils.logger import logger
 import config as AppConfig
-from .daily_partition_cleaner import clean_daily_partitions
-from .monthly_partition_cleaner import clean_monthly_partitions
+from sql.tasks.cleaners.partitions.daily_partition_cleaner import clean_daily_partitions
+from sql.tasks.cleaners.partitions.monthly_partition_cleaner import clean_monthly_partitions
 
 
 class PeriodicCleaner:
