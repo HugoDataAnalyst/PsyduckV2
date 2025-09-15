@@ -191,7 +191,7 @@ class QuestSQLProcessor:
                         await cur.execute("""
                             INSERT INTO quests_pokemon_daily_events (
                                 pokestop, area_id, seen_at, day_date, mode, task_type,
-                                poke_id, poke_form, total_count
+                                poke_id, poke_form
                             )
                             SELECT
                                 t.pokestop,
@@ -199,13 +199,11 @@ class QuestSQLProcessor:
                                 FROM_UNIXTIME(t.first_seen) AS seen_at,
                                 DATE(FROM_UNIXTIME(t.first_seen)) AS day_date,
                                 t.mode, t.task_type,
-                                t.poke_id, t.poke_form, SUM(t.inc) AS total_count
+                                t.poke_id, t.poke_form
                             FROM tmp_qpde t
                             GROUP BY
                                 t.pokestop, t.area_id, t.first_seen, t.mode, t.task_type,
                                 t.poke_id, t.poke_form
-                            ON DUPLICATE KEY UPDATE
-                                total_count = total_count + VALUES(total_count)
                         """)
 
                     # 4) Cleanup temps regardless of which had data
