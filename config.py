@@ -46,7 +46,7 @@ def get_env_list(env_var_name: str, default = None) -> List[str]:
 
 def get_env_int(name: str, default = None) -> Optional[int]:
     value = os.getenv(name)
-    if value is None:
+    if not value:
         logger.warning(f"⚠️ Missing environment variable: {name}. Using default: {default}")
         return default
     try:
