@@ -80,37 +80,76 @@ def build_default_cleaner() -> PeriodicCleaner:
             )
         return _run
 
+    def _maybe_add(enabled: bool, name: str, factory: Callable[[], Callable[[], Awaitable[dict]]]):
+        if not enabled:
+            logger.info(f"⏭️ Skipping cleaner `{name}` (disabled by config).")
+            return
+        cleaner.add_job(name, factory())
+        logger.success(f"✅ Registered cleaner `{name}`.")
+
+    def _skip_if_nonpositive(keep_value: int, unit: str, name: str) -> bool:
+        try:
+            v = int(keep_value)
+        except Exception:
+            logger.warning(f"⚠️ `{name}` retention value invalid: {keep_value!r}. Will still register.")
+            return False
+        if v <= 0:
+            logger.info(f"⏭️ Skipping cleaner `{name}` (keep_{unit} <= 0).")
+            return True
+        return False
+
     # Add tables for cleaning
-    cleaner.add_job(
-        "pokemon_iv_daily_events",
-        daily_job("pokemon_iv_daily_events", AppConfig.clean_pokemon_older_than_x_days),
-    )
-    cleaner.add_job(
-        "raids_daily_events",
-        daily_job("raids_daily_events", AppConfig.clean_raid_older_than_x_days),
-    )
-    cleaner.add_job(
-        "quests_item_daily_events",
-        daily_job("quests_item_daily_events", AppConfig.clean_quest_older_than_x_days),
-    )
-    cleaner.add_job(
-        "quests_pokemon_daily_events",
-        daily_job("quests_pokemon_daily_events", AppConfig.clean_quest_older_than_x_days),
-    )
-    cleaner.add_job(
-        "invasions_daily_events",
-        daily_job("invasions_daily_events", AppConfig.clean_invasion_older_than_x_days),
-    )
+    # Daily Tables
+    if not _skip_if_nonpositive(AppConfig.clean_pokemon_older_than_x_days, "days", "pokemon_iv_daily_events"):
+        _maybe_add(
+            AppConfig.store_sql_pokemon_aggregation,
+            "pokemon_iv_daily_events",
+            lambda: daily_job("pokemon_iv_daily_events", AppConfig.clean_pokemon_older_than_x_days),
+        )
+
+    if not _skip_if_nonpositive(AppConfig.clean_raid_older_than_x_days, "days", "raids_daily_events"):
+        _maybe_add(
+            AppConfig.store_sql_raid_aggregation,
+            "raids_daily_events",
+            lambda: daily_job("raids_daily_events", AppConfig.clean_raid_older_than_x_days),
+        )
+
+    if not _skip_if_nonpositive(AppConfig.clean_quest_older_than_x_days, "days", "quests_daily_events"):
+        _maybe_add(
+            AppConfig.store_sql_quest_aggregation,
+            "quests_item_daily_events",
+            lambda: daily_job("quests_item_daily_events", AppConfig.clean_quest_older_than_x_days),
+        )
+        _maybe_add(
+            AppConfig.store_sql_quest_aggregation,
+            "quests_pokemon_daily_events",
+            lambda: daily_job("quests_pokemon_daily_events", AppConfig.clean_quest_older_than_x_days),
+        )
+
+    if not _skip_if_nonpositive(AppConfig.clean_invasion_older_than_x_days, "days", "invasions_daily_events"):
+        _maybe_add(
+            AppConfig.store_sql_invasion_aggregation,
+            "invasions_daily_events",
+            lambda: daily_job("invasions_daily_events", AppConfig.clean_invasion_older_than_x_days),
+        )
 
     # MONTHLY table
     SHINY_TABLE = "shiny_username_rates"
-    async def shiny_monthly():
-        return await clean_monthly_partitions(
-            table=SHINY_TABLE,
-            column="month_year",
-            keep_months=AppConfig.clean_pokemon_shiny_older_than_x_months,
-            dry_run=False,
+    def shiny_monthly():
+        async def _run():
+            return await clean_monthly_partitions(
+                table=SHINY_TABLE,
+                column="month_year",
+                keep_months=AppConfig.clean_pokemon_shiny_older_than_x_months,
+                dry_run=False,
+            )
+        return _run
+
+    if not _skip_if_nonpositive(AppConfig.clean_pokemon_shiny_older_than_x_months, "months", "pokemon_shiny_rates_monthly"):
+        _maybe_add(
+            AppConfig.store_sql_pokemon_shiny,
+            "pokemon_shiny_rates_monthly",
+            shiny_monthly,
         )
-    cleaner.add_job("pokemon_shiny_rates_monthly", shiny_monthly)
 
     return cleaner
