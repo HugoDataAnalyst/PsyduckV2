@@ -1,13 +1,4 @@
 {
-    "DUCKDB": {
-        "max_memory_ram_gb": 2,
-        "max_cpu_cores": 2,
-        "duckdb_path": "data/analytics.duckdb",
-        "clean_pokemon_data_older_than_x_days": 30,
-        "clean_raids_data_older_than_x_days": 30,
-        "clean_quests_data_older_than_x_days": 30,
-        "clean_invasions_data_older_than_x_days": 30
-    },
     "SQL": {
         "store_sql_pokemon_aggregation": true,
         "store_sql_pokemon_shiny": true,

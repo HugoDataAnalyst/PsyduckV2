@@ -59,15 +59,6 @@ def get_env_int(name: str, default = None) -> Optional[int]:
 def retention_ms(hours: int) -> int:
     return hours * 3600 * 1000
 
-# DUCKDB Settings
-duckdb_cores = int(config.get('DUCKDB', {}).get("max_cpu_cores", 2))
-duckdb_max_ram = int(config.get('DUCKDB', {}).get("max_memory_ram_gb", 2))
-duckdb_path = str(config.get('DUCKDB', {}).get("duckdb_path", "data/analytics.duckdb"))
-duckdb_poke_clean_days = int(config.get('DUCKDB', {}).get("clean_pokemon_data_older_than_x_days", 30))
-duckdb_raid_clean_days = int(config.get('DUCKDB', {}).get("clean_raids_data_older_than_x_days", 30))
-duckdb_quest_clean_days = int(config.get('DUCKDB', {}).get("clean_quests_data_older_than_x_days", 30))
-duckdb_invasion_clean_days = int(config.get('DUCKDB', {}).get("clean_invasions_data_older_than_x_days", 30))
-
 # Database Settings
 db_host = get_env_var('DB_HOST')
 db_port = get_env_int('DB_PORT', 3306)
