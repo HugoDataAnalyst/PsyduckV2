@@ -129,6 +129,15 @@ class RaidSQLProcessor:
                             FROM_UNIXTIME(t.first_seen_epoch) AS seen_at,
                             DATE(FROM_UNIXTIME(t.first_seen_epoch)) AS day_date
                         FROM tmp_rde t
+                        ON DUPLICATE KEY UPDATE
+                            raid_pokemon        = VALUES(raid_pokemon),
+                            raid_level          = VALUES(raid_level),
+                            raid_form           = VALUES(raid_form),
+                            raid_team           = VALUES(raid_team),
+                            raid_costume        = VALUES(raid_costume),
+                            raid_is_exclusive   = VALUES(raid_is_exclusive),
+                            raid_ex_raid_eligible = VALUES(raid_ex_raid_eligible),
+                            area_id             = VALUES(area_id)
                     """)
 
                     await cur.execute("DROP TEMPORARY TABLE IF EXISTS tmp_rde")
