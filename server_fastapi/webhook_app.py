@@ -3,17 +3,18 @@ import config as AppConfig
 from fastapi import FastAPI, Response, openapi
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from utils.logger import logger
-from utils.koji_geofences import KojiGeofences
-from sql.utils.create_partitions import ensure_daily_partitions, ensure_monthly_partitions
-from sql.tasks.partition_ensurer import DailyPartitionEnsurer, MonthlyPartitionEnsurer
-from sql.tasks.golbat_pokestops import GolbatSQLPokestops
-from sql.tasks.cleaners.global_partition_cleaner import build_default_cleaner
 from server_fastapi.routes import data_api, webhook_router
 from server_fastapi import global_state
 from my_redis.connect_redis import RedisManager
 from server_fastapi.utils import details, secure_api
 from fastapi.openapi.docs import get_swagger_ui_html
+from utils.logger import logger
+from utils.koji_geofences import KojiGeofences
+import sql.connect_db as ConnectDB
+from sql.utils.create_partitions import ensure_daily_partitions, ensure_monthly_partitions
+from sql.tasks.partition_ensurer import DailyPartitionEnsurer, MonthlyPartitionEnsurer
+from sql.tasks.golbat_pokestops import GolbatSQLPokestops
+from sql.tasks.cleaners.global_partition_cleaner import build_default_cleaner
 from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
 from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
@@ -272,6 +273,8 @@ async def lifespan(app: FastAPI):
 
     # Close Redis pools
     await redis_manager.close_redis()
+    # Close DB connection
+    await ConnectDB.close_db()
 
 # Custom Swagger UI HTML template
 def custom_swagger_ui_html(*args, **kwargs) -> Response:
