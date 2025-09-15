@@ -31,10 +31,8 @@ def upgrade():
         seen_at      DATETIME NOT NULL,
         day_date     DATE NOT NULL,
         PRIMARY KEY (day_date, pokestop, seen_at),
-        KEY ix_idv_daily_area     (day_date, area_id),
-        KEY ix_idv_pokestop_daily (pokestop, day_date),
-        KEY ix_idv_area_species_daily (area_id, display_type, `character`, grunt, confirmed, seen_at, day_date),
-        KEY ix_idv_pokestop_species_daily (area_id, pokestop, display_type, `character`, grunt, confirmed, seen_at, day_date)
+        KEY ix_idv_area_day_pstop_disp_char (area_id, day_date, pokestop, display_type, `character`),
+        KEY ix_idv_area_day_char_disp_pstop (area_id, day_date, `character`, display_type, pokestop)
     )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4

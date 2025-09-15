@@ -34,10 +34,8 @@ def upgrade():
         day_date          DATE NOT NULL,
 
         PRIMARY KEY (day_date, gym, seen_at),
-        KEY ix_rdv_month_area   (day_date, area_id),
-        KEY ix_rdv_gym_daily    (gym, day_date),
-        KEY ix_rdv_area_species_daily (area_id, raid_pokemon, raid_form, day_date, seen_at),
-        KEY ix_rdv_gym_species_daily (area_id, gym, raid_pokemon, raid_form, day_date, seen_at)
+        KEY ix_dv_area_day_gym_rp_rf_rl (area_id, day_date, gym, raid_pokemon, raid_form, raid_level),
+        KEY ix_dv_area_day_rp_rf_rl_gym (area_id, day_date, raid_pokemon, raid_form, raid_level, gym)
     )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4

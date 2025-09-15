@@ -29,8 +29,8 @@ def upgrade():
         month_year  SMALLINT UNSIGNED NOT NULL,
         total_count INT UNSIGNED NOT NULL DEFAULT 0,
         PRIMARY KEY (month_year, username, pokemon_id, form, shiny, area_id),
-        KEY ix_sur_username_month (username, month_year),
-        KEY ix_sur_month_area     (month_year, area_id)
+        KEY ix_sur_my_pid_form_user_shiny_cnt (month_year, pokemon_id, form, username, shiny, total_count),
+        KEY ix_sur_my_area_pid_form_user_shiny_cnt (month_year, area_id, pokemon_id, form, username, shiny, total_count)
     )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4

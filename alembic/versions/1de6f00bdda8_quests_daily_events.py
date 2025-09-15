@@ -26,21 +26,15 @@ def upgrade():
         seen_at        DATETIME NOT NULL,
         day_date       DATE NOT NULL,
         mode           TINYINT  UNSIGNED NOT NULL,   -- 0=normal, 1=ar
-        task_type      SMALLINT UNSIGNED NOT NULL,   -- normal_type or ar_type
+        task_type      SMALLINT UNSIGNED NOT NULL,
 
         item_id        SMALLINT UNSIGNED NOT NULL,
         item_amount    SMALLINT UNSIGNED NOT NULL,
 
         PRIMARY KEY (day_date, pokestop, seen_at, mode),
 
-        KEY ix_qidv_daily_area     (day_date, seen_at, area_id),
-        KEY ix_qidv_pokestop_daily (pokestop, seen_at, day_date),
-        KEY ix_qidv_task_daily    (task_type, seen_at, day_date),
-        KEY ix_qidv_item_daily    (item_id, item_amount, day_date),
-        KEY ix_qidv_pokestop_item_daily (pokestop, item_id, item_amount, seen_at, day_date),
-        KEY ix_qidv_task_item_daily (task_type, item_id, item_amount, seen_at, day_date),
-        KEY ix_qidv_pokestop_task_item_daily (pokestop, task_type, item_id, item_amount, seen_at, day_date),
-        KEY ix_qidv_pokestop_task_item_area_daily (area_id, pokestop, task_type, item_id, item_amount, seen_at, day_date)
+        KEY ix_qidv_area_day_mode_task_pstop (area_id, day_date, mode, task_type, pokestop),
+        KEY ix_qidv_area_day_mode_task_item_pstop (area_id, day_date, mode, task_type, item_id, item_amount, pokestop)
 
     )
     ENGINE=InnoDB
@@ -58,23 +52,15 @@ def upgrade():
         seen_at        DATETIME NOT NULL,
         day_date       DATE NOT NULL,
         mode           TINYINT  UNSIGNED NOT NULL,   -- 0=normal, 1=ar
-        task_type      SMALLINT UNSIGNED NOT NULL,   -- normal_type or ar_type
+        task_type      SMALLINT UNSIGNED NOT NULL,
 
         poke_id        SMALLINT UNSIGNED NOT NULL,
         poke_form      VARCHAR(15) NOT NULL,
 
-        total_count    INT      UNSIGNED NOT NULL DEFAULT 0,
-
         PRIMARY KEY (day_date, pokestop, seen_at, mode),
 
-        KEY ix_qpdv_daily_area     (day_date, seen_at, area_id),
-        KEY ix_qpdv_pokestop_daily (pokestop, seen_at, day_date),
-        KEY ix_qpdv_task_daily     (task_type, seen_at, day_date),
-        KEY ix_qpdv_poke_daily     (poke_id, poke_form, seen_at, day_date),
-        KEY ix_qpdv_pokestop_poke_daily (pokestop, poke_id, poke_form, seen_at, day_date),
-        KEY ix_qpdv_task_poke_daily (task_type, poke_id, poke_form, seen_at, day_date),
-        KEY ix_qpdv_pokestop_task_poke_daily (pokestop, task_type, poke_id, poke_form, seen_at, day_date),
-        KEY ix_qpdv_pokestop_task_poke_area_daily (area_id, pokestop, task_type, poke_id, poke_form, seen_at, day_date)
+        KEY ix_qpdv_area_day_mode_task_pstop (area_id, day_date, mode, task_type, pokestop),
+        KEY ix_qpdv_area_day_mode_task_poke_pstop (area_id, day_date, mode, task_type, poke_id, poke_form, pokestop)
     )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
