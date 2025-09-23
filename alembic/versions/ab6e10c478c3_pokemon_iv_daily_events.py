@@ -32,7 +32,7 @@ def upgrade():
       PRIMARY KEY (day_date, spawnpoint, seen_at),
       KEY ix_ev_area_day_sp_pkf   (area_id, day_date, spawnpoint, pokemon_id, form),
       KEY ix_ev_area_day_iv_sp_pkf  (area_id, day_date, iv, spawnpoint, pokemon_id, form),
-      KEY ix_ev_area_day_pid_iv_sp_f  (area_id, day_date, pokemon_id, iv, spawnpoint, pokemon_id, form)
+      KEY ix_ev_area_day_pid_iv_sp_f  (area_id, day_date, pokemon_id, iv, spawnpoint, form)
   )
     ENGINE=InnoDB
     DEFAULT CHARSET=utf8mb4
