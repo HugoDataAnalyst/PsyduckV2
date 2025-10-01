@@ -124,6 +124,9 @@ store_raids_timeseries = str(config.get('IN-MEMORY', {}).get('store_raids_timese
 store_invasions_timeseries = str(config.get('IN-MEMORY', {}).get('store_invasions_timeseries', True)).upper() == "TRUE"
 store_quests_timeseries = str(config.get('IN-MEMORY', {}).get('store_quests_timeseries', True)).upper() == "TRUE"
 
+# Cleanup Redis Timeseries
+cleanup_interval_seconds = int(config.get("CLEAN_REDIS_TS", {}).get("cleanup_interval_seconds", 1800))
+
 # Golbat Pokestops
 pokestop_cache_expiry_seconds = config.get("golbat_pokestops", {}).get("pokestop_cache_expiry_seconds", 86400)
 pokestop_refresh_interval_seconds = config.get("golbat_pokestops", {}).get("pokestop_refresh_interval_seconds", 86300)

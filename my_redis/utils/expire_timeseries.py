@@ -255,7 +255,7 @@ async def periodic_cleanup() -> None:
 
             duration = time.time() - start_time
             # sleep the remainder of an hour
-            sleep_time = max(3600 - duration, 5)
+            sleep_time = max(AppConfig.cleanup_interval_seconds - duration, 5)
             logger.success(f"✅ Cleanup completed. 💤 Sleeping for ⏱️ {sleep_time:.1f}s")
             await asyncio.sleep(sleep_time)
 

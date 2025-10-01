@@ -49,5 +49,8 @@
         "timeseries_raid": 72,
         "timeseries_invasion": 72,
         "timeseries_quest": 72
+    },
+    "CLEAN_REDIS_TS": {
+        "cleanup_interval_seconds": 1800
     }
 }
