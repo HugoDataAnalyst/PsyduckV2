@@ -14,8 +14,18 @@ import warnings
 warnings.filterwarnings("ignore", message="Duplicate entry")
 
 # Initialize logging
-setup_logging(AppConfig.log_level, {"file": AppConfig.log_file, "function": True})
-
+setup_logging(
+    AppConfig.log_level,
+    {
+        "to_file": AppConfig.log_file,
+        "file_path": "logs/psyduckv2.log",
+        "rotation": "5 MB",
+        "keep_total": 5,
+        "compression": "gz",
+        "show_file": True,
+        "show_function": True,
+    },
+)
 # Initialize Redis connection
 redis_manager = RedisManager()
 
