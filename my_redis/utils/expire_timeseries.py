@@ -2,6 +2,8 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Dict, Optional, Tuple
+
+from numpy import byte
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 import config as AppConfig
@@ -82,6 +84,17 @@ end
 return { removed, emptied, hcursor }
 """
 
+def is_noscript_error(e: Exception) -> bool:
+    s = str(e)
+    # cover common server/client variations
+    needles = (
+        "NOSCRIPT",                    # classic Redis
+        "No matching script",          # some variants
+        "Please use EVAL",             # part of the same message
+    )
+    s_up = s.upper()
+    return any(n.upper() in s_up for n in needles)
+
 def get_retention_mapping() -> Dict[str, int]:
     """Timeseries retention (in seconds)."""
     return {
@@ -99,8 +112,13 @@ async def _client():
 
 async def _ensure_per_key_script(client):
     global _PER_KEY_CLEAN_SHA
-    if not _PER_KEY_CLEAN_SHA:
-        _PER_KEY_CLEAN_SHA = await client.script_load(PER_KEY_CLEAN_SCRIPT)
+    try:
+        if not _PER_KEY_CLEAN_SHA:
+            _PER_KEY_CLEAN_SHA = await client.script_load(PER_KEY_CLEAN_SCRIPT)
+    except Exception as e:
+        # If it fails, clear SHA cache to force reload on next call
+        _PER_KEY_CLEAN_SHA = None
+        raise
 
 async def _try_acquire_lock(client) -> bool:
     # SET lock NX EX to avoid overlapping runs across processes
@@ -119,7 +137,13 @@ async def _release_lock(client):
 
 async def _clean_hash_key(client, key: str, cutoff: int) -> Tuple[int, int, str]:
     """Run small-batch cleanup on a single hash key. Returns (removed, emptied, next_cursor)."""
+    global _PER_KEY_CLEAN_SHA
     await _ensure_per_key_script(client)
+
+    # Redis may return bytes or bytearrays; convert to str for Lua
+    if isinstance(key, (bytes, bytearray)):
+        key = key.decode("utf-8", errors="ignore")
+
     try:
         removed, emptied, next_cursor = await client.evalsha(
             _PER_KEY_CLEAN_SHA,
@@ -133,8 +157,11 @@ async def _clean_hash_key(client, key: str, cutoff: int) -> Tuple[int, int, str]
         # Redis may return integers as ints already depending on client
         return int(removed or 0), int(emptied or 0), str(next_cursor or "0")
     except Exception as e:
-        # handle NOSCRIPT race
-        if "NOSCRIPT" in str(e).upper():
+        # handle all NOSCRIPT variants (server restarted, script cache flushed, etc.)
+        if is_noscript_error(e):
+            logger.warning("📜 Per-key cleanup script missing. Reloading and retrying…")
+            # force reload
+            _PER_KEY_CLEAN_SHA = None
             await _ensure_per_key_script(client)
             removed, emptied, next_cursor = await client.evalsha(
                 _PER_KEY_CLEAN_SHA,
