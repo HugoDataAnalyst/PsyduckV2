@@ -1,8 +1,10 @@
 from urllib import response
 import config as AppConfig
 from datetime import datetime
+from typing import List
 from server_fastapi.utils import secure_api
-from sql.utils.time_parser import parse_time_input
+from sql.utils.time_parser import parse_time_input, month_parse_time_input, parse_time_to_datetime
+from sql.utils.area_parser import resolve_area_id_by_name
 from server_fastapi import global_state
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, dependencies
 from typing import Optional
@@ -16,12 +18,12 @@ from my_redis.queries.gets.pokemons.pokemon_tth_timeseries_retrieval import Poke
 from my_redis.queries.gets.invasions.invasion_timeseries_retrieval import InvasionTimeSeries
 from my_redis.queries.gets.raids.raid_timeseries_retrieval import RaidTimeSeries
 from my_redis.queries.gets.quests.quest_timeseries_retrieval import QuestTimeSeries
-from sql.queries.pokemon_gets import PokemonSQLQueries
-from sql.queries.pokemon_shiny_gets import ShinySQLQueries
-from sql.queries.raid_gets import RaidSQLQueries
-from sql.queries.invasion_gets import InvasionSQLQueries
-from sql.queries.quest_gets import QuestSQLQueries
 from sql.tasks.golbat_pokestops import GolbatSQLPokestops
+from sql.queries.pokemon_gets import HeatmapFilters, fetch_pokemon_heatmap_range
+from sql.queries.pokemon_shiny_gets import fetch_shiny_rates_range
+from sql.queries.raid_gets import RaidFilters, fetch_raids_range
+from sql.queries.invasion_gets import InvasionFilters, fetch_invasions_range
+from sql.queries.quest_gets import QuestItemFilters, QuestMonFilters, fetch_quests_range
 
 router = APIRouter()
 
@@ -44,6 +46,14 @@ def _parse_csv_param(v: str):
     if not s or s.lower() == "all":
         return None
     return {part.strip() for part in s.split(",") if part.strip()}
+
+def _to_int_list(name: str, s: Optional[set[str]]) -> Optional[List[int]]:
+    if s is None:
+        return None
+    try:
+        return sorted({int(x) for x in s})
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"❌ {name} must be integers (CSV).")
 
 
 @router.get(
@@ -904,41 +914,77 @@ async def get_quest_timeseries(
     dependencies=dependencies_list
 )
 async def get_pokemon_heatmap_data(
-    start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
-    end_time: str = Query(..., description="End time as 202504 (2025 year month 04)"),
-    response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter"),
-    pokemon_id: str = Query("all", description="all or Pokémon ID"),
-    form: str = Query("all", description="all or Pokémon Form ID"),
-    iv_bucket: str = Query("all", description="all or IV specific bucket(0, 25, 50, 75, 90, 100), choose one."),
-    limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
-    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+    start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
+    end_time: str   = Query(..., description="ISO or 'now' / relative"),
+    response_format: str = Query("json", description="json or text"),
+    area: str       = Query(..., description="Single area name (exactly one; no lists)"),
+    pokemon_id: str = Query("all", description="CSV of Pokémon IDs or 'all'"),
+    form: str       = Query("all", description="CSV of forms or 'all'"),
+    iv: str         = Query("all", description="IV conditions: '>=90,==0' or 'all'"),
+    level: str      = Query("all", description="Level conditions: '>=30' or 'all'"),
+    limit: Optional[int] = Query(0, description="Optional per-day limit; 0 = no limit"),
+    concurrency: Optional[int] = Query(4, description="Max parallel day-queries"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
 ):
-    # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
 
-    # Normalize and validate inputs
-    if response_format.lower() not in ["json", "text"]:
-        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+    fmt = (response_format or "json").lower()
+    if fmt not in ("json", "text"):
+        raise HTTPException(status_code=400, detail="❌ response_format must be json or text")
+
+    # area to id - one area only
+    area_norm = (area or "").strip()
+    if area_norm.lower() in ("all", "global") or "," in area_norm:
+        raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
+    area_id = await resolve_area_id_by_name(area_norm)
+
+    # parse time to DATETIME - precise seen_at window
+    try:
+        seen_from = parse_time_to_datetime(start_time)
+        seen_to   = parse_time_to_datetime(end_time)
+        if seen_to < seen_from:
+            raise ValueError("end_time before start_time")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
+
+    # parse CSVs
+    pid_set  = _parse_csv_param(pokemon_id)
+    form_set = _parse_csv_param(form)
+    try:
+        pid_list  = sorted({int(x) for x in pid_set}) if pid_set else None
+    except Exception:
+        raise HTTPException(status_code=400, detail="❌ pokemon_id must be integers (CSV).")
+    form_list = sorted(form_set) if form_set else None
+
+    filters = HeatmapFilters(
+        pokemon_ids=pid_list,
+        forms=form_list,
+        iv_expr=None if (iv or "all").lower() == "all" else iv,
+        level_expr=None if (level or "all").lower() == "all" else level,
+    )
 
     try:
-        start_dt = parse_time_input(start_time)
-        end_dt = parse_time_input(end_time)
+        result = await fetch_pokemon_heatmap_range(
+            area_id=int(area_id),
+            seen_from=seen_from,
+            seen_to=seen_to,
+            filters=filters,
+            limit_per_day=int(limit or 0),
+            concurrency=int(concurrency or 4),
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"❌ {ve}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"❌ Invalid time format: {e}")
+        raise HTTPException(status_code=500, detail=f"❌ Query failed: {e}")
 
-    # Initialize the counter retrieval object
-    pokemon_heatmap = PokemonSQLQueries(area, start_dt, end_dt, pokemon_id, form, iv_bucket, limit)
-
-    # Retrieve data dynamically based on counter type and interval
-
-    result = await pokemon_heatmap.pokemon_sql_heatmap()
-
-    if response_format.lower() == "json":
+    if fmt == "json":
         return result
-    else:
-        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-        return text_output
+
+    # text fallback
+    lines = [f"range={result['start_time']}..{result['end_time']} area={area_norm} rows={result['rows']}"]
+    for r in result["data"]:
+        lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} (#{r['pokemon_id']}/{r['form']} @ {r['spawnpoint']})")
+    return "\n".join(lines)
 
 
 @router.get(
@@ -947,44 +993,66 @@ async def get_pokemon_heatmap_data(
     dependencies=dependencies_list
 )
 async def get_shiny_rate_data(
-    start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
-    end_time: str = Query(..., description="End time as 202504 (2025 year month 04)"),
+    start_time: str = Query(..., description="Start month as 202503 (YYYYMM or YYMM)"),
+    end_time: str   = Query(..., description="End month as 202504 (YYYYMM or YYMM)"),
     response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter"),
-    username: str = Query("all", description="all or specific username"),
-    pokemon_id: str = Query("all", description="all or Pokémon ID"),
-    form: str = Query("all", description="all or Pokémon Form ID"),
-    shiny: str = Query("all", description="all or shiny status (0=non-shiny, 1=shiny)"),
-    limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
+    area: str       = Query("global", description="Area name or 'all'/'global'"),
+    username: str   = Query("all", description="All or a specific username"),
+    pokemon_id: str = Query("all", description="All or CSV of Pokémon IDs"),
+    form: str       = Query("all", description="All or CSV of form strings"),
+    min_user_n: int = Query(0, description="Per-user minimum encounters to include (noise control)"),
+    limit: Optional[int] = Query(0, description="Limit rows in the final output; 0 = no limit"),
+    concurrency: Optional[int] = Query(4, description="Parallel month queries"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
-    # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
 
-    # Normalize and validate inputs
-    if response_format.lower() not in ["json", "text"]:
+    resp_fmt = (response_format or "json").lower()
+    if resp_fmt not in ("json", "text"):
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
     try:
-        start_dt = parse_time_input(start_time)
-        end_dt = parse_time_input(end_time)
+        start_month_date = month_parse_time_input(start_time)  # returns date(y, m, 1)
+        end_month_date   = month_parse_time_input(end_time)
+        if end_month_date < start_month_date:
+            raise ValueError("end_time before start_time")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"❌ Invalid time format: {e}")
 
-    if shiny not in ["all", "0", "1"]:
-        raise HTTPException(status_code=400, detail="❌ Invalid shiny value. Must be all, 0, or 1.")
+    try:
+        result = await fetch_shiny_rates_range(
+            start_month_date=start_month_date,
+            end_month_date=end_month_date,
+            area_name=area,
+            usernames_csv=username,
+            pokemon_id=pokemon_id,
+            form=form,
+            min_user_n=int(min_user_n or 0),
+            limit=int(limit or 0),
+            concurrency=int(concurrency or 4),
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"❌ {ve}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"❌ Query failed: {e}")
 
-    # Initialize the shiny rate retrieval object
-    shiny_rates = ShinySQLQueries(area, start_dt, end_dt, username, pokemon_id, form, shiny, limit)
-
-    # Retrieve data
-    result = await shiny_rates.shiny_sql_rates()
-
-    if response_format.lower() == "json":
+    if resp_fmt == "json":
         return result
-    else:
-        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-        return text_output
+
+    # text fallback
+    lines = [
+        f"range={result['start_month']}..{result['end_month']}",
+        f"area={result['area']}",
+        f"rows={result['rows']}",
+    ]
+    for r in result["data"]:
+        lines.append(
+            f"{r['pokemon_id']}/{r['form']} "
+            f"macro={r['shiny_pct_macro']}% pooled={r['shiny_pct_pooled']}% "
+            f"users={r['users_contributing']} n={r['total_encounters']}"
+        )
+    return "\n".join(lines)
+
 
 
 @router.get(
@@ -993,58 +1061,101 @@ async def get_shiny_rate_data(
     dependencies=dependencies_list
 )
 async def get_raid_data(
-    start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
-    end_time: str = Query(..., description="End time as 202504 (2025 year month 04)"),
-    response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter"),
-    gym_id: str = Query("all", description="all or specific gym ID"),
-    raid_pokemon: str = Query("all", description="all or raid boss Pokémon ID"),
-    raid_level: str = Query("all", description="all or raid level (1-5)"),
-    raid_form: str = Query("all", description="all or raid boss form"),
-    raid_team: str = Query("all", description="all or controlling team ID"),
-    raid_costume: str = Query("all", description="all or costume ID"),
-    raid_is_exclusive: str = Query("all", description="all or exclusive status (0 or 1)"),
-    raid_ex_raid_eligible: str = Query("all", description="all or EX eligibility (0 or 1)"),
-    limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
+    start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
+    end_time: str   = Query(..., description="ISO or 'now' / relative"),
+    response_format: str = Query("json", description="json or text"),
+    area: str = Query(..., description="Single area name (exactly one; no lists)"),
+    gym_id: str = Query("all"), raid_pokemon: str = Query("all"),
+    raid_level: str = Query("all"), raid_form: str = Query("all"),
+    raid_team: str = Query("all"), raid_costume: str = Query("all"),
+    raid_is_exclusive: str = Query("all"), raid_ex_raid_eligible: str = Query("all"),
+    limit: Optional[int] = Query(0, description="Optional per-day limit; 0 = no limit."),
+    concurrency: Optional[int] = Query(4, description="Max parallel day-queries"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
-    # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
 
-    # Normalize and validate inputs
-    if response_format.lower() not in ["json", "text"]:
-        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+    fmt = (response_format or "json").lower()
+    if fmt not in ("json", "text"):
+        raise HTTPException(status_code=400, detail="❌ response_format must be json or text.")
 
+    # Area to id - exactly one area
+    area_norm = (area or "").strip()
+    if area_norm.lower() in ("all", "global") or "," in area_norm:
+        raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
     try:
-        start_dt = parse_time_input(start_time)
-        end_dt = parse_time_input(end_time)
+        area_id = await resolve_area_id_by_name(area_norm)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"❌ Invalid time format: {e}")
+        raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
 
-    # Initialize the raid retrieval object
-    raid_data = RaidSQLQueries(
-        area=area,
-        start=start_dt,
-        end=end_dt,
-        gym_id=gym_id,
-        raid_pokemon=raid_pokemon,
-        raid_level=raid_level,
-        raid_form=raid_form,
-        raid_team=raid_team,
-        raid_costume=raid_costume,
-        raid_is_exclusive=raid_is_exclusive,
-        raid_ex_raid_eligible=raid_ex_raid_eligible,
-        limit=limit
+    # Parse times to DATETIME
+    try:
+        seen_from = parse_time_to_datetime(start_time)
+        seen_to   = parse_time_to_datetime(end_time)
+        if seen_to < seen_from:
+            raise ValueError("end_time before start_time")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
+
+    # CSVs parsing
+    gyms_set               = _parse_csv_param(gym_id)
+    raid_pokemon_set       = _parse_csv_param(raid_pokemon)
+    raid_form_set          = _parse_csv_param(raid_form)
+    raid_level_set         = _parse_csv_param(raid_level)
+    raid_team_set          = _parse_csv_param(raid_team)
+    raid_costume_set       = _parse_csv_param(raid_costume)
+    raid_is_exclusive_set  = _parse_csv_param(raid_is_exclusive)
+    raid_ex_eligible_set   = _parse_csv_param(raid_ex_raid_eligible)
+
+    # Convert to proper types
+    gyms_list              = sorted(list(gyms_set)) if gyms_set else None
+    raid_pokemon_list      = _to_int_list("raid_pokemon", raid_pokemon_set)
+    raid_form_list         = _to_int_list("raid_form", raid_form_set)
+    raid_level_list        = _to_int_list("raid_level", raid_level_set)
+    raid_team_list         = _to_int_list("raid_team", raid_team_set)
+    raid_costume_list      = _to_int_list("raid_costume", raid_costume_set)
+    raid_is_exclusive_list = _to_int_list("raid_is_exclusive", raid_is_exclusive_set)
+    raid_ex_eligible_list  = _to_int_list("raid_ex_raid_eligible", raid_ex_eligible_set)
+
+    # Build filters dataclass
+    filters = RaidFilters(
+        gyms=gyms_list,
+        raid_pokemon=raid_pokemon_list,
+        raid_form=raid_form_list,
+        raid_level=raid_level_list,
+        raid_team=raid_team_list,
+        raid_costume=raid_costume_list,
+        raid_is_exclusive=raid_is_exclusive_list,
+        raid_ex_raid_eligible=raid_ex_eligible_list,
     )
 
-    # Retrieve data
-    result = await raid_data.raid_sql_data()
+    try:
+        result = await fetch_raids_range(
+            area_id=int(area_id),
+            area_name=area_norm,
+            seen_from=seen_from,
+            seen_to=seen_to,
+            filters=filters,
+            limit_per_day=int(limit or 0),
+            concurrency=int(concurrency or 4),
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"❌ {ve}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"❌ Query failed: {e}")
 
-    if response_format.lower() == "json":
+    if fmt == "json":
         return result
-    else:
-        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-        return text_output
+
+    # Text fallback
+    lines = [f"range={result['start_time']}..{result['end_time']} area={result['area']} rows={result['rows']}"]
+    for r in result["data"]:
+        lines.append(
+            f"{r['latitude']},{r['longitude']} -> {r['count']} "
+            f"(gym={r['gym']} boss={r['raid_pokemon']}/{r['raid_form']} lvl={r['raid_level']})"
+        )
+    return "\n".join(lines)
+
 
 
 @router.get(
@@ -1053,52 +1164,91 @@ async def get_raid_data(
     dependencies=dependencies_list
 )
 async def get_invasion_data(
-    start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
-    end_time: str = Query(..., description="End time as 202504 (2025 year month 04)"),
-    response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter"),
-    pokestop_id: str = Query("all", description="all or specific pokestop ID"),
-    display_type: str = Query("all", description="all or invasion display type"),
-    character: str = Query("all", description="all or invasion character"),
-    grunt: str = Query("all", description="all or grunt type"),
-    confirmed: str = Query("all", description="all or confirmed status (0 or 1)"),
-    limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
+    start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
+    end_time: str   = Query(..., description="ISO or 'now' / relative"),
+    response_format: str = Query("json", description="json or text"),
+    area: str = Query(..., description="Single area name (exactly one; no lists)"),
+    pokestop_id: str = Query("all", description="CSV of pokestop ids or 'all'"),
+    display_type: str = Query("all", description="CSV of invasion display types or 'all'"),
+    character: str = Query("all", description="CSV of invasion characters or 'all'"),
+    grunt: str = Query("all", description="CSV of grunt ids or 'all'"),
+    confirmed: str = Query("all", description="CSV of 0/1 or 'all'"),
+    limit: Optional[int] = Query(0, description="Optional per-day limit; 0 = no limit."),
+    concurrency: Optional[int] = Query(4, description="Max parallel day-queries"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
-    # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
 
-    # Normalize and validate inputs
-    if response_format.lower() not in ["json", "text"]:
-        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+    fmt = (response_format or "json").lower()
+    if fmt not in ("json", "text"):
+        raise HTTPException(status_code=400, detail="❌ response_format must be json or text.")
 
+    # one area only
+    area_norm = (area or "").strip()
+    if area_norm.lower() in ("all", "global") or "," in area_norm:
+        raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
     try:
-        start_dt = parse_time_input(start_time)
-        end_dt = parse_time_input(end_time)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"❌ Invalid time format: {e}")
+        area_id = await resolve_area_id_by_name(area_norm)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
 
-    # Initialize the invasion retrieval object
-    invasion_data = InvasionSQLQueries(
-        area=area,
-        start=start_dt,
-        end=end_dt,
-        pokestop_id=pokestop_id,
-        display_type=display_type,
-        character=character,
-        grunt=grunt,
-        confirmed=confirmed,
-        limit=limit
+    # time window to DATETIME
+    try:
+        seen_from = parse_time_to_datetime(start_time)
+        seen_to   = parse_time_to_datetime(end_time)
+        if seen_to < seen_from:
+            raise ValueError("end_time before start_time")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
+
+    # CSV params
+    pstop_set     = _parse_csv_param(pokestop_id)
+    dtype_set     = _parse_csv_param(display_type)
+    char_set      = _parse_csv_param(character)
+    grunt_set     = _parse_csv_param(grunt)
+    confirmed_set = _parse_csv_param(confirmed)
+
+    pokestops_list = sorted(list(pstop_set)) if pstop_set else None  # strings
+    dtype_list     = _to_int_list("display_type", dtype_set)
+    char_list      = _to_int_list("character", char_set)
+    grunt_list     = _to_int_list("grunt", grunt_set)
+    confirmed_list = _to_int_list("confirmed", confirmed_set)
+
+    # build filters and run
+    filters = InvasionFilters(
+        pokestops=pokestops_list,
+        display_types=dtype_list,
+        characters=char_list,
+        grunts=grunt_list,
+        confirmed=confirmed_list,
     )
 
-    # Retrieve data
-    result = await invasion_data.invasion_sql_data()
+    try:
+        result = await fetch_invasions_range(
+            area_id=int(area_id),
+            area_name=area_norm,
+            seen_from=seen_from,
+            seen_to=seen_to,
+            filters=filters,
+            limit_per_day=int(limit or 0),
+            concurrency=int(concurrency or 4),
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"❌ {ve}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"❌ Query failed: {e}")
 
-    if response_format.lower() == "json":
+    if fmt == "json":
         return result
-    else:
-        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-        return text_output
+
+    # text fallback
+    lines = [f"range={result['start_time']}..{result['end_time']} area={result['area']} rows={result['rows']}"]
+    for r in result["data"]:
+        lines.append(
+            f"{r['latitude']},{r['longitude']} -> {r['count']} "
+            f"(pokestop={r['pokestop']} type={r['display_type']} char={r['character']})"
+        )
+    return "\n".join(lines)
 
 
 @router.get(
@@ -1107,57 +1257,128 @@ async def get_invasion_data(
     dependencies=dependencies_list
 )
 async def get_quest_data(
-    start_time: str = Query(..., description="Start time as 202503 (2025 year month 03)"),
-    end_time: str = Query(..., description="End time as 202504 (2025 year month 04)"),
-    response_format: str = Query("json", description="Response format: json or text"),
-    area: str = Query("global", description="Area to filter"),
-    pokestop_id: str = Query("all", description="all or specific pokestop ID"),
-    ar_type: str = Query("all", description="all or AR quest type"),
-    normal_type: str = Query("all", description="all or normal quest type"),
-    reward_ar_type: str = Query("all", description="all or AR reward type"),
-    reward_normal_type: str = Query("all", description="all or normal reward type"),
-    reward_ar_item_id: str = Query("all", description="all or AR reward item ID"),
-    reward_normal_item_id: str = Query("all", description="all or normal reward item ID"),
-    reward_ar_poke_id: str = Query("all", description="all or AR reward Pokémon ID"),
-    reward_normal_poke_id: str = Query("all", description="all or normal reward Pokémon ID"),
-    limit: Optional[int] = Query(0, description="Optional row limit for preview in the UI, 1000 advised."),
+    start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
+    end_time: str   = Query(..., description="ISO or 'now' / relative"),
+    response_format: str = Query("json", description="json or text"),
+    area: str = Query(..., description="Single area name (exactly one; no lists)"),
+    pokestop_id: str = Query("all", description="CSV of pokestop IDs or 'all'"),
+    quest_type: str = Query("all", description="'all' | 'ar' | 'normal'"),
+    reward_ar_type: str = Query("all", description="CSV of AR task_types (items) or 'all'"),
+    reward_normal_type: str = Query("all", description="CSV of normal task_types (items) or 'all'"),
+    reward_ar_item_id: str = Query("all", description="CSV of AR reward item IDs or 'all'"),
+    reward_normal_item_id: str = Query("all", description="CSV of normal reward item IDs or 'all'"),
+    reward_ar_poke_id: str = Query("all", description="CSV of AR reward Pokémon IDs or 'all'"),
+    reward_normal_poke_id: str = Query("all", description="CSV of normal reward Pokémon IDs or 'all'"),
+    limit: Optional[int] = Query(0, description="Optional per-day limit; 0 = no limit."),
+    concurrency: Optional[int] = Query(4, description="Max parallel day-queries"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
-    # Validate secret parameters
     await secure_api.check_secret_header_value(api_secret_header)
 
-    # Normalize and validate inputs
-    if response_format.lower() not in ["json", "text"]:
+    fmt = (response_format or "json").lower()
+    if fmt not in ("json", "text"):
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
+    # area
+    area_norm = (area or "").strip()
+    if area_norm.lower() in ("all", "global") or "," in area_norm:
+        raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
     try:
-        start_dt = parse_time_input(start_time)
-        end_dt = parse_time_input(end_time)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"❌ Invalid time format: {e}")
+        area_id = await resolve_area_id_by_name(area_norm)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
 
-    # Initialize the quest retrieval object
-    quest_data = QuestSQLQueries(
-        area=area,
-        start=start_dt,
-        end=end_dt,
-        pokestop_id=pokestop_id,
-        ar_type=ar_type,
-        normal_type=normal_type,
-        reward_ar_type=reward_ar_type,
-        reward_normal_type=reward_normal_type,
-        reward_ar_item_id=reward_ar_item_id,
-        reward_normal_item_id=reward_normal_item_id,
-        reward_ar_poke_id=reward_ar_poke_id,
-        reward_normal_poke_id=reward_normal_poke_id,
-        limit=limit
+    # time window
+    try:
+        seen_from = parse_time_to_datetime(start_time)
+        seen_to   = parse_time_to_datetime(end_time)
+        if seen_to < seen_from:
+            raise ValueError("end_time before start_time")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
+
+    # CSV parser
+    ps_set            = _parse_csv_param(pokestop_id)
+    r_ar_type_set     = _parse_csv_param(reward_ar_type)
+    r_norm_type_set   = _parse_csv_param(reward_normal_type)
+    ar_item_set       = _parse_csv_param(reward_ar_item_id)
+    normal_item_set   = _parse_csv_param(reward_normal_item_id)
+    ar_poke_set       = _parse_csv_param(reward_ar_poke_id)
+    normal_poke_set   = _parse_csv_param(reward_normal_poke_id)
+
+    def _to_int_list(name: str, s: Optional[set[str]]) -> Optional[List[int]]:
+        if s is None: return None
+        try: return sorted({int(x) for x in s})
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"❌ {name} must be integers (CSV).")
+
+    pokestops_list = sorted(list(ps_set)) if ps_set else None
+
+    # quest_type to allowed modes
+    qt = (quest_type or "all").strip().lower()
+    if qt not in ("all", "ar", "normal"):
+        raise HTTPException(status_code=400, detail="❌ quest_type must be 'all', 'ar', or 'normal'.")
+    allowed_modes = None if qt == "all" else ([1] if qt == "ar" else [0])
+
+    # Items filters task_type only provided via reward_*_type
+    items_ar_types     = _to_int_list("reward_ar_type", r_ar_type_set)
+    items_normal_types = _to_int_list("reward_normal_type", r_norm_type_set)
+    items_ar_ids       = _to_int_list("reward_ar_item_id", ar_item_set)
+    items_norm_ids     = _to_int_list("reward_normal_item_id", normal_item_set)
+
+    # Pokémon filters no task_type CSV here; only per-mode poke ids
+    mons_ar_types      = None
+    mons_normal_types  = None
+    mons_ar_poke_ids   = _to_int_list("reward_ar_poke_id", ar_poke_set)
+    mons_norm_poke_ids = _to_int_list("reward_normal_poke_id", normal_poke_set)
+
+    items_filters = QuestItemFilters(
+        pokestops=pokestops_list,
+        allowed_modes=allowed_modes,
+        ar_task_types=items_ar_types,
+        normal_task_types=items_normal_types,
+        ar_item_ids=items_ar_ids,
+        normal_item_ids=items_norm_ids,
+    )
+    mon_filters = QuestMonFilters(
+        pokestops=pokestops_list,
+        allowed_modes=allowed_modes,
+        ar_task_types=mons_ar_types,
+        normal_task_types=mons_normal_types,
+        ar_poke_ids=mons_ar_poke_ids,
+        normal_poke_ids=mons_norm_poke_ids,
     )
 
-    # Retrieve data
-    result = await quest_data.quest_sql_data()
+    try:
+        result = await fetch_quests_range(
+            area_id=int(area_id),
+            area_name=area_norm,
+            seen_from=seen_from,
+            seen_to=seen_to,
+            items_filters=items_filters,
+            mon_filters=mon_filters,
+            limit_per_day=int(limit or 0),
+            concurrency=int(concurrency or 4),
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"❌ {ve}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"❌ Query failed: {e}")
 
-    if response_format.lower() == "json":
+    if fmt == "json":
         return result
-    else:
-        text_output = "\n".join(f"{k}: {v}" for k, v in result.items())
-        return text_output
+
+    # text fallback
+    lines = [
+        f"range={result['start_time']}..{result['end_time']} area={result['area']}",
+        f"[items] rows={result['items']['rows']}"
+    ]
+    for r in result["items"]["data"]:
+        lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
+                     f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
+    lines.append(f"[pokemon] rows={result['pokemon']['rows']}")
+    for r in result["pokemon']['data"]:
+        lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
+                     f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
+    return "\n".join(lines)
+

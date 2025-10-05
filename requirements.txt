@@ -1,10 +1,8 @@
-tortoise-orm==0.24.2
 loguru==0.7.3
 mysql-connector-python==9.2.0
 dotenv==0.9.9
 aiomysql==0.2.0
 cryptography==44.0.2
-aerich==0.8.2
 tomlkit==0.13.2
 redis==5.2.1
 httpx==0.28.1
@@ -12,6 +10,9 @@ shapely==2.0.7
 uvicorn==0.34.0
 fastapi==0.115.11
 timezonefinder==6.5.8
-requests==2.32.3
+requests==2.32.4
 tzlocal==5.3.1
 python-dateutil==2.9.0
+alembic==1.16.5
+sqlalchemy==2.0.43
+pytz==2025.1

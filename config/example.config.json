@@ -6,6 +6,13 @@
         "store_sql_quest_aggregation": true,
         "store_sql_invasion_aggregation": true
     },
+    "CLEAN_SQL": {
+        "clean_pokemon_older_than_x_days": 15,
+        "clean_raid_older_than_x_days": 15,
+        "clean_quest_older_than_x_days": 15,
+        "clean_invasion_older_than_x_days": 15,
+        "clean_pokemon_shiny_older_than_x_months": 3
+    },
     "IN-MEMORY":{
         "store_pokemon_timeseries": true,
         "store_pokemon_tth_timeseries": true,
@@ -19,8 +26,14 @@
     "flusher": {
         "pokemon_max_threshold": 10000,
         "shiny_max_threshold": 10000,
-        "shiny_flush_interval": 20,
-        "pokemon_flush_interval": 20
+        "raid_max_threshold": 10000,
+        "invasion_max_threshold": 10000,
+        "quest_max_threshold": 10000,
+        "shiny_flush_interval": 15,
+        "pokemon_flush_interval": 15,
+        "raid_flush_interval": 15,
+        "invasion_flush_interval": 15,
+        "quest_flush_interval": 15
     },
     "geofences": {
         "expire_cache_seconds": 3600,
@@ -36,5 +49,8 @@
         "timeseries_raid": 72,
         "timeseries_invasion": 72,
         "timeseries_quest": 72
+    },
+    "CLEAN_REDIS_TS": {
+        "cleanup_interval_seconds": 1800
     }
 }

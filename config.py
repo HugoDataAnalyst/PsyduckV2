@@ -46,7 +46,7 @@ def get_env_list(env_var_name: str, default = None) -> List[str]:
 
 def get_env_int(name: str, default = None) -> Optional[int]:
     value = os.getenv(name)
-    if value is None:
+    if not value:
         logger.warning(f"⚠️ Missing environment variable: {name}. Using default: {default}")
         return default
     try:
@@ -68,11 +68,22 @@ db_user = get_env_var('DB_USER', "root")
 db_password = get_env_var('DB_PASSWORD', "root_password")
 db_retry_connection = 5
 db_rest_betwen_connection = 5
+db_container_name = get_env_var('DB_CONTAINER_NAME')
+db_container_port = get_env_int('DB_CONTAINER_PORT')
+
+# SQL Settings
 store_sql_pokemon_aggregation = str(config.get('SQL', {}).get('store_sql_pokemon_aggregation', True)).upper() == "TRUE"
 store_sql_pokemon_shiny = str(config.get('SQL', {}).get('store_sql_pokemon_shiny', True)).upper() == "TRUE"
 store_sql_raid_aggregation = str(config.get('SQL', {}).get('store_sql_raid_aggregation', True)).upper() == "TRUE"
 store_sql_quest_aggregation = str(config.get('SQL', {}).get('store_sql_quest_aggregation', True)).upper() == "TRUE"
 store_sql_invasion_aggregation = str(config.get('SQL', {}).get('store_sql_invasion_aggregation', True)).upper() == "TRUE"
+
+# Clean SQL Settings
+clean_pokemon_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_older_than_x_days", 15))
+clean_raid_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_raid_older_than_x_days", 15))
+clean_quest_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_quest_older_than_x_days", 15))
+clean_invasion_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_invasion_older_than_x_days", 15))
+clean_pokemon_shiny_older_than_x_months = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_shiny_older_than_x_months", 3))
 
 # Redis
 redis_password = get_env_var("REDIS_PASSWORD", "myveryredisstrongpassword")
@@ -89,8 +100,15 @@ redis_max_connections = int(config.get("REDIS", {}).get("redis_connections", 30)
 # Flusher settings
 pokemon_max_threshold = config.get("flusher", {}).get("pokemon_max_threshold", 10000)
 shiny_max_threshold = config.get("flusher", {}).get("shiny_max_threshold", 10000)
+quest_max_threshold = config.get("flusher", {}).get("quest_max_threshold", 10000)
+raid_max_threshold = config.get("flusher", {}).get("raid_max_threshold", 10000)
+invasion_max_threshold = config.get("flusher", {}).get("invasion_max_threshold", 10000)
+quest_flush_interval = config.get("flusher", {}).get("quest_flush_interval", 60)
+raid_flush_interval = config.get("flusher", {}).get("raid_flush_interval", 60)
+invasion_flush_interval = config.get("flusher", {}).get("invasion_flush_interval", 60)
 shiny_flush_interval = config.get("flusher", {}).get("shiny_flush_interval", 60)
 pokemon_flush_interval = config.get("flusher", {}).get("pokemon_flush_interval", 60)
+
 
 # Redis retention settings
 timeseries_pokemon_retention_ms  = retention_ms(config.get("retention_hours", {}).get("timeseries_pokemon", 72))
@@ -105,6 +123,9 @@ store_pokemon_tth_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemo
 store_raids_timeseries = str(config.get('IN-MEMORY', {}).get('store_raids_timeseries', True)).upper() == "TRUE"
 store_invasions_timeseries = str(config.get('IN-MEMORY', {}).get('store_invasions_timeseries', True)).upper() == "TRUE"
 store_quests_timeseries = str(config.get('IN-MEMORY', {}).get('store_quests_timeseries', True)).upper() == "TRUE"
+
+# Cleanup Redis Timeseries
+cleanup_interval_seconds = int(config.get("CLEAN_REDIS_TS", {}).get("cleanup_interval_seconds", 1800))
 
 # Golbat Pokestops
 pokestop_cache_expiry_seconds = config.get("golbat_pokestops", {}).get("pokestop_cache_expiry_seconds", 86400)

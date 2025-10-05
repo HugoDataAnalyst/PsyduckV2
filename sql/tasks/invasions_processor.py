@@ -1,178 +1,157 @@
 import asyncio
 import random
 import aiomysql
+from sql.connect_db import transaction
 from datetime import datetime
 import time
 from utils.logger import logger
 import config as AppConfig
 
-async def get_mysql_pool():
-    pool = await aiomysql.create_pool(
-        host=AppConfig.db_host,
-        port=AppConfig.db_port,
-        user=AppConfig.db_user,
-        password=AppConfig.db_password,
-        db=AppConfig.db_name,
-        autocommit=True,  # we'll toggle during critical section
-        loop=asyncio.get_running_loop()
-    )
-    return pool
-
 class InvasionSQLProcessor:
     @classmethod
-    async def upsert_aggregated_invasion_from_filtered(cls, filtered_data, increment: int = 1, pool=None):
+    async def bulk_insert_invasions_daily_events(cls, data_batch: list[dict], max_retries: int = 8) -> int:
         """
-        Upsert a single invasion with robust session settings and retries.
-        Keeps pokestops fresh and bumps aggregated_invasions.total_count.
+        Fast insert into invasions_daily_events using a TEMP table, with prior upsert of pokestops.
+
+        Expects per event:
+          pokestop, pokestop_name, latitude, longitude,
+          display_type, character, grunt, confirmed, area_id, first_seen (epoch)
         """
-        created_pool = False
-        try:
-            if pool is None:
-                pool = await get_mysql_pool()
-                created_pool = True
-
-            pokestop_id = filtered_data.get('invasion_pokestop_id')
-            if not pokestop_id:
-                logger.warning("⚠️ Missing pokestop_id in invasion data")
-                return 0
-
-            # Coords (required for pokestops)
+        # Normalize rows
+        rows = []
+        for d in data_batch:
             try:
-                latitude = float(filtered_data.get('invasion_latitude'))
-                longitude = float(filtered_data.get('invasion_longitude'))
-            except (TypeError, ValueError):
-                logger.warning(f"⚠️ Invalid coordinates for pokestop {pokestop_id}")
-                return 0
+                pokestop      = str(d["pokestop"]).strip()
+                pokestop_name = str(d.get("pokestop_name", "")).strip()
+                latitude      = float(d.get("latitude", 0.0))
+                longitude     = float(d.get("longitude", 0.0))
 
-            area_id = filtered_data.get('area_id')
-            if area_id is None:
-                logger.warning(f"⚠️ Missing area_id for pokestop {pokestop_id}")
-                return 0
+                display_type  = int(d.get("display_type", 0))
+                character     = int(d.get("character", 0))
+                grunt         = int(d.get("grunt", 0))
+                confirmed     = int(d.get("confirmed", 0))
+                area_id       = int(d["area_id"])
+                first_seen    = int(d["first_seen"])
+                if not pokestop or first_seen <= 0:
+                    continue
 
-            # Invasion fields
-            display_type = int(filtered_data.get('invasion_type', 0))
-            character    = int(filtered_data.get('invasion_character', 0))
-            grunt        = int(filtered_data.get('invasion_grunt_type', 0))
-            confirmed    = int(filtered_data.get('invasion_confirmed', 0))
-
-            # Month/year
-            try:
-                first_seen = int(filtered_data.get('invasion_first_seen'))
-                dt = datetime.fromtimestamp(first_seen)
-                month_year = int(dt.strftime("%y%m"))
+                rows.append((
+                    pokestop, pokestop_name[:255], latitude, longitude,
+                    display_type, character, grunt, confirmed,
+                    area_id, first_seen
+                ))
             except Exception:
-                logger.warning(f"⚠️ Invalid first_seen timestamp for pokestop {pokestop_id}")
-                return 0
+                continue
 
-            inc = int(increment)
-
-            start_time = time.perf_counter()
-            ok = await cls._upsert_invasion_with_retry(
-                pool=pool,
-                pokestop_id=str(pokestop_id),
-                pokestop_name=str(filtered_data.get('invasion_pokestop_name') or ""),
-                latitude=latitude,
-                longitude=longitude,
-                display_type=display_type,
-                character=character,
-                grunt=grunt,
-                confirmed=confirmed,
-                area_id=int(area_id),
-                month_year=month_year,
-                increment=inc,
-                max_retries=10
-            )
-            elapsed = time.perf_counter() - start_time
-
-            if ok:
-                logger.debug(f"✅ Processed invasion for pokestop {pokestop_id} in area {area_id} in {elapsed:.4f}s")
-                return 1
-            logger.warning(f"⚠️ Failed to process invasion for pokestop {pokestop_id} after {elapsed:.4f}s")
+        if not rows:
             return 0
 
-        except Exception as e:
-            logger.error(f"❌ Unexpected error processing invasion for pokestop {filtered_data.get('invasion_pokestop_id')}: {e}", exc_info=True)
-            return 0
-        finally:
-            if created_pool and pool is not None:
-                pool.close()
-                await pool.wait_closed()
+        BATCH = 5000
+        attempt = 0
 
-    @classmethod
-    async def _upsert_invasion_with_retry(cls, pool, **inv):
-        """
-        Two-step upsert (pokestops then aggregated_invasions) in one short transaction.
-        Retries on 1213/1205 with small jittered backoff.
-        """
-        max_retries = int(inv.get('max_retries', 8))
-        inc = int(inv.get('increment', 1))
-
-        for attempt in range(max_retries):
+        while attempt < max_retries:
             try:
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        await cur.execute("SET SESSION innodb_lock_wait_timeout = 10")
-                        await cur.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
-                        await cur.execute("SET autocommit = 0")
+                async with transaction(dict_cursor=False, isolation="READ COMMITTED", lock_wait_timeout=10) as cur:
+                    # Temp table
+                    await cur.execute("""
+                        CREATE TEMPORARY TABLE IF NOT EXISTS tmp_ide (
+                          pokestop      VARCHAR(50)  NOT NULL,
+                          pokestop_name VARCHAR(255) NOT NULL,
+                          latitude      DOUBLE NOT NULL,
+                          longitude     DOUBLE NOT NULL,
 
-                        # 1) Upsert pokestop
-                        await cur.execute(
-                            """
-                            INSERT INTO pokestops (pokestop, pokestop_name, latitude, longitude)
-                            VALUES (%s, %s, %s, %s)
-                            ON DUPLICATE KEY UPDATE
-                                pokestop_name = VALUES(pokestop_name),
-                                latitude     = VALUES(latitude),
-                                longitude    = VALUES(longitude)
-                            """,
-                            (inv['pokestop_id'], inv['pokestop_name'], inv['latitude'], inv['longitude'])
+                          display_type  SMALLINT UNSIGNED NOT NULL,
+                          `character`   SMALLINT UNSIGNED NOT NULL,
+                          grunt         SMALLINT UNSIGNED NOT NULL,
+                          confirmed     TINYINT  UNSIGNED NOT NULL,
+                          area_id       SMALLINT UNSIGNED NOT NULL,
+                          first_seen    BIGINT NOT NULL,
+
+                          INDEX ix_tmp_ide_p (pokestop),
+                          INDEX ix_tmp_ide_s (first_seen)
+                        ) ENGINE=InnoDB
+                    """)
+
+                    ph = "(" + ",".join(["%s"] * 10) + ")"
+                    for i in range(0, len(rows), BATCH):
+                        chunk = rows[i:i+BATCH]
+                        flat = tuple(v for row in chunk for v in row)
+                        vals = ",".join([ph] * len(chunk))
+                        await cur.execute(f"INSERT INTO tmp_ide VALUES {vals}", flat)
+
+                    # Upsert pokestops (PK = pokestop)
+                    # a) Insert brand-new
+                    await cur.execute("""
+                        INSERT IGNORE INTO pokestops (pokestop, pokestop_name, latitude, longitude)
+                        SELECT
+                          t.pokestop,
+                          ANY_VALUE(t.pokestop_name),
+                          ANY_VALUE(t.latitude),
+                          ANY_VALUE(t.longitude)
+                        FROM tmp_ide t
+                        GROUP BY t.pokestop
+                    """)
+                    new_ps = cur.rowcount
+
+                    # b) Update changed name/coords
+                    await cur.execute("""
+                        UPDATE pokestops p
+                        JOIN (
+                          SELECT
+                            t.pokestop,
+                            ANY_VALUE(t.pokestop_name) AS pokestop_name,
+                            ANY_VALUE(t.latitude)      AS latitude,
+                            ANY_VALUE(t.longitude)     AS longitude
+                          FROM tmp_ide t
+                          GROUP BY t.pokestop
+                        ) x ON x.pokestop = p.pokestop
+                        SET
+                          p.pokestop_name = x.pokestop_name,
+                          p.latitude      = x.latitude,
+                          p.longitude     = x.longitude
+                        WHERE
+                          p.pokestop_name <> x.pokestop_name
+                          OR p.latitude  <> x.latitude
+                          OR p.longitude <> x.longitude
+                    """)
+                    upd_ps = cur.rowcount
+
+                    # Insert daily events (IGNORE duplicates, they wil be non existant anyway)
+                    await cur.execute("""
+                        INSERT IGNORE INTO invasions_daily_events (
+                            pokestop, display_type, `character`, grunt, confirmed,
+                            area_id, seen_at, day_date
                         )
+                        SELECT
+                            t.pokestop, t.display_type, t.`character`, t.grunt, t.confirmed,
+                            t.area_id,
+                            FROM_UNIXTIME(t.first_seen) AS seen_at,
+                            DATE(FROM_UNIXTIME(t.first_seen)) AS day_date
+                        FROM tmp_ide t
+                    """)
 
-                        # 2) Bump aggregated_invasions via pokestops.id
-                        await cur.execute(
-                            """
-                            INSERT INTO aggregated_invasions (
-                                pokestop_id, display_type, `character`, grunt, confirmed,
-                                area_id, month_year, total_count
-                            )
-                            SELECT
-                                p.id, %s, %s, %s, %s, %s, %s, %s
-                            FROM pokestops p
-                            WHERE p.pokestop = %s
-                            ON DUPLICATE KEY UPDATE
-                                total_count = total_count + VALUES(total_count)
-                            """,
-                            (
-                                inv['display_type'],
-                                inv['character'],
-                                inv['grunt'],
-                                inv['confirmed'],
-                                inv['area_id'],
-                                inv['month_year'],
-                                inc,
-                                inv['pokestop_id']
-                            )
-                        )
+                    await cur.execute("DROP TEMPORARY TABLE IF EXISTS tmp_ide")
 
-                        await conn.commit()
-                        await cur.execute("SET autocommit = 1")
-                        return True
+                    logger.info(f"🧮 Invasions daily | new_ps={new_ps} upd_ps={upd_ps} in_rows={len(rows)}")
+                    return len(rows)
 
             except aiomysql.Error as e:
                 code = e.args[0] if e.args else None
                 if code in (1213, 1205):
-                    backoff = min(2.0, 0.25 * (attempt + 1)) + random.uniform(0, 0.1)
+                    attempt += 1
+                    backoff = min(2.0, 0.25 * attempt) + random.uniform(0, 0.1)
                     logger.warning(
-                        f"⚠️ Invasion upsert {('deadlock' if code==1213 else 'lock timeout')}."
-                        f" Retrying {attempt+1}/{max_retries} in {backoff:.2f}s…"
+                        f"⚠️ invasions daily-events {('deadlock' if code==1213 else 'timeout')}, "
+                        f"retry {attempt}/{max_retries} in {backoff:.2f}s"
                     )
                     await asyncio.sleep(backoff)
                     continue
-                logger.error(f"❌ Database error processing invasion: {e}", exc_info=True)
-                return False
+                logger.error(f"❌ DB error (invasions daily-events): {e}", exc_info=True)
+                return 0
             except Exception as e:
-                logger.error(f"❌ Unexpected error processing invasion: {e}", exc_info=True)
-                return False
+                logger.error(f"❌ Unexpected (invasions daily-events): {e}", exc_info=True)
+                return 0
 
-        logger.error("❌ Max retries reached for invasion upsert")
-        return False
+        logger.error("❌ invasions daily-events: max retries reached")
+        return 0
+

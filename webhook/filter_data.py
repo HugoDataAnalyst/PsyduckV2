@@ -443,6 +443,14 @@ class WebhookFilter:
             logger.debug(f"⚠️ Skipping Raid data due to missing fields: {message}")
             return None
 
+        if "rsvps" in message:
+            rsvps_val = message.get("rsvps")
+            # treat None, "null", "", as acceptable
+            acceptable = (None, "", "null", "NULL")
+            if rsvps_val not in acceptable:
+                logger.debug(f"↩️ Skipping raid due to rsvps value={rsvps_val!r}")
+                return None
+
         required_always = ["gym_id", "level", "latitude", "longitude", "spawn", "start", "end"]
 
         missing = [k for k in required_always if (k not in message or message[k] is None or (isinstance(message[k], str) and message[k].strip() == ""))]
@@ -495,6 +503,7 @@ class WebhookFilter:
             "raid_team_id": message["team_id"],
             "area_id": geofence_id,
             "area_name": geofence_name,
+            "rsvps": message["rsvps"],
             "raid_first_seen": local_area_utc,
             "raid_start": local_area_start_utc,
             "raid_end": local_area_end,
