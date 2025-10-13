@@ -12,9 +12,15 @@ def _parse_upper_bound_as_date(desc: str | None) -> date | None:
     """
     if not desc or desc.upper() == "MAXVALUE":
         return None
+
+    s = str(desc).strip()
+    # information_schema.PARTITION_DESCRIPTION returns "'YYYY-MM-DD'" for RANGE COLUMNS(DATE)
+    if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+        s = s[1:-1]
+
     try:
         # MySQL returns 'YYYY-MM-DD'
-        return date.fromisoformat(str(desc))
+        return date.fromisoformat(s)
     except Exception:
         return None
 
