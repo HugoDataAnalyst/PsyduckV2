@@ -1,7 +1,7 @@
 loguru==0.7.3
 mysql-connector-python==9.2.0
 dotenv==0.9.9
-aiomysql==0.2.0
+aiomysql==0.3.0
 cryptography==44.0.2
 tomlkit==0.13.2
 redis==5.2.1
