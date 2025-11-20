@@ -14,8 +14,15 @@ from webhook.parser_data import (
 )
 from server_fastapi import global_state
 from server_fastapi.utils import secure_api
+import config as AppConfig
 
 router = APIRouter()
+
+# Semaphore to limit concurrent Redis connections
+# Use half of max connections to leave room for API queries
+MAX_CONCURRENT_REDIS_OPS = max(5, AppConfig.redis_max_connections // 2)
+redis_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REDIS_OPS)
+logger.info(f"🔧 Webhook concurrency limit: {MAX_CONCURRENT_REDIS_OPS} (Redis max: {AppConfig.redis_max_connections})")
 
 async def process_single_event(event: dict):
     """Processes a single webhook event."""
@@ -32,33 +39,35 @@ async def process_single_event(event: dict):
         logger.debug("⚠️ Webhook ignored (filtered out).")
         return {"status": "ignored"}
 
-    if data_type == "pokemon":
-        logger.debug("✅ Processing 👻 Pokémon data.")
-        result = await process_pokemon_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    elif data_type == "raid":
-        logger.debug("✅ Processing 👹 Raid data.")
-        result = await process_raid_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    elif data_type == "quest":
-        logger.debug("✅ Processing 🔎 Quest data.")
-        result = await process_quest_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    elif data_type == "invasion":
-        logger.debug("✅ Processing 🕴️ Invasion data.")
-        result = await process_invasion_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    else:
-        logger.debug(f"⚠️ Webhook type '{data_type}' not handled by parser yet.")
-        return {"status": "ignored", "message": f"Webhook type '{data_type}' not processed."}
+    # Use semaphore to limit concurrent Redis operations
+    async with redis_semaphore:
+        if data_type == "pokemon":
+            logger.debug("✅ Processing 👻 Pokémon data.")
+            result = await process_pokemon_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        elif data_type == "raid":
+            logger.debug("✅ Processing 👹 Raid data.")
+            result = await process_raid_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        elif data_type == "quest":
+            logger.debug("✅ Processing 🔎 Quest data.")
+            result = await process_quest_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        elif data_type == "invasion":
+            logger.debug("✅ Processing 🕴️ Invasion data.")
+            result = await process_invasion_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        else:
+            logger.debug(f"⚠️ Webhook type '{data_type}' not handled by parser yet.")
+            return {"status": "ignored", "message": f"Webhook type '{data_type}' not processed."}
 
 
 @router.post("/webhook", dependencies=[Depends(secure_api.validate_remote_addr)], include_in_schema=False)
@@ -87,8 +96,10 @@ async def receive_webhook(request: Request):
 
         start_time = time.perf_counter()
 
-        # Process events concurrently in batches to avoid overwhelming Redis
-        batch_size = 50  # Process up to 50 events concurrently
+        # Process events concurrently in batches
+        # Batch size is 2x semaphore to allow for queuing, but capped at 50
+        # This ensures we fully utilize Redis connections without creating too many waiting tasks
+        batch_size = min(MAX_CONCURRENT_REDIS_OPS * 2, 50)
         for i in range(0, len(events), batch_size):
             batch = events[i:i + batch_size]
             # Process batch concurrently
