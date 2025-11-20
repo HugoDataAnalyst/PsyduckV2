@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Union, Iterable
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
+import config as AppConfig
 try:
     from dateutil.relativedelta import relativedelta
 except ImportError:
@@ -15,6 +16,11 @@ redis_manager = RedisManager()
 # Pipeline batch size - larger batches for better performance
 # Writes can still interleave between batches
 PIPELINE_BATCH_SIZE = 500
+
+# Max concurrent pipeline operations for queries
+# Based on Redis connection pool: use 1/4 of total (half for queries, half of that for safety)
+# Capped at 20 to prevent excessive overhead
+MAX_CONCURRENT_PIPELINES = min(max(3, AppConfig.redis_max_connections // 4), 20)
 
 class PokemonTimeSeries:
     def __init__(
@@ -80,10 +86,9 @@ class PokemonTimeSeries:
                 # Process all batches concurrently
                 batches = [all_keys[i:i + PIPELINE_BATCH_SIZE] for i in range(0, len(all_keys), PIPELINE_BATCH_SIZE)]
 
-                # Process up to 10 batches concurrently to maximize throughput
-                batch_size = 10
-                for i in range(0, len(batches), batch_size):
-                    concurrent_batches = batches[i:i + batch_size]
+                # Process batches concurrently based on available connections
+                for i in range(0, len(batches), MAX_CONCURRENT_PIPELINES):
+                    concurrent_batches = batches[i:i + MAX_CONCURRENT_PIPELINES]
                     await asyncio.gather(*[
                         self._process_keys_batch(
                             client, batch, start_ts, end_ts,
