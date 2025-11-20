@@ -73,15 +73,21 @@ class InvasionTimeSeries:
         client,
         keys: list,
         start_ts: int,
-        end_ts: int,
-        acc_total: dict,
-        acc_confirmed: Dict[str, int],
-        acc_grouped: Dict[str, Dict[str, int]],
-        acc_surged: Dict[str, Dict[str, int]]
+        end_ts: int
     ):
-        """Process a batch of keys using pipelining to fetch data efficiently"""
+        """Process a batch of keys using pipelining to fetch data efficiently
+
+        Returns:
+            Tuple of (local_total, local_confirmed, local_grouped, local_surged) dictionaries
+        """
+        # Local accumulators for this batch
+        local_total = {}
+        local_confirmed: Dict[str, int] = {}
+        local_grouped: Dict[str, Dict[str, int]] = {}
+        local_surged: Dict[str, Dict[str, int]] = {}
+
         if not keys:
-            return
+            return local_total, local_confirmed, local_grouped, local_surged
 
         # Use pipeline to fetch all hash data at once
         async with client.pipeline(transaction=False) as pipe:
@@ -124,20 +130,22 @@ class InvasionTimeSeries:
                 if not (start_ts <= ts < end_ts):
                     continue
 
-                # Aggregate based on mode
+                # Aggregate based on mode into local accumulators
                 if self.mode == "sum":
-                    acc_total['total'] = acc_total.get('total', 0) + count
-                    acc_confirmed[confirmed_key] = acc_confirmed.get(confirmed_key, 0) + count
+                    local_total['total'] = local_total.get('total', 0) + count
+                    local_confirmed[confirmed_key] = local_confirmed.get(confirmed_key, 0) + count
 
                 elif self.mode == "grouped":
-                    bucket = acc_grouped.setdefault(group_key, {})
+                    bucket = local_grouped.setdefault(group_key, {})
                     bucket_str = str(ts)
                     bucket[bucket_str] = bucket.get(bucket_str, 0) + count
 
                 elif self.mode == "surged":
-                    bucket = acc_surged.setdefault(group_key, {})
+                    bucket = local_surged.setdefault(group_key, {})
                     hour = str((ts % 86400) // 3600)
                     bucket[hour] = bucket.get(hour, 0) + count
+
+        return local_total, local_confirmed, local_grouped, local_surged
 
     async def invasion_retrieve_timeseries(self) -> Dict[str, Any]:
         """Retrieve timeseries data using Python-side filtering with pipelining to avoid blocking Redis"""
@@ -146,7 +154,7 @@ class InvasionTimeSeries:
             logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
-        # Accumulators across multiple patterns
+        # Global accumulators
         acc_total = {}
         acc_confirmed: Dict[str, int] = {}
         acc_grouped: Dict[str, Dict[str, int]] = {}
@@ -164,29 +172,38 @@ class InvasionTimeSeries:
             for pattern in self._build_key_patterns():
                 logger.debug(f"🕴️ Scanning for pattern: {pattern}")
 
-                # Use SCAN to iterate through matching keys
-                keys_batch = []
-                async for key in client.scan_iter(match=pattern, count=500):
-                    keys_batch.append(key)
+                # Collect all keys for this pattern
+                all_keys = []
+                async for key in client.scan_iter(match=pattern, count=2000):
+                    all_keys.append(key)
 
-                    # Process in batches to allow writes to interleave
-                    if len(keys_batch) >= PIPELINE_BATCH_SIZE:
-                        await self._process_keys_batch(
-                            client, keys_batch, start_ts, end_ts,
-                            acc_total, acc_confirmed, acc_grouped, acc_surged
-                        )
-                        total_keys_processed += len(keys_batch)
-                        keys_batch = []
-                        # Small delay to allow write operations to proceed
-                        await asyncio.sleep(0.001)
+                # Process in batches
+                batches = [all_keys[i:i + PIPELINE_BATCH_SIZE] for i in range(0, len(all_keys), PIPELINE_BATCH_SIZE)]
 
-                # Process remaining keys
-                if keys_batch:
-                    await self._process_keys_batch(
-                        client, keys_batch, start_ts, end_ts,
-                        acc_total, acc_confirmed, acc_grouped, acc_surged
+                # Process batches sequentially to avoid lock contention
+                for batch in batches:
+                    local_total, local_confirmed, local_grouped, local_surged = await self._process_keys_batch(
+                        client, batch, start_ts, end_ts
                     )
-                    total_keys_processed += len(keys_batch)
+
+                    # Merge results sequentially (fast CPU operation, no lock needed)
+                    for k, v in local_total.items():
+                        acc_total[k] = acc_total.get(k, 0) + v
+
+                    for confirmed_key, count in local_confirmed.items():
+                        acc_confirmed[confirmed_key] = acc_confirmed.get(confirmed_key, 0) + count
+
+                    for group_key, groups in local_grouped.items():
+                        bucket = acc_grouped.setdefault(group_key, {})
+                        for bucket_str, count in groups.items():
+                            bucket[bucket_str] = bucket.get(bucket_str, 0) + count
+
+                    for group_key, hours in local_surged.items():
+                        bucket = acc_surged.setdefault(group_key, {})
+                        for hour, count in hours.items():
+                            bucket[hour] = bucket.get(hour, 0) + count
+
+                total_keys_processed += len(all_keys)
 
             elapsed = time.monotonic() - request_start
             logger.info(f"🕴️ Invasion retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")

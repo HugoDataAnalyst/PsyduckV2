@@ -1,11 +1,9 @@
-import asyncio
 import re
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, Union, Iterable
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
-import config as AppConfig
 try:
     from dateutil.relativedelta import relativedelta
 except ImportError:
@@ -16,11 +14,6 @@ redis_manager = RedisManager()
 # Pipeline batch size - larger batches for better performance
 # Writes can still interleave between batches
 PIPELINE_BATCH_SIZE = 500
-
-# Max concurrent pipeline operations for queries
-# Based on Redis connection pool: use 1/4 of total (half for queries, half of that for safety)
-# Capped at 20 to prevent excessive overhead
-MAX_CONCURRENT_PIPELINES = min(max(3, AppConfig.redis_max_connections // 4), 20)
 
 class PokemonTimeSeries:
     def __init__(
@@ -60,11 +53,10 @@ class PokemonTimeSeries:
             logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
-        # accumulators with lock for thread-safe concurrent updates
+        # Global accumulators - will merge results sequentially
         acc_sum: Dict[str, int] = {}
         acc_grouped: Dict[str, Dict[str, int]] = {}
         acc_surged: Dict[str, Dict[str, int]] = {}
-        acc_lock = asyncio.Lock()
 
         start_ts = int(self.start.timestamp())
         end_ts   = int(self.end.timestamp())
@@ -74,36 +66,39 @@ class PokemonTimeSeries:
             total_keys_processed = 0
             patterns = self._build_key_patterns()
 
-            # Process patterns concurrently for better performance
-            async def process_pattern(pattern):
+            # Process each pattern separately
+            for pattern in patterns:
                 logger.debug(f"👻 Scanning for pattern: {pattern}")
 
-                # Collect all keys first
+                # Collect all keys for this pattern
                 all_keys = []
                 async for key in client.scan_iter(match=pattern, count=2000):
                     all_keys.append(key)
 
-                # Process all batches concurrently
+                # Process in batches
                 batches = [all_keys[i:i + PIPELINE_BATCH_SIZE] for i in range(0, len(all_keys), PIPELINE_BATCH_SIZE)]
 
-                # Process batches concurrently based on available connections
-                for i in range(0, len(batches), MAX_CONCURRENT_PIPELINES):
-                    concurrent_batches = batches[i:i + MAX_CONCURRENT_PIPELINES]
-                    await asyncio.gather(*[
-                        self._process_keys_batch(
-                            client, batch, start_ts, end_ts,
-                            acc_sum, acc_grouped, acc_surged, acc_lock
-                        ) for batch in concurrent_batches
-                    ])
+                # Process batches sequentially to avoid lock contention
+                for batch in batches:
+                    local_sum, local_grouped, local_surged = await self._process_keys_batch(
+                        client, batch, start_ts, end_ts
+                    )
 
-                return len(all_keys)
+                    # Merge results sequentially (fast CPU operation, no lock needed)
+                    for metric, count in local_sum.items():
+                        acc_sum[metric] = acc_sum.get(metric, 0) + count
 
-            # Process up to 5 patterns concurrently
-            batch_size = 5
-            for i in range(0, len(patterns), batch_size):
-                pattern_batch = patterns[i:i + batch_size]
-                counts = await asyncio.gather(*[process_pattern(p) for p in pattern_batch])
-                total_keys_processed += sum(counts)
+                    for metric, groups in local_grouped.items():
+                        bucket = acc_grouped.setdefault(metric, {})
+                        for group_key, count in groups.items():
+                            bucket[group_key] = bucket.get(group_key, 0) + count
+
+                    for metric, hours in local_surged.items():
+                        bucket = acc_surged.setdefault(metric, {})
+                        for hour, count in hours.items():
+                            bucket[hour] = bucket.get(hour, 0) + count
+
+                total_keys_processed += len(all_keys)
 
             elapsed = time.monotonic() - request_start
             logger.info(f"👻 Pokémon retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
@@ -142,26 +137,26 @@ class PokemonTimeSeries:
         client,
         keys: list,
         start_ts: int,
-        end_ts: int,
-        acc_sum: Dict[str, int],
-        acc_grouped: Dict[str, Dict[str, int]],
-        acc_surged: Dict[str, Dict[str, int]],
-        acc_lock: asyncio.Lock = None
+        end_ts: int
     ):
-        """Process a batch of keys using pipelining to fetch data efficiently"""
+        """Process a batch of keys using pipelining to fetch data efficiently
+
+        Returns:
+            Tuple of (local_sum, local_grouped, local_surged) dictionaries
+        """
+        # Local accumulators for this batch
+        local_sum: Dict[str, int] = {}
+        local_grouped: Dict[str, Dict[str, int]] = {}
+        local_surged: Dict[str, Dict[str, int]] = {}
+
         if not keys:
-            return
+            return local_sum, local_grouped, local_surged
 
         # Use pipeline to fetch all hash data at once
         async with client.pipeline(transaction=False) as pipe:
             for key in keys:
                 pipe.hgetall(key)
             results = await pipe.execute()
-
-        # Local accumulators for this batch
-        local_sum: Dict[str, int] = {}
-        local_grouped: Dict[str, Dict[str, int]] = {}
-        local_surged: Dict[str, Dict[str, int]] = {}
 
         # Process each key's hash data into local accumulators
         for key, hash_data in zip(keys, results):
@@ -213,36 +208,7 @@ class PokemonTimeSeries:
                     bucket = local_surged.setdefault(metric, {})
                     bucket[hour] = bucket.get(hour, 0) + count
 
-        # Merge local accumulators into global accumulators with lock
-        if acc_lock:
-            async with acc_lock:
-                # Merge sum
-                for metric, count in local_sum.items():
-                    acc_sum[metric] = acc_sum.get(metric, 0) + count
-
-                # Merge grouped
-                for metric, groups in local_grouped.items():
-                    bucket = acc_grouped.setdefault(metric, {})
-                    for group_key, count in groups.items():
-                        bucket[group_key] = bucket.get(group_key, 0) + count
-
-                # Merge surged
-                for metric, hours in local_surged.items():
-                    bucket = acc_surged.setdefault(metric, {})
-                    for hour, count in hours.items():
-                        bucket[hour] = bucket.get(hour, 0) + count
-        else:
-            # No lock needed (sequential processing)
-            for metric, count in local_sum.items():
-                acc_sum[metric] = acc_sum.get(metric, 0) + count
-            for metric, groups in local_grouped.items():
-                bucket = acc_grouped.setdefault(metric, {})
-                for group_key, count in groups.items():
-                    bucket[group_key] = bucket.get(group_key, 0) + count
-            for metric, hours in local_surged.items():
-                bucket = acc_surged.setdefault(metric, {})
-                for hour, count in hours.items():
-                    bucket[hour] = bucket.get(hour, 0) + count
+        return local_sum, local_grouped, local_surged
 
     def _build_key_patterns(self) -> list[str]:
         """
