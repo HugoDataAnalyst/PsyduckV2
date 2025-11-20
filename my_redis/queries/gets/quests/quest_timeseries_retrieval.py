@@ -8,79 +8,8 @@ from server_fastapi import global_state
 
 redis_manager = RedisManager()
 
-QUEST_TIMESERIES_SCRIPT = """
-local pattern = ARGV[1]
-local start_ts = tonumber(ARGV[2])
-local end_ts = tonumber(ARGV[3])
-local mode = ARGV[4]
-local batch_size = 1000
-
-local sum_results = {}
-local grouped_results = {}
-local surged_results = {}
-
-local cursor = '0'
-repeat
-  local reply = redis.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', batch_size)
-  cursor = reply[1]
-  local keys = reply[2]
-  for _, key in ipairs(keys) do
-    local hash_data = redis.call('HGETALL', key)
-    for i = 1, #hash_data, 2 do
-      local ts = tonumber(hash_data[i])
-      local count = tonumber(hash_data[i+1])
-      if ts and count and ts >= start_ts and ts < end_ts then
-         if mode == 'sum' then
-           sum_results[key] = (sum_results[key] or 0) + count
-         elseif mode == 'grouped' then
-           if not grouped_results[key] then grouped_results[key] = {} end
-           local bucket_str = tostring(ts)
-           grouped_results[key][bucket_str] = (grouped_results[key][bucket_str] or 0) + count
-         elseif mode == 'surged' then
-           if not surged_results[key] then surged_results[key] = {} end
-           local hour = tostring(math.floor((ts % 86400) / 3600))
-           surged_results[key][hour] = (surged_results[key][hour] or 0) + count
-         end
-      end
-    end
-  end
-until cursor == '0'
-
-if mode == 'sum' then
-  local arr = {}
-  for k, v in pairs(sum_results) do
-    table.insert(arr, k)
-    table.insert(arr, v)
-  end
-  return arr
-elseif mode == 'grouped' then
-  local arr = {}
-  for k, groups in pairs(grouped_results) do
-    local inner = {}
-    for bucket, count in pairs(groups) do
-      table.insert(inner, bucket)
-      table.insert(inner, count)
-    end
-    table.insert(arr, k)
-    table.insert(arr, inner)
-  end
-  return arr
-elseif mode == 'surged' then
-  local arr = {}
-  for k, hours in pairs(surged_results) do
-    local inner = {}
-    for hour, count in pairs(hours) do
-      table.insert(inner, hour)
-      table.insert(inner, count)
-    end
-    table.insert(arr, k)
-    table.insert(arr, inner)
-  end
-  return arr
-else
-  return {}
-end
-"""
+# Pipeline batch size - balance between throughput and allowing writes to interleave
+PIPELINE_BATCH_SIZE = 150
 
 class QuestTimeSeries:
     def __init__(
@@ -112,7 +41,6 @@ class QuestTimeSeries:
         self.end = end
         self.mode = mode.lower()
         self.quest_mode = quest_mode.lower()
-        self.script_sha = None
 
         def _norm(x):
             if x is None or (isinstance(x, str) and x.lower() == "all"):
@@ -129,14 +57,6 @@ class QuestTimeSeries:
             f"quest_mode={self.quest_mode}, quest_types={self.quest_types or 'ALL'}, "
             f"range={self.start}..{self.end}"
         )
-    async def _load_script(self, client):
-        if not self.script_sha:
-            logger.debug("🔄 Loading 🔎 Quest Lua script into Redis...")
-            self.script_sha = await client.script_load(QUEST_TIMESERIES_SCRIPT)
-            logger.debug(f"🔎 Quest Lua script loaded with SHA: {self.script_sha}")
-        else:
-            logger.debug("🔎 Quest Lua script already loaded, reusing cached SHA.")
-        return self.script_sha
 
     def _build_key_patterns(self) -> list[str]:
         # Replace "all"/"global" with wildcard for area; wildcard quest_mode if "all"
@@ -154,19 +74,73 @@ class QuestTimeSeries:
         logger.debug(f"Built 🔎 Quest {len(patterns)} key pattern(s): {patterns[:5]}{'...' if len(patterns)>5 else ''}")
         return patterns
 
+    async def _process_keys_batch(
+        self,
+        client,
+        keys: list,
+        start_ts: int,
+        end_ts: int,
+        acc_sum: Dict[str, int],
+        acc_grouped: Dict[str, Dict[str, int]],
+        acc_surged: Dict[str, Dict[str, int]]
+    ):
+        """Process a batch of keys using pipelining to fetch data efficiently"""
+        if not keys:
+            return
+
+        # Use pipeline to fetch all hash data at once
+        async with client.pipeline(transaction=False) as pipe:
+            for key in keys:
+                pipe.hgetall(key)
+            results = await pipe.execute()
+
+        # Process each key's hash data
+        for key, hash_data in zip(keys, results):
+            if not hash_data:
+                continue
+
+            # Decode key if it's bytes
+            if isinstance(key, bytes):
+                key = key.decode('utf-8')
+
+            # Filter and aggregate hash data
+            for ts_field, count_value in hash_data.items():
+                # Decode if bytes
+                if isinstance(ts_field, bytes):
+                    ts_field = ts_field.decode('utf-8')
+                if isinstance(count_value, bytes):
+                    count_value = count_value.decode('utf-8')
+
+                try:
+                    ts = int(ts_field)
+                    count = int(count_value)
+                except (ValueError, TypeError):
+                    continue
+
+                # Filter by time range
+                if not (start_ts <= ts < end_ts):
+                    continue
+
+                # Aggregate based on mode
+                if self.mode == "sum":
+                    acc_sum[key] = acc_sum.get(key, 0) + count
+
+                elif self.mode == "grouped":
+                    bucket = acc_grouped.setdefault(key, {})
+                    ts_bucket = str(ts)
+                    bucket[ts_bucket] = bucket.get(ts_bucket, 0) + count
+
+                elif self.mode == "surged":
+                    bucket = acc_surged.setdefault(key, {})
+                    hour = str((ts % 86400) // 3600)
+                    bucket[hour] = bucket.get(hour, 0) + count
+
     async def quest_retrieve_timeseries(self) -> Dict[str, Any]:
+        """Retrieve timeseries data using Python-side filtering with pipelining to avoid blocking Redis"""
         client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
-
-        def convert_redis_result(res):
-            if isinstance(res, list):
-                if len(res) % 2 == 0:
-                    return {res[i]: convert_redis_result(res[i+1]) for i in range(0, len(res), 2)}
-                else:
-                    return [convert_redis_result(item) for item in res]
-            return res
 
         # accumulators to merge across multiple patterns
         acc_sum: Dict[str, int] = {}
@@ -179,40 +153,38 @@ class QuestTimeSeries:
             logger.debug(f"🔎 Quest ⏱️ Time range: start_ts={start_ts}, end_ts={end_ts}")
 
             request_start = time.monotonic()
-            sha = await self._load_script(client)
+            total_keys_processed = 0
 
+            # Process each pattern separately
             for pattern in self._build_key_patterns():
-                raw = await client.evalsha(
-                    sha,
-                    0,
-                    pattern,
-                    str(start_ts),
-                    str(end_ts),
-                    self.mode
-                )
-                data = convert_redis_result(raw)
+                logger.debug(f"🔎 Scanning for pattern: {pattern}")
 
-                if self.mode == "sum":
-                    # data: { full_key: count, ... }
-                    for k, v in data.items():
-                        acc_sum[k] = acc_sum.get(k, 0) + int(v)
-                elif self.mode == "grouped":
-                    # data: { full_key: { ts_bucket: count, ... }, ... }
-                    for k, groups in data.items():
-                        bucket = acc_grouped.setdefault(k, {})
-                        # groups might be list -> convert to dict
-                        if isinstance(groups, list):
-                            groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                        for tb, cnt in groups.items():
-                            bucket[tb] = bucket.get(tb, 0) + int(cnt)
-                elif self.mode == "surged":
-                    # data: { full_key: { hour: count, ... }, ... }
-                    for k, hours in data.items():
-                        bucket = acc_surged.setdefault(k, {})
-                        if isinstance(hours, list):
-                            hours = {hours[i]: hours[i+1] for i in range(0, len(hours), 2)}
-                        for h, cnt in hours.items():
-                            bucket[h] = bucket.get(h, 0) + int(cnt)
+                # Use SCAN to iterate through matching keys
+                keys_batch = []
+                async for key in client.scan_iter(match=pattern, count=500):
+                    keys_batch.append(key)
+
+                    # Process in batches to allow writes to interleave
+                    if len(keys_batch) >= PIPELINE_BATCH_SIZE:
+                        await self._process_keys_batch(
+                            client, keys_batch, start_ts, end_ts,
+                            acc_sum, acc_grouped, acc_surged
+                        )
+                        total_keys_processed += len(keys_batch)
+                        keys_batch = []
+                        # Small delay to allow write operations to proceed
+                        await asyncio.sleep(0.001)
+
+                # Process remaining keys
+                if keys_batch:
+                    await self._process_keys_batch(
+                        client, keys_batch, start_ts, end_ts,
+                        acc_sum, acc_grouped, acc_surged
+                    )
+                    total_keys_processed += len(keys_batch)
+
+            elapsed = time.monotonic() - request_start
+            logger.info(f"🔎 Quest retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
 
             # Final formatting
             if self.mode == "sum":
@@ -252,11 +224,8 @@ class QuestTimeSeries:
             else:
                 formatted = {}
 
-            elapsed = time.monotonic() - request_start
-            logger.info(f"🔎 Quest retrieval execution took ⏱️ {elapsed:.3f} seconds")
-
             return {"mode": self.mode, "data": formatted}
 
         except Exception as e:
-            logger.error(f"❌ 🔎 Quest Lua script execution failed: {e}", exc_info=True)
+            logger.error(f"❌ 🔎 Quest retrieval failed: {e}", exc_info=True)
             return {"mode": self.mode, "data": {}}

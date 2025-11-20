@@ -9,68 +9,8 @@ from webhook.filter_data import WebhookFilter
 
 redis_manager = RedisManager()
 
-# Lua script without any offset logic.
-RAID_TIMESERIES_SCRIPT = """
-local pattern = ARGV[1]
-local start_ts = tonumber(ARGV[2])
-local end_ts = tonumber(ARGV[3])
-local mode = ARGV[4]
-local batch_size = 1000
-
-local sum_results = {}
-local grouped_results = {}
-local surged_results = {}
-
-local cursor = '0'
-repeat
-  local reply = redis.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', batch_size)
-  cursor = reply[1]
-  local keys = reply[2]
-  for _, key in ipairs(keys) do
-    local hash_data = redis.call('HGETALL', key)
-    for i = 1, #hash_data, 2 do
-      local ts = tonumber(hash_data[i])
-      local count = tonumber(hash_data[i+1])
-      if ts and count and ts >= start_ts and ts < end_ts then
-         -- For sum and grouped modes, aggregate counts using the full key.
-         sum_results[key] = (sum_results[key] or 0) + count
-         grouped_results[key] = (grouped_results[key] or 0) + count
-         -- For surged mode, compute the hour from the UTC timestamp
-         if mode == 'surged' then
-            local hour = math.floor((ts % 86400) / 3600)
-            local new_key = key .. ":" .. tostring(hour)
-            surged_results[new_key] = (surged_results[new_key] or 0) + count
-         end
-      end
-    end
-  end
-until cursor == '0'
-
-if mode == 'sum' then
-  local arr = {}
-  for k, v in pairs(sum_results) do
-    table.insert(arr, k)
-    table.insert(arr, v)
-  end
-  return arr
-elseif mode == 'grouped' then
-  local arr = {}
-  for k, v in pairs(grouped_results) do
-    table.insert(arr, k)
-    table.insert(arr, v)
-  end
-  return arr
-elseif mode == 'surged' then
-  local arr = {}
-  for k, v in pairs(surged_results) do
-    table.insert(arr, k)
-    table.insert(arr, v)
-  end
-  return arr
-else
-  return {}
-end
-"""
+# Pipeline batch size - balance between throughput and allowing writes to interleave
+PIPELINE_BATCH_SIZE = 150
 
 class RaidTimeSeries:
     def __init__(
@@ -88,7 +28,6 @@ class RaidTimeSeries:
         self.start = start
         self.end = end
         self.mode = mode.lower()
-        self.script_sha = None
 
         def _norm(x):
             if x is None or (isinstance(x, str) and x.lower() == "all"):
@@ -109,15 +48,6 @@ class RaidTimeSeries:
             f"raid_levels={self.raid_levels or 'ALL'}, raid_forms={self.raid_forms or 'ALL'}, "
             f"start={self.start}, end={self.end}"
         )
-
-    async def _load_script(self, client):
-        if not self.script_sha:
-            logger.debug("🔄 Loading 👹 Raid Lua script into Redis...")
-            self.script_sha = await client.script_load(RAID_TIMESERIES_SCRIPT)
-            logger.debug(f"👹 Raid Lua script loaded with SHA: {self.script_sha}")
-        else:
-            logger.debug("👹 Raid Lua script already loaded, reusing cached SHA.")
-        return self.script_sha
 
     def _build_key_patterns(self) -> list[str]:
         """
@@ -223,19 +153,71 @@ class RaidTimeSeries:
             result[hour] = transformed
         return dict(sorted(result.items(), key=lambda item: int(item[0].split()[1])))
 
+    async def _process_keys_batch(
+        self,
+        client,
+        keys: list,
+        start_ts: int,
+        end_ts: int,
+        acc_sum: Dict[str, int],
+        acc_grouped: Dict[str, int],
+        acc_surged: Dict[str, int]
+    ):
+        """Process a batch of keys using pipelining to fetch data efficiently"""
+        if not keys:
+            return
+
+        # Use pipeline to fetch all hash data at once
+        async with client.pipeline(transaction=False) as pipe:
+            for key in keys:
+                pipe.hgetall(key)
+            results = await pipe.execute()
+
+        # Process each key's hash data
+        for key, hash_data in zip(keys, results):
+            if not hash_data:
+                continue
+
+            # Decode key if it's bytes
+            if isinstance(key, bytes):
+                key = key.decode('utf-8')
+
+            # Filter and aggregate hash data
+            for ts_field, count_value in hash_data.items():
+                # Decode if bytes
+                if isinstance(ts_field, bytes):
+                    ts_field = ts_field.decode('utf-8')
+                if isinstance(count_value, bytes):
+                    count_value = count_value.decode('utf-8')
+
+                try:
+                    ts = int(ts_field)
+                    count = int(count_value)
+                except (ValueError, TypeError):
+                    continue
+
+                # Filter by time range
+                if not (start_ts <= ts < end_ts):
+                    continue
+
+                # Aggregate based on mode
+                if self.mode in ["sum", "grouped"]:
+                    # For sum and grouped, use the full key
+                    acc_sum[key] = acc_sum.get(key, 0) + count
+                    acc_grouped[key] = acc_grouped.get(key, 0) + count
+
+                elif self.mode == "surged":
+                    # For surged mode, compute the hour from the UTC timestamp
+                    hour = (ts % 86400) // 3600
+                    new_key = f"{key}:{hour}"
+                    acc_surged[new_key] = acc_surged.get(new_key, 0) + count
+
     async def raid_retrieve_timeseries(self) -> Dict[str, Any]:
+        """Retrieve timeseries data using Python-side filtering with pipelining to avoid blocking Redis"""
         client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
-
-        def convert_redis_result(res):
-            if isinstance(res, list):
-                if len(res) % 2 == 0:
-                    return {res[i]: convert_redis_result(res[i+1]) for i in range(0, len(res), 2)}
-                else:
-                    return [convert_redis_result(item) for item in res]
-            return res
 
         # accumulators across multiple patterns
         acc_sum: Dict[str, int] = {}
@@ -248,27 +230,38 @@ class RaidTimeSeries:
             logger.debug(f"👹 Raid ⏱️ Time range: start_ts={start_ts}, end_ts={end_ts}")
 
             request_start = time.monotonic()
-            sha = await self._load_script(client)
+            total_keys_processed = 0
 
+            # Process each pattern separately
             for pattern in self._build_key_patterns():
-                raw = await client.evalsha(
-                    sha, 0,
-                    pattern,
-                    str(start_ts),
-                    str(end_ts),
-                    self.mode
-                )
-                data = convert_redis_result(raw)
+                logger.debug(f"👹 Scanning for pattern: {pattern}")
 
-                if self.mode == "sum":
-                    for k, v in data.items():
-                        acc_sum[k] = acc_sum.get(k, 0) + int(v)
-                elif self.mode == "grouped":
-                    for k, v in data.items():
-                        acc_grouped[k] = acc_grouped.get(k, 0) + int(v)
-                elif self.mode == "surged":
-                    for k, v in data.items():  # k includes ":<hour>"
-                        acc_surged[k] = acc_surged.get(k, 0) + int(v)
+                # Use SCAN to iterate through matching keys
+                keys_batch = []
+                async for key in client.scan_iter(match=pattern, count=500):
+                    keys_batch.append(key)
+
+                    # Process in batches to allow writes to interleave
+                    if len(keys_batch) >= PIPELINE_BATCH_SIZE:
+                        await self._process_keys_batch(
+                            client, keys_batch, start_ts, end_ts,
+                            acc_sum, acc_grouped, acc_surged
+                        )
+                        total_keys_processed += len(keys_batch)
+                        keys_batch = []
+                        # Small delay to allow write operations to proceed
+                        await asyncio.sleep(0.001)
+
+                # Process remaining keys
+                if keys_batch:
+                    await self._process_keys_batch(
+                        client, keys_batch, start_ts, end_ts,
+                        acc_sum, acc_grouped, acc_surged
+                    )
+                    total_keys_processed += len(keys_batch)
+
+            elapsed = time.monotonic() - request_start
+            logger.info(f"👹 Raid retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
 
             # Final formatting
             if self.mode == "sum":
@@ -280,10 +273,8 @@ class RaidTimeSeries:
             else:
                 formatted = {}
 
-            elapsed = time.monotonic() - request_start
-            logger.info(f"👹 Raid retrieval execution took ⏱️ {elapsed:.3f} seconds")
             return {"mode": self.mode, "data": formatted}
 
         except Exception as e:
-            logger.error(f"❌ 👹 Raid Lua script execution failed: {e}")
+            logger.error(f"❌ 👹 Raid retrieval failed: {e}")
             return {"mode": self.mode, "data": {}}

@@ -7,89 +7,8 @@ from utils.logger import logger
 
 redis_manager = RedisManager()
 
-# Lua script as defined above.
-TTH_TIMESERIES_SCRIPT = """
-local pattern = ARGV[1]
-local start_ts = tonumber(ARGV[2])
-local end_ts = tonumber(ARGV[3])
-local mode = ARGV[4]
-local batch_size = 1000
-
-local sum_results = {}
-local grouped_results = {}
-local surged_results = {}
-
-local cursor = '0'
-repeat
-    local reply = redis.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', batch_size)
-    cursor = reply[1]
-    local keys = reply[2]
-    for _, key in ipairs(keys) do
-        local hash_data = redis.call('HGETALL', key)
-        -- Extract key parts: ts, tth_pokemon, area, tth_bucket
-        local key_parts = {}
-        for part in string.gmatch(key, '([^:]+)') do
-            table.insert(key_parts, part)
-        end
-        for i = 1, #hash_data, 2 do
-            local ts = tonumber(hash_data[i])
-            local count = tonumber(hash_data[i+1])
-            if ts and count and ts >= start_ts and ts < end_ts then
-                local bucket = key_parts[4] or "unknown"
-                -- Sum mode aggregation
-                sum_results[bucket] = (sum_results[bucket] or 0) + count
-                -- Grouped mode aggregation: group by time bucket (minute-rounded timestamp)
-                if not grouped_results[bucket] then
-                    grouped_results[bucket] = {}
-                end
-                local time_bucket = tostring(math.floor(ts / 60) * 60)
-                grouped_results[bucket][time_bucket] = (grouped_results[bucket][time_bucket] or 0) + count
-                -- Surged mode aggregation: group by hour of day.
-                if not surged_results[bucket] then
-                    surged_results[bucket] = {}
-                end
-                local hour = tostring(math.floor((ts % 86400) / 3600))
-                surged_results[bucket][hour] = (surged_results[bucket][hour] or 0) + count
-            end
-        end
-    end
-until cursor == '0'
-
-if mode == 'sum' then
-    local arr = {}
-    for k, v in pairs(sum_results) do
-        table.insert(arr, k)
-        table.insert(arr, v)
-    end
-    return arr
-elseif mode == 'grouped' then
-    local arr = {}
-    for bucket, groups in pairs(grouped_results) do
-        local inner = {}
-        for time_bucket, count in pairs(groups) do
-            table.insert(inner, time_bucket)
-            table.insert(inner, count)
-        end
-        table.insert(arr, bucket)
-        table.insert(arr, inner)
-    end
-    return arr
-elseif mode == 'surged' then
-    local arr = {}
-    for bucket, hours in pairs(surged_results) do
-        local inner = {}
-        for hour, count in pairs(hours) do
-            table.insert(inner, hour)
-            table.insert(inner, count)
-        end
-        table.insert(arr, bucket)
-        table.insert(arr, inner)
-    end
-    return arr
-else
-    return {}
-end
-"""
+# Pipeline batch size - balance between throughput and allowing writes to interleave
+PIPELINE_BATCH_SIZE = 150
 
 class PokemonTTHTimeSeries:
     def __init__(
@@ -110,7 +29,6 @@ class PokemonTTHTimeSeries:
         self.start = start
         self.end = end
         self.mode = mode.lower()
-        self.script_sha = None
 
         def _norm(x):
             if x is None or (isinstance(x, str) and x.lower() == "all"):
@@ -127,15 +45,6 @@ class PokemonTTHTimeSeries:
             f"⏸️ End: {self.end}, Mode: {self.mode}"
         )
 
-    async def _load_script(self, client):
-        if not self.script_sha:
-            logger.debug("🔄 Loading 👻⏱️ TTH Lua script into Redis...")
-            self.script_sha = await client.script_load(TTH_TIMESERIES_SCRIPT)
-            logger.debug(f"👻⏱️ TTH Lua script loaded with SHA: {self.script_sha}")
-        else:
-            logger.debug("👻⏱️ TTH Lua script already loaded, reusing cached SHA.")
-        return self.script_sha
-
     def _build_key_patterns(self) -> list[str]:
         # "all/global" -> wildcard; expand buckets into multiple patterns
         area = "*" if self.area.lower() in ["all", "global"] else self.area
@@ -147,19 +56,82 @@ class PokemonTTHTimeSeries:
         )
         return patterns
 
+    async def _process_keys_batch(
+        self,
+        client,
+        keys: list,
+        start_ts: int,
+        end_ts: int,
+        acc_sum: Dict[str, int],
+        acc_grouped: Dict[str, Dict[str, int]],
+        acc_surged: Dict[str, Dict[str, int]]
+    ):
+        """Process a batch of keys using pipelining to fetch data efficiently"""
+        if not keys:
+            return
+
+        # Use pipeline to fetch all hash data at once
+        async with client.pipeline(transaction=False) as pipe:
+            for key in keys:
+                pipe.hgetall(key)
+            results = await pipe.execute()
+
+        # Process each key's hash data
+        for key, hash_data in zip(keys, results):
+            if not hash_data:
+                continue
+
+            # Decode key if it's bytes
+            if isinstance(key, bytes):
+                key = key.decode('utf-8')
+
+            # Extract key parts: ts:tth_pokemon:area:tth_bucket
+            key_parts = key.split(':')
+            if len(key_parts) < 4:
+                continue
+
+            bucket = key_parts[3]
+
+            # Filter and aggregate hash data
+            for ts_field, count_value in hash_data.items():
+                # Decode if bytes
+                if isinstance(ts_field, bytes):
+                    ts_field = ts_field.decode('utf-8')
+                if isinstance(count_value, bytes):
+                    count_value = count_value.decode('utf-8')
+
+                try:
+                    ts = int(ts_field)
+                    count = int(count_value)
+                except (ValueError, TypeError):
+                    continue
+
+                # Filter by time range
+                if not (start_ts <= ts < end_ts):
+                    continue
+
+                # Aggregate based on mode
+                if self.mode == "sum":
+                    acc_sum[bucket] = acc_sum.get(bucket, 0) + count
+
+                elif self.mode == "grouped":
+                    # group by time bucket (minute-rounded timestamp)
+                    time_bucket = str((ts // 60) * 60)
+                    bucket_dict = acc_grouped.setdefault(bucket, {})
+                    bucket_dict[time_bucket] = bucket_dict.get(time_bucket, 0) + count
+
+                elif self.mode == "surged":
+                    # group by hour of day
+                    hour = str((ts % 86400) // 3600)
+                    bucket_dict = acc_surged.setdefault(bucket, {})
+                    bucket_dict[hour] = bucket_dict.get(hour, 0) + count
+
     async def retrieve_timeseries(self) -> Dict:
+        """Retrieve timeseries data using Python-side filtering with pipelining to avoid blocking Redis"""
         client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
-
-        def convert_redis_result(res):
-            if isinstance(res, list):
-                if len(res) % 2 == 0:
-                    return {res[i]: convert_redis_result(res[i + 1]) for i in range(0, len(res), 2)}
-                else:
-                    return [convert_redis_result(item) for item in res]
-            return res
 
         # helpers for sorting
         def _bucket_key(bucket: str) -> int:
@@ -178,38 +150,38 @@ class PokemonTTHTimeSeries:
 
         try:
             request_start = time.monotonic()
-            sha = await self._load_script(client)
+            total_keys_processed = 0
 
+            # Process each pattern separately
             for pattern in self._build_key_patterns():
-                raw = await client.evalsha(
-                    sha, 0,
-                    pattern,
-                    str(start_ts),
-                    str(end_ts),
-                    self.mode
-                )
-                data = convert_redis_result(raw)
+                logger.debug(f"👻⏱️ Scanning for pattern: {pattern}")
 
-                if self.mode == "sum":
-                    # data: { bucket: count }
-                    for b, v in data.items():
-                        acc_sum[b] = acc_sum.get(b, 0) + int(v)
-                elif self.mode == "grouped":
-                    # data: { bucket: { time_bucket_ts: count } }
-                    for b, groups in data.items():
-                        if isinstance(groups, list):
-                            groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                        bucket = acc_grouped.setdefault(b, {})
-                        for t, v in groups.items():
-                            bucket[t] = bucket.get(t, 0) + int(v)
-                elif self.mode == "surged":
-                    # data: { bucket: { hour_str: count } }
-                    for b, hours in data.items():
-                        if isinstance(hours, list):
-                            hours = {hours[i]: hours[i+1] for i in range(0, len(hours), 2)}
-                        bucket = acc_surged.setdefault(b, {})
-                        for h, v in hours.items():
-                            bucket[h] = bucket.get(h, 0) + int(v)
+                # Use SCAN to iterate through matching keys
+                keys_batch = []
+                async for key in client.scan_iter(match=pattern, count=500):
+                    keys_batch.append(key)
+
+                    # Process in batches to allow writes to interleave
+                    if len(keys_batch) >= PIPELINE_BATCH_SIZE:
+                        await self._process_keys_batch(
+                            client, keys_batch, start_ts, end_ts,
+                            acc_sum, acc_grouped, acc_surged
+                        )
+                        total_keys_processed += len(keys_batch)
+                        keys_batch = []
+                        # Small delay to allow write operations to proceed
+                        await asyncio.sleep(0.001)
+
+                # Process remaining keys
+                if keys_batch:
+                    await self._process_keys_batch(
+                        client, keys_batch, start_ts, end_ts,
+                        acc_sum, acc_grouped, acc_surged
+                    )
+                    total_keys_processed += len(keys_batch)
+
+            elapsed = time.monotonic() - request_start
+            logger.info(f"👻⏱️ Pokémon TTH retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
 
             # Final formatting
             if self.mode == "sum":
@@ -233,10 +205,8 @@ class PokemonTTHTimeSeries:
             else:
                 formatted = {}
 
-            elapsed = time.monotonic() - request_start
-            logger.info(f"👻⏱️ Pokémon TTH retrieval execution took {elapsed:.3f} seconds")
             return {"mode": self.mode, "data": formatted}
 
         except Exception as e:
-            logger.error(f"TTH Lua script execution failed: {e}")
+            logger.error(f"TTH retrieval failed: {e}")
             return {"mode": self.mode, "data": {}}

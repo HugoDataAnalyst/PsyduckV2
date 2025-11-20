@@ -7,96 +7,8 @@ from utils.logger import logger
 
 redis_manager = RedisManager()
 
-INVASION_TIMESERIES_SCRIPT = """
-local pattern = ARGV[1]
-local start_ts = tonumber(ARGV[2])
-local end_ts = tonumber(ARGV[3])
-local mode = ARGV[4]
-local batch_size = 1000
-
-local total = 0
-local sum_results = {}
-local grouped_results = {}
-local surged_results = {}
-local confirmed_results = {}
-
-local cursor = '0'
-repeat
-  local reply = redis.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', batch_size)
-  cursor = reply[1]
-  local keys = reply[2]
-  for _, key in ipairs(keys) do
-    local hash_data = redis.call('HGETALL', key)
-    -- Key format: ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}
-    local key_parts = {}
-    for part in string.gmatch(key, "([^:]+)") do
-      table.insert(key_parts, part)
-    end
-    local group_key = key_parts[5] .. ":" .. key_parts[6] .. ":" .. key_parts[7]
-    for i = 1, #hash_data, 2 do
-      local ts = tonumber(hash_data[i])
-      local count = tonumber(hash_data[i+1])
-      if ts and count and ts >= start_ts and ts < end_ts then
-         total = total + count
-         sum_results[group_key] = (sum_results[group_key] or 0) + count
-
-         if not grouped_results[group_key] then
-           grouped_results[group_key] = {}
-         end
-         local bucket_str = tostring(ts)
-         grouped_results[group_key][bucket_str] = (grouped_results[group_key][bucket_str] or 0) + count
-
-         if not surged_results[group_key] then
-           surged_results[group_key] = {}
-         end
-         local hour = tostring(math.floor((ts % 86400) / 3600))
-         surged_results[group_key][hour] = (surged_results[group_key][hour] or 0) + count
-
-         -- Accumulate counts per confirmed flag.
-         local confirmed_key = key_parts[7]
-         confirmed_results[confirmed_key] = (confirmed_results[confirmed_key] or 0) + count
-      end
-    end
-  end
-until cursor == '0'
-
-if mode == 'sum' then
-  -- Convert confirmed_results into an array of key/value pairs.
-  local confirmed_arr = {}
-  for k, v in pairs(confirmed_results) do
-    table.insert(confirmed_arr, k)
-    table.insert(confirmed_arr, v)
-  end
-  local result = {"total", total, "confirmed", confirmed_arr}
-  return result
-elseif mode == 'grouped' then
-  local arr = {}
-  for group_key, groups in pairs(grouped_results) do
-    local inner = {}
-    for bucket, count in pairs(groups) do
-      table.insert(inner, bucket)
-      table.insert(inner, count)
-    end
-    table.insert(arr, group_key)
-    table.insert(arr, inner)
-  end
-  return arr
-elseif mode == 'surged' then
-  local arr = {}
-  for group_key, hours in pairs(surged_results) do
-    local inner = {}
-    for hour, count in pairs(hours) do
-      table.insert(inner, hour)
-      table.insert(inner, count)
-    end
-    table.insert(arr, group_key)
-    table.insert(arr, inner)
-  end
-  return arr
-else
-  return {}
-end
-"""
+# Pipeline batch size - balance between throughput and allowing writes to interleave
+PIPELINE_BATCH_SIZE = 150
 
 class InvasionTimeSeries:
     def __init__(
@@ -122,7 +34,6 @@ class InvasionTimeSeries:
         self.end = end
         self.mode = mode.lower()
         self.confirmed = confirmed
-        self.script_sha = None
 
         def _norm(x):
             if x is None or (isinstance(x, str) and x.lower() == "all"):
@@ -139,15 +50,6 @@ class InvasionTimeSeries:
             f"displays={self.displays or 'ALL'}, grunts={self.grunts or 'ALL'}, confirmed={self.confirmed}, "
             f"start={self.start}, end={self.end}"
         )
-
-    async def _load_script(self, client):
-        if not self.script_sha:
-            logger.debug("🔄 Loading 🕴️ Invasion Lua script into Redis...")
-            self.script_sha = await client.script_load(INVASION_TIMESERIES_SCRIPT)
-            logger.debug(f"🕴️ Invasion Lua script loaded with SHA: {self.script_sha}")
-        else:
-            logger.debug("🕴️ Invasion Lua script already loaded, reusing cached SHA.")
-        return self.script_sha
 
     def _build_key_patterns(self) -> list[str]:
         """
@@ -166,22 +68,86 @@ class InvasionTimeSeries:
         logger.debug(f"Built 🕴️ Invasion {len(patterns)} key pattern(s): {patterns[:5]}{'...' if len(patterns)>5 else ''}")
         return patterns
 
+    async def _process_keys_batch(
+        self,
+        client,
+        keys: list,
+        start_ts: int,
+        end_ts: int,
+        acc_total: dict,
+        acc_confirmed: Dict[str, int],
+        acc_grouped: Dict[str, Dict[str, int]],
+        acc_surged: Dict[str, Dict[str, int]]
+    ):
+        """Process a batch of keys using pipelining to fetch data efficiently"""
+        if not keys:
+            return
+
+        # Use pipeline to fetch all hash data at once
+        async with client.pipeline(transaction=False) as pipe:
+            for key in keys:
+                pipe.hgetall(key)
+            results = await pipe.execute()
+
+        # Process each key's hash data
+        for key, hash_data in zip(keys, results):
+            if not hash_data:
+                continue
+
+            # Decode key if it's bytes
+            if isinstance(key, bytes):
+                key = key.decode('utf-8')
+
+            # Key format: ts:invasion:total:{area}:{display_type}:{grunt}:{confirmed}
+            key_parts = key.split(':')
+            if len(key_parts) < 7:
+                continue
+
+            group_key = f"{key_parts[4]}:{key_parts[5]}:{key_parts[6]}"  # display:grunt:confirmed
+            confirmed_key = key_parts[6]
+
+            # Filter and aggregate hash data
+            for ts_field, count_value in hash_data.items():
+                # Decode if bytes
+                if isinstance(ts_field, bytes):
+                    ts_field = ts_field.decode('utf-8')
+                if isinstance(count_value, bytes):
+                    count_value = count_value.decode('utf-8')
+
+                try:
+                    ts = int(ts_field)
+                    count = int(count_value)
+                except (ValueError, TypeError):
+                    continue
+
+                # Filter by time range
+                if not (start_ts <= ts < end_ts):
+                    continue
+
+                # Aggregate based on mode
+                if self.mode == "sum":
+                    acc_total['total'] = acc_total.get('total', 0) + count
+                    acc_confirmed[confirmed_key] = acc_confirmed.get(confirmed_key, 0) + count
+
+                elif self.mode == "grouped":
+                    bucket = acc_grouped.setdefault(group_key, {})
+                    bucket_str = str(ts)
+                    bucket[bucket_str] = bucket.get(bucket_str, 0) + count
+
+                elif self.mode == "surged":
+                    bucket = acc_surged.setdefault(group_key, {})
+                    hour = str((ts % 86400) // 3600)
+                    bucket[hour] = bucket.get(hour, 0) + count
+
     async def invasion_retrieve_timeseries(self) -> Dict[str, Any]:
+        """Retrieve timeseries data using Python-side filtering with pipelining to avoid blocking Redis"""
         client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
-        def convert_redis_result(res):
-            if isinstance(res, list):
-                if len(res) % 2 == 0:
-                    return {res[i]: convert_redis_result(res[i+1]) for i in range(0, len(res), 2)}
-                else:
-                    return [convert_redis_result(item) for item in res]
-            return res
-
         # Accumulators across multiple patterns
-        acc_total = 0
+        acc_total = {}
         acc_confirmed: Dict[str, int] = {}
         acc_grouped: Dict[str, Dict[str, int]] = {}
         acc_surged: Dict[str, Dict[str, int]] = {}
@@ -192,45 +158,42 @@ class InvasionTimeSeries:
             logger.debug(f"🕴️ Invasion ⏱️ Time range: start_ts={start_ts}, end_ts={end_ts}")
 
             request_start = time.monotonic()
-            sha = await self._load_script(client)
+            total_keys_processed = 0
 
+            # Process each pattern separately
             for pattern in self._build_key_patterns():
-                raw = await client.evalsha(
-                    sha, 0,
-                    pattern,
-                    str(start_ts),
-                    str(end_ts),
-                    self.mode
-                )
-                data = convert_redis_result(raw)
+                logger.debug(f"🕴️ Scanning for pattern: {pattern}")
 
-                if self.mode == "sum":
-                    # {"total": int, "confirmed": { "0": int, "1": int } }
-                    acc_total += int(data.get("total", 0) or 0)
-                    conf = data.get("confirmed", {}) or {}
-                    for k, v in conf.items():
-                        acc_confirmed[k] = acc_confirmed.get(k, 0) + int(v)
-                elif self.mode == "grouped":
-                    # { "display:grunt:confirmed": { "ts": count, ... }, ... }
-                    for group_key, groups in data.items():
-                        # Ensure 'groups' is dict
-                        if isinstance(groups, list):
-                            groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                        bucket = acc_grouped.setdefault(group_key, {})
-                        for ts_str, cnt in groups.items():
-                            bucket[ts_str] = bucket.get(ts_str, 0) + int(cnt)
-                elif self.mode == "surged":
-                    # { "display:grunt:confirmed": { "hour": count, ... }, ... }
-                    for group_key, inner in data.items():
-                        if isinstance(inner, list):
-                            inner = {inner[i]: inner[i+1] for i in range(0, len(inner), 2)}
-                        bucket = acc_surged.setdefault(group_key, {})
-                        for hour, cnt in inner.items():
-                            bucket[hour] = bucket.get(hour, 0) + int(cnt)
+                # Use SCAN to iterate through matching keys
+                keys_batch = []
+                async for key in client.scan_iter(match=pattern, count=500):
+                    keys_batch.append(key)
+
+                    # Process in batches to allow writes to interleave
+                    if len(keys_batch) >= PIPELINE_BATCH_SIZE:
+                        await self._process_keys_batch(
+                            client, keys_batch, start_ts, end_ts,
+                            acc_total, acc_confirmed, acc_grouped, acc_surged
+                        )
+                        total_keys_processed += len(keys_batch)
+                        keys_batch = []
+                        # Small delay to allow write operations to proceed
+                        await asyncio.sleep(0.001)
+
+                # Process remaining keys
+                if keys_batch:
+                    await self._process_keys_batch(
+                        client, keys_batch, start_ts, end_ts,
+                        acc_total, acc_confirmed, acc_grouped, acc_surged
+                    )
+                    total_keys_processed += len(keys_batch)
+
+            elapsed = time.monotonic() - request_start
+            logger.info(f"🕴️ Invasion retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
 
             # Final formatting/sorting
             if self.mode == "sum":
-                formatted = {"total": acc_total, "confirmed": dict(sorted(acc_confirmed.items()))}
+                formatted = {"total": acc_total.get('total', 0), "confirmed": dict(sorted(acc_confirmed.items()))}
             elif self.mode == "grouped":
                 formatted = {}
                 for group_key, groups in acc_grouped.items():
@@ -257,9 +220,7 @@ class InvasionTimeSeries:
             else:
                 formatted = {}
 
-            elapsed = time.monotonic() - request_start
-            logger.info(f"🕴️ Invasion retrieval execution took ⏱️ {elapsed:.3f} seconds")
             return {"mode": self.mode, "data": formatted}
         except Exception as e:
-            logger.error(f"❌ 🕴️ Invasion Lua script execution failed: {e}")
+            logger.error(f"❌ 🕴️ Invasion retrieval failed: {e}")
             return {"mode": self.mode, "data": {}}
