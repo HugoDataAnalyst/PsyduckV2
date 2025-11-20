@@ -7,8 +7,8 @@ from utils.logger import logger
 
 redis_manager = RedisManager()
 
-# Pipeline batch size - balance between throughput and allowing writes to interleave
-PIPELINE_BATCH_SIZE = 150
+# Pipeline batch size - larger batches for better performance
+PIPELINE_BATCH_SIZE = 500
 
 class PokemonTTHTimeSeries:
     def __init__(

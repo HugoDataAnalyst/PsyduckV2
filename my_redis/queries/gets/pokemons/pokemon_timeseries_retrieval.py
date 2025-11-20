@@ -12,8 +12,9 @@ except ImportError:
 
 redis_manager = RedisManager()
 
-# Pipeline batch size - balance between throughput and allowing writes to interleave
-PIPELINE_BATCH_SIZE = 150
+# Pipeline batch size - larger batches for better performance
+# Writes can still interleave between batches
+PIPELINE_BATCH_SIZE = 500
 
 class PokemonTimeSeries:
     def __init__(
@@ -64,26 +65,25 @@ class PokemonTimeSeries:
         try:
             request_start = time.monotonic()
             total_keys_processed = 0
+            patterns = self._build_key_patterns()
 
-            # Process each pattern separately
-            for pattern in self._build_key_patterns():
+            # Process patterns concurrently for better performance
+            async def process_pattern(pattern):
+                keys_count = 0
                 logger.debug(f"👻 Scanning for pattern: {pattern}")
 
-                # Use SCAN to iterate through matching keys
                 keys_batch = []
-                async for key in client.scan_iter(match=pattern, count=500):
+                async for key in client.scan_iter(match=pattern, count=1000):
                     keys_batch.append(key)
 
-                    # Process in batches to allow writes to interleave
+                    # Process in larger batches for better throughput
                     if len(keys_batch) >= PIPELINE_BATCH_SIZE:
                         await self._process_keys_batch(
                             client, keys_batch, start_ts, end_ts,
                             acc_sum, acc_grouped, acc_surged
                         )
-                        total_keys_processed += len(keys_batch)
+                        keys_count += len(keys_batch)
                         keys_batch = []
-                        # Small delay to allow write operations to proceed
-                        await asyncio.sleep(0.001)
 
                 # Process remaining keys
                 if keys_batch:
@@ -91,7 +91,16 @@ class PokemonTimeSeries:
                         client, keys_batch, start_ts, end_ts,
                         acc_sum, acc_grouped, acc_surged
                     )
-                    total_keys_processed += len(keys_batch)
+                    keys_count += len(keys_batch)
+
+                return keys_count
+
+            # Process up to 5 patterns concurrently
+            batch_size = 5
+            for i in range(0, len(patterns), batch_size):
+                pattern_batch = patterns[i:i + batch_size]
+                counts = await asyncio.gather(*[process_pattern(p) for p in pattern_batch])
+                total_keys_processed += sum(counts)
 
             elapsed = time.monotonic() - request_start
             logger.info(f"👻 Pokémon retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")

@@ -9,8 +9,8 @@ from webhook.filter_data import WebhookFilter
 
 redis_manager = RedisManager()
 
-# Pipeline batch size - balance between throughput and allowing writes to interleave
-PIPELINE_BATCH_SIZE = 150
+# Pipeline batch size - larger batches for better performance
+PIPELINE_BATCH_SIZE = 500
 
 class RaidTimeSeries:
     def __init__(
