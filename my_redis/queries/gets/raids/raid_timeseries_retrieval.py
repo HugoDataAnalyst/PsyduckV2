@@ -174,12 +174,16 @@ class RaidTimeSeries:
             return local_sum, local_grouped, local_surged
 
         # Use pipeline to fetch all hash data at once
+        pipeline_start = time.monotonic()
         async with client.pipeline(transaction=False) as pipe:
             for key in keys:
                 pipe.hgetall(key)
             results = await pipe.execute()
+        pipeline_elapsed = time.monotonic() - pipeline_start
+        logger.debug(f"👹 Pipeline fetched {len(keys)} keys in {pipeline_elapsed:.3f}s")
 
         # Process each key's hash data
+        processing_start = time.monotonic()
         for key, hash_data in zip(keys, results):
             if not hash_data:
                 continue
@@ -218,6 +222,9 @@ class RaidTimeSeries:
                     new_key = f"{key}:{hour}"
                     local_surged[new_key] = local_surged.get(new_key, 0) + count
 
+        processing_elapsed = time.monotonic() - processing_start
+        logger.debug(f"👹 Processed {len(keys)} keys data in {processing_elapsed:.3f}s")
+
         return local_sum, local_grouped, local_surged
 
     async def raid_retrieve_timeseries(self) -> Dict[str, Any]:
@@ -245,14 +252,21 @@ class RaidTimeSeries:
                 logger.debug(f"👹 Scanning for pattern: {pattern}")
 
                 # Collect all keys for this pattern
+                scan_start = time.monotonic()
                 all_keys = []
                 async for key in client.scan_iter(match=pattern, count=2000):
                     all_keys.append(key)
+                scan_elapsed = time.monotonic() - scan_start
+                logger.debug(f"👹 SCAN iteration collected {len(all_keys)} keys in {scan_elapsed:.3f}s")
 
                 # Process in batches
+                batch_split_start = time.monotonic()
                 batches = [all_keys[i:i + PIPELINE_BATCH_SIZE] for i in range(0, len(all_keys), PIPELINE_BATCH_SIZE)]
+                batch_split_elapsed = time.monotonic() - batch_split_start
+                logger.debug(f"👹 Split into {len(batches)} batches in {batch_split_elapsed:.3f}s")
 
                 # Process batches sequentially to avoid lock contention
+                batch_process_start = time.monotonic()
                 for batch in batches:
                     local_sum, local_grouped, local_surged = await self._process_keys_batch(
                         client, batch, start_ts, end_ts
@@ -267,6 +281,8 @@ class RaidTimeSeries:
 
                     for key, count in local_surged.items():
                         acc_surged[key] = acc_surged.get(key, 0) + count
+                batch_process_elapsed = time.monotonic() - batch_process_start
+                logger.debug(f"👹 Sequential batch processing took {batch_process_elapsed:.3f}s")
 
                 total_keys_processed += len(all_keys)
 
@@ -274,6 +290,7 @@ class RaidTimeSeries:
             logger.info(f"👹 Raid retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
 
             # Final formatting
+            format_start = time.monotonic()
             if self.mode == "sum":
                 formatted = self._transform_timeseries_sum(acc_sum)
             elif self.mode == "grouped":
@@ -282,6 +299,8 @@ class RaidTimeSeries:
                 formatted = self.transform_raids_surged_totals_hourly_by_hour(acc_surged)
             else:
                 formatted = {}
+            format_elapsed = time.monotonic() - format_start
+            logger.debug(f"👹 Final formatting took {format_elapsed:.3f}s")
 
             return {"mode": self.mode, "data": formatted}
 

@@ -11,11 +11,18 @@ import config as AppConfig
 redis_manager = RedisManager()
 
 
-def build_hash_key(data_type: str, metric: str, area: str, entity: str, form: Union[str, int]) -> str:
+def build_hash_key(data_type: str, metric: str, area: str, entity: str, form: Union[str, int], date_hour: str = None) -> str:
     """
-    Build a plain text hash key.
-    Example: ts:pokemon:total:Matosinhos:422:0
+    Build a plain text hash key with optional hourly partition.
+
+    New format (hourly-partitioned):
+      ts:pokemon:total:Matosinhos:422:0:2025-11-20-18
+
+    Old format (for backward compatibility):
+      ts:pokemon:total:Matosinhos:422:0
     """
+    if date_hour:
+        return f"ts:{data_type}:{metric}:{area}:{entity}:{form}:{date_hour}"
     return f"ts:{data_type}:{metric}:{area}:{entity}:{form}"
 
 
@@ -56,6 +63,9 @@ async def add_pokemon_timeseries_event(data: Dict[str, Any], pipe=None) -> Dict[
     first_seen = data["first_seen"]
     bucket = get_time_bucket(first_seen)
 
+    # Generate hourly partition key: YYYY-MM-DD-HH
+    date_hour = datetime.fromtimestamp(first_seen).strftime('%Y-%m-%d-%H')
+
     # Determine metric increments.
     inc_total      = 1  # Always increment total.
     inc_iv100      = 1 if data.get("iv") == 100 else 0
@@ -79,18 +89,18 @@ async def add_pokemon_timeseries_event(data: Dict[str, Any], pipe=None) -> Dict[
     if pipe:
         for metric, inc in metrics.items():
             if inc:
-                key = build_hash_key(data_type, metric, area, entity, form)
+                key = build_hash_key(data_type, metric, area, entity, form, date_hour)
                 pipe.hincrby(key, bucket, inc)
                 updated_fields[metric] = "OK"
     else:
         async with client.pipeline() as pipe:
             for metric, inc in metrics.items():
                 if inc:
-                    key = build_hash_key(data_type, metric, area, entity, form)
+                    key = build_hash_key(data_type, metric, area, entity, form, date_hour)
                     pipe.hincrby(key, bucket, inc)
                     updated_fields[metric] = "OK"
             await pipe.execute()
 
-    logger.debug(f"✅ Added event for {data_type} {entity} in {area} (form: {form}) at bucket {bucket}")
+    logger.debug(f"✅ Added event for {data_type} {entity} in {area} (form: {form}) at {date_hour} bucket {bucket}")
     return updated_fields
 

@@ -1,3 +1,4 @@
+import asyncio
 import re
 import time
 from datetime import datetime, timedelta
@@ -13,7 +14,7 @@ redis_manager = RedisManager()
 
 # Pipeline batch size - larger batches for better performance
 # Writes can still interleave between batches
-PIPELINE_BATCH_SIZE = 500
+PIPELINE_BATCH_SIZE = 5000
 
 class PokemonTimeSeries:
     def __init__(
@@ -68,23 +69,34 @@ class PokemonTimeSeries:
 
             # Process each pattern separately
             for pattern in patterns:
-                logger.debug(f"👻 Scanning for pattern: {pattern}")
+                logger.info(f"👻 Scanning for pattern: {pattern}")
 
                 # Collect all keys for this pattern
+                scan_start = time.monotonic()
                 all_keys = []
                 async for key in client.scan_iter(match=pattern, count=2000):
                     all_keys.append(key)
+                scan_elapsed = time.monotonic() - scan_start
+                logger.info(f"👻 SCAN iteration collected {len(all_keys)} keys in {scan_elapsed:.3f}s")
 
-                # Process in batches
+                # Process in batches concurrently for better performance
+                batch_split_start = time.monotonic()
                 batches = [all_keys[i:i + PIPELINE_BATCH_SIZE] for i in range(0, len(all_keys), PIPELINE_BATCH_SIZE)]
+                batch_split_elapsed = time.monotonic() - batch_split_start
+                logger.info(f"👻 Split into {len(batches)} batches in {batch_split_elapsed:.3f}s")
 
-                # Process batches sequentially to avoid lock contention
-                for batch in batches:
-                    local_sum, local_grouped, local_surged = await self._process_keys_batch(
-                        client, batch, start_ts, end_ts
-                    )
+                # Process all batches concurrently - each returns isolated results
+                gather_start = time.monotonic()
+                batch_results = await asyncio.gather(*[
+                    self._process_keys_batch(client, batch, start_ts, end_ts)
+                    for batch in batches
+                ])
+                gather_elapsed = time.monotonic() - gather_start
+                logger.info(f"👻 Concurrent batch processing took {gather_elapsed:.3f}s")
 
-                    # Merge results sequentially (fast CPU operation, no lock needed)
+                # Merge all batch results sequentially (no lock needed since we're in a single coroutine)
+                merge_start = time.monotonic()
+                for local_sum, local_grouped, local_surged in batch_results:
                     for metric, count in local_sum.items():
                         acc_sum[metric] = acc_sum.get(metric, 0) + count
 
@@ -97,6 +109,8 @@ class PokemonTimeSeries:
                         bucket = acc_surged.setdefault(metric, {})
                         for hour, count in hours.items():
                             bucket[hour] = bucket.get(hour, 0) + count
+                merge_elapsed = time.monotonic() - merge_start
+                logger.info(f"👻 Merging {len(batch_results)} batch results took {merge_elapsed:.3f}s")
 
                 total_keys_processed += len(all_keys)
 
@@ -104,6 +118,7 @@ class PokemonTimeSeries:
             logger.info(f"👻 Pokémon retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
 
             # Final formatting
+            format_start = time.monotonic()
             if self.mode == "sum":
                 formatted = dict(sorted(acc_sum.items()))
             elif self.mode == "grouped":
@@ -125,6 +140,8 @@ class PokemonTimeSeries:
                     formatted[metric] = dict(sorted(labeled.items(), key=lambda kv: int(kv[0].split()[1])))
             else:
                 formatted = {}
+            format_elapsed = time.monotonic() - format_start
+            logger.info(f"👻 Final formatting took {format_elapsed:.3f}s")
 
             return {"mode": self.mode, "data": formatted}
 
@@ -153,12 +170,16 @@ class PokemonTimeSeries:
             return local_sum, local_grouped, local_surged
 
         # Use pipeline to fetch all hash data at once
+        pipeline_start = time.monotonic()
         async with client.pipeline(transaction=False) as pipe:
             for key in keys:
                 pipe.hgetall(key)
             results = await pipe.execute()
+        pipeline_elapsed = time.monotonic() - pipeline_start
+        logger.info(f"👻 Pipeline fetched {len(keys)} keys in {pipeline_elapsed:.3f}s")
 
         # Process each key's hash data into local accumulators
+        processing_start = time.monotonic()
         for key, hash_data in zip(keys, results):
             if not hash_data:
                 continue
@@ -208,14 +229,22 @@ class PokemonTimeSeries:
                     bucket = local_surged.setdefault(metric, {})
                     bucket[hour] = bucket.get(hour, 0) + count
 
+        processing_elapsed = time.monotonic() - processing_start
+        logger.info(f"👻 Processed {len(keys)} keys data in {processing_elapsed:.3f}s")
+
         return local_sum, local_grouped, local_surged
 
     def _build_key_patterns(self) -> list[str]:
         """
-        Build a list of Redis MATCH patterns for SCAN.
-        Key format: ts:pokemon:{metric}:{area}:{pokemon_id}:{form}
-        We always wildcard metric ('*'). For pokemon_id/form we expand cartesian
-        product if sets are provided; otherwise wildcard that slot.
+        Build a list of Redis MATCH patterns for SCAN with hourly partitions.
+
+        New format (hourly-partitioned):
+          ts:pokemon:{metric}:{area}:{pokemon_id}:{form}:{date_hour}
+
+        Old format (for backward compatibility):
+          ts:pokemon:{metric}:{area}:{pokemon_id}:{form}
+
+        For time range queries, we generate patterns for each hour in the range.
         """
         metric = "*"
         area = "*" if self.area.lower() in ["all", "global"] else self.area
@@ -223,9 +252,25 @@ class PokemonTimeSeries:
         pids  = list(self.pokemon_ids) if self.pokemon_ids is not None else ["*"]
         forms = list(self.forms)       if self.forms is not None       else ["*"]
 
+        # Generate list of hours between start and end
+        date_hours = []
+        current = self.start.replace(minute=0, second=0, microsecond=0)
+        while current <= self.end:
+            date_hours.append(current.strftime('%Y-%m-%d-%H'))
+            current += timedelta(hours=1)
+
         patterns = []
+
+        # Build patterns for new hourly-partitioned keys
+        for pid in pids:
+            for frm in forms:
+                for date_hour in date_hours:
+                    patterns.append(f"ts:pokemon:{metric}:{area}:{pid}:{frm}:{date_hour}")
+
+        # Also include old format pattern for backward compatibility (keys without date_hour)
         for pid in pids:
             for frm in forms:
                 patterns.append(f"ts:pokemon:{metric}:{area}:{pid}:{frm}")
-        logger.debug(f"Built {len(patterns)} key pattern(s): {patterns[:5]}{'...' if len(patterns)>5 else ''}")
+
+        logger.debug(f"Built {len(patterns)} key pattern(s) for {len(date_hours)} hours: {patterns[:5]}{'...' if len(patterns)>5 else ''}")
         return patterns

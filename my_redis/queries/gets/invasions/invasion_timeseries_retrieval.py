@@ -90,12 +90,16 @@ class InvasionTimeSeries:
             return local_total, local_confirmed, local_grouped, local_surged
 
         # Use pipeline to fetch all hash data at once
+        pipeline_start = time.monotonic()
         async with client.pipeline(transaction=False) as pipe:
             for key in keys:
                 pipe.hgetall(key)
             results = await pipe.execute()
+        pipeline_elapsed = time.monotonic() - pipeline_start
+        logger.debug(f"🕴️ Pipeline fetched {len(keys)} keys in {pipeline_elapsed:.3f}s")
 
         # Process each key's hash data
+        processing_start = time.monotonic()
         for key, hash_data in zip(keys, results):
             if not hash_data:
                 continue
@@ -145,6 +149,9 @@ class InvasionTimeSeries:
                     hour = str((ts % 86400) // 3600)
                     bucket[hour] = bucket.get(hour, 0) + count
 
+        processing_elapsed = time.monotonic() - processing_start
+        logger.debug(f"🕴️ Processed {len(keys)} keys data in {processing_elapsed:.3f}s")
+
         return local_total, local_confirmed, local_grouped, local_surged
 
     async def invasion_retrieve_timeseries(self) -> Dict[str, Any]:
@@ -173,14 +180,21 @@ class InvasionTimeSeries:
                 logger.debug(f"🕴️ Scanning for pattern: {pattern}")
 
                 # Collect all keys for this pattern
+                scan_start = time.monotonic()
                 all_keys = []
                 async for key in client.scan_iter(match=pattern, count=2000):
                     all_keys.append(key)
+                scan_elapsed = time.monotonic() - scan_start
+                logger.debug(f"🕴️ SCAN iteration collected {len(all_keys)} keys in {scan_elapsed:.3f}s")
 
                 # Process in batches
+                batch_split_start = time.monotonic()
                 batches = [all_keys[i:i + PIPELINE_BATCH_SIZE] for i in range(0, len(all_keys), PIPELINE_BATCH_SIZE)]
+                batch_split_elapsed = time.monotonic() - batch_split_start
+                logger.debug(f"🕴️ Split into {len(batches)} batches in {batch_split_elapsed:.3f}s")
 
                 # Process batches sequentially to avoid lock contention
+                batch_process_start = time.monotonic()
                 for batch in batches:
                     local_total, local_confirmed, local_grouped, local_surged = await self._process_keys_batch(
                         client, batch, start_ts, end_ts
@@ -202,6 +216,8 @@ class InvasionTimeSeries:
                         bucket = acc_surged.setdefault(group_key, {})
                         for hour, count in hours.items():
                             bucket[hour] = bucket.get(hour, 0) + count
+                batch_process_elapsed = time.monotonic() - batch_process_start
+                logger.debug(f"🕴️ Sequential batch processing took {batch_process_elapsed:.3f}s")
 
                 total_keys_processed += len(all_keys)
 
@@ -209,6 +225,7 @@ class InvasionTimeSeries:
             logger.info(f"🕴️ Invasion retrieval processed {total_keys_processed} keys in {elapsed:.3f}s")
 
             # Final formatting/sorting
+            format_start = time.monotonic()
             if self.mode == "sum":
                 formatted = {"total": acc_total.get('total', 0), "confirmed": dict(sorted(acc_confirmed.items()))}
             elif self.mode == "grouped":
@@ -236,6 +253,8 @@ class InvasionTimeSeries:
                 )
             else:
                 formatted = {}
+            format_elapsed = time.monotonic() - format_start
+            logger.debug(f"🕴️ Final formatting took {format_elapsed:.3f}s")
 
             return {"mode": self.mode, "data": formatted}
         except Exception as e:
