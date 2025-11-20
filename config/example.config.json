@@ -21,7 +21,7 @@
         "store_quests_timeseries": true
     },
     "REDIS": {
-        "redis_connections": 30
+        "redis_connections": 200
     },
     "flusher": {
         "pokemon_max_threshold": 10000,
