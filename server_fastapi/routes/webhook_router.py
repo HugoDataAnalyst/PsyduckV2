@@ -80,21 +80,32 @@ async def receive_webhook(request: Request):
 
     results = {}
 
-    # Process each event type **concurrently**, but handle each type sequentially
+    # Process each event type **concurrently**, and events within each type also concurrently
     async def process_event_group(event_type, events):
         logger.info(f"🔄 Processing {len(events)} {event_type} events...")
         results[event_type] = []
 
         start_time = time.perf_counter()
-        valid_count = 0
 
-        for event in events:  # Sequential processing per event type
-            result = await process_single_event(event)
-            if result:
-                results[event_type].append(result)
-                if result.get("status") != "ignored":
-                    valid_count += 1
+        # Process events concurrently in batches to avoid overwhelming Redis
+        batch_size = 50  # Process up to 50 events concurrently
+        for i in range(0, len(events), batch_size):
+            batch = events[i:i + batch_size]
+            # Process batch concurrently
+            batch_results = await asyncio.gather(
+                *[process_single_event(event) for event in batch],
+                return_exceptions=True
+            )
 
+            # Collect results
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Error processing event: {result}")
+                    results[event_type].append({"status": "error", "message": str(result)})
+                elif result:
+                    results[event_type].append(result)
+
+        valid_count = sum(1 for r in results[event_type] if r.get("status") not in ["ignored", "error"])
         elapsed = time.perf_counter() - start_time  # End stopwatch
         if valid_count:
             logger.success(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")
