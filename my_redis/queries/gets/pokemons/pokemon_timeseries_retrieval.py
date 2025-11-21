@@ -1,7 +1,7 @@
 import asyncio
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, Union, Iterable
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
@@ -236,15 +236,10 @@ class PokemonTimeSeries:
 
     def _build_key_patterns(self) -> list[str]:
         """
-        Build a list of Redis MATCH patterns for SCAN with hourly partitions.
+        Build a list of Redis MATCH patterns for SCAN.
 
-        New format (hourly-partitioned):
-          ts:pokemon:{metric}:{area}:{pokemon_id}:{form}:{date_hour}
-
-        Old format (for backward compatibility):
+        Format:
           ts:pokemon:{metric}:{area}:{pokemon_id}:{form}
-
-        For time range queries, we generate patterns for each hour in the range.
         """
         metric = "*"
         area = "*" if self.area.lower() in ["all", "global"] else self.area
@@ -252,25 +247,10 @@ class PokemonTimeSeries:
         pids  = list(self.pokemon_ids) if self.pokemon_ids is not None else ["*"]
         forms = list(self.forms)       if self.forms is not None       else ["*"]
 
-        # Generate list of hours between start and end
-        date_hours = []
-        current = self.start.replace(minute=0, second=0, microsecond=0)
-        while current <= self.end:
-            date_hours.append(current.strftime('%Y-%m-%d-%H'))
-            current += timedelta(hours=1)
-
         patterns = []
-
-        # Build patterns for new hourly-partitioned keys
-        for pid in pids:
-            for frm in forms:
-                for date_hour in date_hours:
-                    patterns.append(f"ts:pokemon:{metric}:{area}:{pid}:{frm}:{date_hour}")
-
-        # Also include old format pattern for backward compatibility (keys without date_hour)
         for pid in pids:
             for frm in forms:
                 patterns.append(f"ts:pokemon:{metric}:{area}:{pid}:{frm}")
 
-        logger.debug(f"Built {len(patterns)} key pattern(s) for {len(date_hours)} hours: {patterns[:5]}{'...' if len(patterns)>5 else ''}")
+        logger.debug(f"Built {len(patterns)} key pattern(s): {patterns[:5]}{'...' if len(patterns)>5 else ''}")
         return patterns
