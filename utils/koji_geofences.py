@@ -32,6 +32,7 @@ class KojiGeofences:
     expiry = AppConfig.geofence_expire_cache_seconds
     bearer_token = AppConfig.koji_bearer_token
     geofence_api_url = AppConfig.koji_geofence_api_url
+    koji_url = AppConfig.koji_url
     redis_manager = RedisManager()  # Singleton
     tf = TimezoneFinder()
     _instance = None  # Singleton instance
@@ -123,7 +124,10 @@ class KojiGeofences:
         """
         headers = {"Authorization": f"Bearer {cls.bearer_token}"} if cls.bearer_token else {}
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(cls.geofence_api_url, headers=headers)
+            if cls.koji_url:
+                resp = await client.get(cls.koji_url, headers=headers)
+            else:
+                resp = await client.get(cls.geofence_api_url, headers=headers)
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
