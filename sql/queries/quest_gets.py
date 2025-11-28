@@ -120,7 +120,7 @@ async def fetch_quests_items_day(
 
     sql = f"""
         SELECT
-          i.pokestop,
+          p.pokestop_name,
           i.mode,
           i.task_type,
           ANY_VALUE(p.latitude)  AS latitude,

@@ -50,7 +50,7 @@ async def fetch_invasions_day(
 
     sql = f"""
         SELECT
-          i.pokestop,
+          p.pokestop_name,
           i.display_type,
           i.`character`,
           ANY_VALUE(p.latitude)  AS latitude,

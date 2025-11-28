@@ -56,7 +56,7 @@ async def fetch_raids_day(
 
     sql = f"""
         SELECT
-          r.gym,
+          g.gym_name,
           r.raid_pokemon,
           r.raid_form,
           r.raid_level,
