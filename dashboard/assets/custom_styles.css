@@ -1,0 +1,192 @@
+/* custom_styles.css
+   Dashboard custom styles
+   - Ensures rows-per-page selector value and menu options are black on white
+   - Includes fallbacks for several react-select class name variants
+   - Small extra visual tweaks for dropdown controls
+*/
+
+/* -------------------------
+   General dashboard tweaks
+   ------------------------- */
+
+/* Ensure dark-theme containers keep readable text where needed */
+body, .dash-app, .container {
+    color: #eaeaea;
+}
+
+/* Small utility: make the main cards slightly lighter on hover (optional) */
+.card:hover {
+    box-shadow: 0 6px 14px rgba(0,0,0,0.4);
+}
+
+/* -------------------------
+   Original rows-per-page fixes
+   (kept for backwards compatibility)
+   ------------------------- */
+
+/* Fix rows per page dropdown text color (legacy .Select class names) */
+#rows-per-page-selector .Select-menu-outer {
+    background-color: white !important;
+}
+
+#rows-per-page-selector .Select-option {
+    color: black !important;
+    background-color: white !important;
+}
+
+#rows-per-page-selector .Select-option:hover {
+    background-color: #f0f0f0 !important;
+    color: black !important;
+}
+
+#rows-per-page-selector .Select-value-label {
+    color: black !important;
+}
+
+/* For newer Dash / react-select versions that use different class names */
+.Select-menu {
+    background-color: white !important;
+}
+
+.Select-menu .Select-option {
+    color: black !important;
+}
+
+/* -------------------------
+   Robust react-select compatibility
+   Covers a variety of generated class names and structures
+   ------------------------- */
+
+/* Container and control background */
+#rows-per-page-selector .Select__control,
+#rows-per-page-selector .Select-control,
+#rows-per-page-selector .css-1pahdxg-control,  /* common generated control class */
+.rows-per-page-selector .Select__control,
+.rows-per-page-selector .css-1pahdxg-control {
+    background: white !important;
+    color: black !important;
+}
+
+/* The selected single value (closed state) */
+#rows-per-page-selector .Select__single-value,
+#rows-per-page-selector .Select-value-label,
+#rows-per-page-selector .Select-value,
+#rows-per-page-selector .css-1uccc91-singleValue,
+#rows-per-page-selector .css-1okebmr-singleValue,
+#rows-per-page-selector .css-1wa3eu0-placeholder,
+.rows-per-page-selector .Select__single-value,
+.rows-per-page-selector .css-1uccc91-singleValue {
+    color: black !important;
+    opacity: 1 !important;
+}
+
+/* Placeholder text */
+#rows-per-page-selector .Select-placeholder,
+#rows-per-page-selector .css-14el2xx-placeholder {
+    color: rgba(0,0,0,0.8) !important;
+}
+
+/* Dropdown menu and options (open state) */
+#rows-per-page-selector .Select__menu,
+#rows-per-page-selector .Select-menu,
+#rows-per-page-selector .Select-menu-outer,
+#rows-per-page-selector .css-yt9ioa-menu {
+    background-color: white !important;
+    color: black !important;
+}
+
+/* Individual options */
+#rows-per-page-selector .Select__option,
+#rows-per-page-selector .Select-option,
+#rows-per-page-selector .css-yt9ioa-option,
+#rows-per-page-selector .css-1n7v3ny-option {
+    color: black !important;
+    background-color: white !important;
+}
+
+/* Hover / focused option */
+#rows-per-page-selector .Select__option--is-focused,
+#rows-per-page-selector .Select-option:hover,
+#rows-per-page-selector .css-yt9ioa-option:hover,
+#rows-per-page-selector .css-1n7v3ny-option--is-focused {
+    background-color: #f0f0f0 !important;
+    color: black !important;
+}
+
+/* Active / selected option (menu) */
+#rows-per-page-selector .Select__option--is-selected,
+#rows-per-page-selector .Select-option.is-selected {
+    background-color: #e9ecef !important;
+    color: black !important;
+}
+
+/* Ensure indicators (arrow, clear) are visible on white background */
+#rows-per-page-selector .Select-arrow,
+#rows-per-page-selector .css-tlfecz-indicatorContainer,
+.rows-per-page-selector .Select-arrow {
+    color: #333 !important;
+    fill: #333 !important;
+}
+
+/* If the id-based structure changes, allow targeting by added className */
+.rows-per-page-selector,
+.rows-per-page-selector .Select__single-value,
+.rows-per-page-selector .Select-value-label,
+.rows-per-page-selector .css-1uccc91-singleValue {
+    color: black !important;
+    opacity: 1 !important;
+}
+
+/* -------------------------
+   Extra helpful fallbacks
+   - Some Dash versions nest the control inside other wrappers;
+     these selectors attempt to reach into them.
+   ------------------------- */
+
+/* Make sure the displayed value inside the inner div is black */
+#rows-per-page-selector div[class*="singleValue"],
+#rows-per-page-selector div[class*="placeholder"],
+.rows-per-page-selector div[class*="singleValue"],
+.rows-per-page-selector div[class*="placeholder"] {
+    color: black !important;
+    opacity: 1 !important;
+}
+
+/* For the small inline dropdown width we use in the table footer */
+#rows-per-page-selector, .rows-per-page-selector {
+    min-width: 80px;
+    max-width: 160px;
+}
+
+/* If you use dark theme for the page but want the dropdown itself to stand out */
+#rows-per-page-selector .Select__control,
+.rows-per-page-selector .Select__control {
+    border: 1px solid #cfcfcf !important;
+    border-radius: 4px !important;
+}
+
+/* Heatmap Numbered Dot Styles */
+.heatmap-dot {
+    background-color: rgba(51, 136, 255, 0.8);
+    border: 2px solid white;
+    border-radius: 50%;
+    color: white;
+    text-align: center;
+    font-weight: bold;
+    font-size: 12px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    /* Ensure scaling doesn't break centering */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Remove default square styling from leaflet divIcon wrapper */
+.custom-div-icon {
+    background: none;
+    border: none;
+}
+
+/* -------------------------
+   End of file
+   ------------------------- */
