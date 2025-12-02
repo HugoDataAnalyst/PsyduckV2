@@ -23,6 +23,7 @@ __pycache__/
 data/*
 logs/
 config/config.json
+dashboard/dashboard_config.json
 docker-compose.yml
 
 # Database rubbish
