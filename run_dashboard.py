@@ -1,0 +1,25 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+from utils.logger import logger
+from dashboard.app import app
+from dashboard.tasks.global_pokemons import start_background_task as start_pokemon_task
+from dashboard.tasks.global_raids import start_background_task_raids as start_raids_task
+from dashboard.tasks.global_invasions import start_background_task_invasions as start_invasions_task
+from dashboard.tasks.global_quests import start_background_task_quests as start_quests_task
+import config as AppConfig
+
+if __name__ == "__main__":
+    DEBUG_MODE = AppConfig.dashboard_debug_mode
+    logger.info(f"🚀 Starting Dash Dashboard on http://{AppConfig.dashboard_ip}:{AppConfig.dashboard_port} with debug mode: {DEBUG_MODE}")
+
+    logger.info(f"🔗 Connecting to API at {AppConfig.api_base_url}")
+
+    if not DEBUG_MODE or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        print("✅ Starting Background Tasks...")
+        start_pokemon_task()
+        start_raids_task()
+        start_invasions_task()
+        start_quests_task()
+
+    app.run(debug=DEBUG_MODE, port=f"{AppConfig.dashboard_port}", host=f"{AppConfig.dashboard_ip}")
