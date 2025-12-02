@@ -74,7 +74,13 @@
         if (mapInstance) {
             // Clear layers but try to keep map instance if possible?
             // For stability with switching modes, it's often safer to clear layers.
-            if (markersLayer) markersLayer.clearLayers();
+            if (markersLayer) {
+                markersLayer.clearLayers();
+                // If it's a cluster group, also remove it from the map
+                if (typeof markersLayer.clearLayers === 'function') {
+                    mapInstance.removeLayer(markersLayer);
+                }
+            }
             if (heatLayer) mapInstance.removeLayer(heatLayer);
             if (gridLayer) mapInstance.removeLayer(gridLayer);
             if (legendControl) legendControl.remove();
@@ -226,7 +232,41 @@
 
             } else {
                 // --- MARKERS MODE ---
-                markersLayer = L.layerGroup().addTo(mapInstance);
+                // Use MarkerClusterGroup if available, otherwise fallback to regular LayerGroup
+                if (typeof L.markerClusterGroup === 'function') {
+                    markersLayer = L.markerClusterGroup({
+                        // Much more aggressive clustering for large datasets
+                        maxClusterRadius: function(zoom) {
+                            // Larger radius at lower zoom = more clustering
+                            return (zoom < 13) ? 120 : (zoom < 15) ? 80 : 60;
+                        },
+                        disableClusteringAtZoom: 17, // Show individual markers only when very zoomed in
+                        spiderfyOnMaxZoom: false, // Disable spiderfy, just zoom in instead
+                        showCoverageOnHover: false,
+                        zoomToBoundsOnClick: true,
+                        chunkedLoading: true, // Better performance for large datasets
+                        chunkInterval: 200,
+                        chunkDelay: 50,
+                        iconCreateFunction: function(cluster) {
+                            var count = cluster.getChildCount();
+                            // Larger clusters for visibility
+                            var size = Math.min(70, Math.max(40, 40 + Math.log10(count + 1) * 12));
+
+                            // Color based on count for better visual feedback
+                            var color = 'rgba(110, 204, 57, 0.85)'; // Green
+                            if (count > 100) color = 'rgba(255, 165, 0, 0.85)'; // Orange
+                            if (count > 500) color = 'rgba(255, 69, 0, 0.85)'; // Red
+
+                            return L.divIcon({
+                                html: '<div style="background-color: ' + color + '; border-radius: 50%; width: ' + size + 'px; height: ' + size + 'px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: ' + Math.min(16, Math.max(11, size/3)) + 'px; border: 3px solid rgba(255,255,255,0.6); box-shadow: 0 0 10px rgba(0,0,0,0.3);">' + count + '</div>',
+                                className: 'marker-cluster-custom',
+                                iconSize: L.point(size, size)
+                            });
+                        }
+                    }).addTo(mapInstance);
+                } else {
+                    markersLayer = L.layerGroup().addTo(mapInstance);
+                }
 
                 // Group by precise location
                 var grouped = {};

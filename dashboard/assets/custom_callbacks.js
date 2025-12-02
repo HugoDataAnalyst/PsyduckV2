@@ -45,6 +45,6 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
             // Render
             window.renderPokemonHeatmap(filteredData, useIcons);
             return window.dash_clientside.no_update;
-        }
+        },
     }
 });

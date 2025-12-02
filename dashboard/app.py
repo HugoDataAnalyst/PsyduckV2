@@ -68,11 +68,14 @@ app = dash.Dash(
     external_stylesheets=[
         dbc.themes.DARKLY,
         dbc.icons.BOOTSTRAP,
-        "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"  # Leaflet CSS for maps
+        "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",  # Leaflet CSS for maps
+        "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css",  # Leaflet MarkerCluster CSS
+        "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"  # Leaflet MarkerCluster default styles
     ],
     external_scripts=[
         "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",  # Leaflet JS for maps
-        "https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" # Leaflet Heatmap Plugin
+        "https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js",  # Leaflet Heatmap Plugin
+        "https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"  # Leaflet MarkerCluster Plugin
     ],
     suppress_callback_exceptions=True
 )
