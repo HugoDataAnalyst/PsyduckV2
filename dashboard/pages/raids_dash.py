@@ -1,0 +1,636 @@
+import dash
+from dash import html, dcc, callback, Input, Output, State, ALL, ctx, MATCH, ClientsideFunction
+import dash_bootstrap_components as dbc
+import plotly.express as px
+import plotly.graph_objects as go
+import pandas as pd
+from datetime import datetime, date
+from dashboard.utils import get_cached_geofences, get_raids_stats, get_pokemon_icon_url
+from utils.logger import logger
+import config as AppConfig
+import json
+import re
+import os
+
+dash.register_page(__name__, path='/raids', title='Raid Analytics')
+
+ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+
+_SPECIES_MAP = None
+_FORM_MAP = None
+
+def safe_int(value):
+    """Safely converts a value to int, handling 'None' strings and NoneType."""
+    if value is None: return 0
+    if isinstance(value, str):
+        if value.lower() == "none" or value == "": return 0
+        try: return int(float(value))
+        except: return 0
+    if isinstance(value, (int, float)): return int(value)
+    return 0
+
+def _get_species_map():
+    """Loads pokedex_id.json: ID -> Species Name (e.g. 1 -> BULBASAUR)"""
+    global _SPECIES_MAP
+    if _SPECIES_MAP is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex_id.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex_id.json')
+            with open(path, 'r') as f:
+                data = json.load(f)
+                _SPECIES_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
+        except Exception as e:
+            logger.info(f"Error loading pokedex_id.json: {e}")
+            _SPECIES_MAP = {}
+    return _SPECIES_MAP
+
+def _get_form_map():
+    """Loads pokedex.json: Form ID -> Form Name (e.g. 46 -> RATTATA_ALOLA)"""
+    global _FORM_MAP
+    if _FORM_MAP is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex.json')
+            with open(path, 'r') as f:
+                data = json.load(f)
+                _FORM_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
+        except Exception as e:
+            logger.info(f"Error loading pokedex.json: {e}")
+            _FORM_MAP = {}
+    return _FORM_MAP
+
+def resolve_pokemon_name(pid, form_id):
+    species_map = _get_species_map()
+    form_map = _get_form_map()
+
+    pid = safe_int(pid)
+    form_id = safe_int(form_id)
+
+    base_name = species_map.get(pid, f"Pokemon {pid}")
+
+    # If no form or form is 0 or Unset, just return species
+    if form_id <= 0:
+        return base_name
+
+    # Try to find specific form name
+    form_name_full = form_map.get(form_id)
+
+    if form_name_full:
+        # If the specific form mapping is just the Normal version, ignore the suffix
+        # unless it is Alola/Galar/Hisui/etc
+        if "Normal" in form_name_full and not any(x in form_name_full for x in ["Alola", "Galar", "Hisui"]):
+             return base_name
+        return form_name_full
+
+    return base_name
+
+# Raid Info Colors/Icons
+def get_raid_info(level_str):
+    lvl = str(level_str)
+    color = "#e0e0e0" # default
+    label = f"Level {lvl}"
+    file_suffix = lvl
+
+    # Standard levels
+    if lvl == "1": color = "#e0e0e0" # Gray/White
+    elif lvl == "3": color = "#f0ad4e" # Orange
+    elif lvl == "5": color = "#dc3545" # Red (Legendary)
+    elif lvl == "6": label, color = "Mega", "#a020f0" # Purple
+    elif lvl == "7": label, color = "Mega 5", "#7fce83" # Greenish
+    elif lvl == "8": label, color = "Ultra Beast", "#e881f1" # Pinkish
+    elif lvl == "9": label, color = "Extended Egg", "#ce2c2c" # Dark Red
+    elif lvl == "10": label, color = "Primal", "#ad5b2c" # Brown/Orange
+    elif lvl == "11": label, color = "Shadow Level 1", "#0a0a0a"
+    elif lvl == "12": label, color = "Shadow Level 2", "#0a0a0a"
+    elif lvl == "13": label, color = "Shadow Level 3", "#0a0a0a"
+    elif lvl == "14": label, color = "Shadow Level 4", "#0a0a0a"
+    elif lvl == "15": label, color = "Shadow Level 5", "#0a0a0a"
+
+    # Extra Attributes
+    lvl_lower = lvl.lower()
+    if "costume" in lvl_lower:
+        icon_url = f"{ICON_BASE_URL}/reward/avatar_clothing/0.webp"
+        color = "#f8f9fa"
+        label = "Costume"
+    elif "exclusive" in lvl_lower:
+        icon_url = f"{ICON_BASE_URL}/misc/sponsor.webp"
+        color = "#198754"
+        label = "Exclusive"
+    elif "ex eligible" in lvl_lower:
+        icon_url = f"{ICON_BASE_URL}/misc/ex.webp"
+        color = "#0d6efd"
+        label = "EX Eligible"
+    else:
+        # Fallback for standard levels - Egg Image
+        icon_url = f"{ICON_BASE_URL}/raid/egg/{file_suffix}.webp"
+
+    return label, color, icon_url
+
+# Layout
+
+def generate_area_cards(geofences, selected_area_name):
+    cards = []
+    for idx, geo in enumerate(geofences):
+        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', geo['name'])
+        is_selected = (selected_area_name == geo['name'])
+
+        map_children = [html.Div("✓ Selected", style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
+
+        card = dbc.Card([
+            html.Div(map_children, id=f"raids-area-map-{safe_name}", **{'data-map-geofence': json.dumps(geo)}, style={'height': '150px', 'backgroundColor': '#1a1a1a', 'position': 'relative'}),
+            dbc.CardBody([
+                html.H5(geo['name'], className="card-title text-truncate", style={'color': '#28a745' if is_selected else 'inherit'}),
+                dbc.Button("✓ Selected" if is_selected else "Select", href=f"/raids?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
+            ])
+        ], style={"width": "14rem", "margin": "10px", "border": f"3px solid {'#28a745' if is_selected else 'transparent'}"}, className="shadow-sm")
+
+        if is_selected: card.id = "selected-area-card"
+        cards.append(card)
+    return cards if cards else html.Div("No areas match your search.", className="text-center text-muted my-4")
+
+def layout(area=None, **kwargs):
+    geofences = get_cached_geofences() or []
+    initial_cards = generate_area_cards(geofences, area)
+    area_options = [{"label": g["name"], "value": g["name"]} for g in geofences]
+    area_label = area if area else "No Area Selected"
+
+    return dbc.Container([
+        dcc.Store(id="raids-raw-data-store"),
+        dcc.Store(id="raids-table-sort-store", data={"col": "total", "dir": "desc"}),
+        dcc.Store(id="raids-table-page-store", data={"current_page": 1, "rows_per_page": 25}),
+        dcc.Store(id="raids-total-pages-store", data=1),
+        dcc.Store(id="raids-clientside-dummy-store"),
+        dcc.Dropdown(id="raids-area-selector", options=area_options, value=area, style={'display': 'none'}),
+        dcc.Store(id="raids-mode-persistence-store", storage_type="local"),
+
+        # Header
+        dbc.Row([
+            dbc.Col(html.H2("Raid Analytics", className="text-white"), width=12, className="my-4"),
+        ]),
+
+        # Notification Area
+        html.Div(id="raids-notification-area"),
+
+        # Main Control Card
+        dbc.Card([
+            dbc.CardHeader("⚙️ Analysis Settings", className="fw-bold"),
+            dbc.CardBody([
+                dbc.Row([
+                    # Area Selection
+                    dbc.Col([
+                        dbc.Label("Selected Area", className="fw-bold"),
+                        dbc.InputGroup([
+                            dbc.InputGroupText("🗺️"),
+                            dbc.Input(value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
+                            dbc.Button("Change", id="raids-open-area-modal", color="primary")
+                        ], className="mb-3")
+                    ], width=12, md=6),
+
+                    # Data Source
+                    dbc.Col([
+                        dbc.Label("Data Source", className="fw-bold"),
+                        html.Div(
+                            dbc.RadioItems(
+                                id="raids-data-source-selector",
+                                options=[
+                                    {"label": "Live (Real-time)", "value": "live"},
+                                    {"label": "Historical (Stats)", "value": "historical"}
+                                ],
+                                value="live",
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-secondary",
+                                labelCheckedClassName="active"
+                            ), className="mb-3"
+                        )
+                    ], width=12, md=6)
+                ], className="g-3"),
+
+                html.Hr(className="my-3"),
+
+                # Controls Row
+                dbc.Row([
+                    # Time Control
+                    dbc.Col([
+                        html.Div(id="raids-live-controls", children=[
+                            dbc.Label("📅 Time Window (Hours)"),
+                            dbc.InputGroup([
+                                dbc.Input(id="raids-live-time-input", type="number", min=1, max=72, value=1),
+                                dbc.InputGroupText("hours")
+                            ])
+                        ]),
+                        html.Div(id="raids-historical-controls", style={"display": "none"}, children=[
+                            dbc.Label("📅 Date Range"),
+                            dcc.DatePickerRange(id="raids-historical-date-picker", start_date=date.today(), end_date=date.today(), className="d-block w-100")
+                        ])
+                    ], width=6, md=3),
+
+                    # Interval
+                    dbc.Col([
+                        html.Div(id="raids-interval-control-container", style={"display": "none"}, children=[
+                            dbc.Label("⏱️ Interval"),
+                            dcc.Dropdown(id="raids-interval-selector", options=[{"label": "Hourly", "value": "hourly"}], value="hourly", clearable=False, className="text-dark")
+                        ])
+                    ], width=6, md=3),
+
+                    # Mode
+                    dbc.Col([
+                        dbc.Label("📊 View Mode"),
+                        dcc.Dropdown(
+                            id="raids-mode-selector",
+                            options=[],
+                            value=None,
+                            clearable=False,
+                            className="text-dark"
+                        )
+                    ], width=6, md=3),
+
+                    # Actions
+                    dbc.Col([
+                        dbc.Label("Actions", style={"visibility": "hidden"}),
+                        dbc.Button("Run Analysis", id="raids-submit-btn", color="success", className="w-100 fw-bold")
+                    ], width=6, md=3)
+                ], className="align-items-end g-3")
+            ])
+        ], className="shadow-sm border-0 mb-4"),
+
+        # Area Selection Modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Select an Area")),
+            dbc.ModalBody([
+                html.Div(
+                    dbc.Input(id="raids-area-filter-input", placeholder="Filter areas by name...", className="mb-3", autoFocus=True),
+                    style={"position": "sticky", "top": "-16px", "zIndex": "1020", "backgroundColor": "var(--bs-modal-bg, #fff)", "paddingTop": "16px", "paddingBottom": "10px", "marginBottom": "10px", "borderBottom": "1px solid #dee2e6"}
+                ),
+                html.Div(initial_cards, id="raids-area-cards-container", className="d-flex flex-wrap justify-content-center")
+            ]),
+            dbc.ModalFooter(dbc.Button("Close", id="raids-close-area-modal", className="ms-auto"))
+        ], id="raids-area-modal", size="xl", scrollable=True),
+
+        # Results Container
+        dcc.Loading(html.Div(id="raids-stats-container", style={"display": "none"}, children=[
+            dbc.Row([
+                # Sidebar
+                dbc.Col(dbc.Card([
+                    dbc.CardHeader("📈 Total Counts"),
+                    dbc.CardBody(html.Div(id="raids-total-counts-display"))
+                ], className="shadow-sm border-0 h-100"), width=12, lg=4, className="mb-4"),
+
+                # Activity Data
+                dbc.Col(dbc.Card([
+                    dbc.CardHeader("📋 Activity Data"),
+                    dbc.CardBody([
+                         # Embedded Search Input - Visible only in Grouped mode
+                        dcc.Input(
+                            id="raids-search-input",
+                            type="text",
+                            placeholder="🔍 Search Bosses...",
+                            debounce=True,
+                            className="form-control mb-3",
+                            style={"display": "none"}
+                        ),
+                        html.Div(id="raids-main-visual-container")
+                    ])
+                ], className="shadow-sm border-0 h-100"), width=12, lg=8, className="mb-4"),
+            ]),
+
+            dbc.Row([dbc.Col(dbc.Card([
+                dbc.CardHeader("🛠️ Raw Data Inspector"),
+                dbc.CardBody(html.Pre(id="raids-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
+            ], className="shadow-sm border-0"), width=12)])
+        ]))
+    ])
+
+# Parsing Logic
+
+def parse_data_to_df(data, mode, source):
+    records = []
+
+    # Parse nested dictionaries like raid_level, raid_costume
+    def flatten_nested_dict(key_name, nested_data):
+        if isinstance(nested_data, dict):
+            for k, v in nested_data.items():
+                if isinstance(v, (int, float)):
+                    records.append({"metric": str(k), "count": v, "pid": "All", "form": "All", "key": "All", "time_bucket": "Total"})
+
+    if mode == "sum":
+        if isinstance(data, dict):
+            if "total" in data:
+                records.append({"metric": "total", "count": data["total"], "pid": "All", "form": "All", "key": "All", "time_bucket": "Total"})
+            if "raid_level" in data:
+                flatten_nested_dict("level", data["raid_level"])
+            if "raid_costume" in data:
+                costume_data = data["raid_costume"]
+                if "1" in costume_data:
+                    records.append({"metric": "Costume", "count": costume_data["1"], "pid": "All", "form": "All", "key": "All", "time_bucket": "Total"})
+            if "raid_is_exclusive" in data:
+                exclusive_data = data["raid_is_exclusive"]
+                if "1" in exclusive_data:
+                    records.append({"metric": "Exclusive", "count": exclusive_data["1"], "pid": "All", "form": "All", "key": "All", "time_bucket": "Total"})
+            if "raid_ex_eligible" in data:
+                ex_data = data["raid_ex_eligible"]
+                if "1" in ex_data:
+                    records.append({"metric": "EX Eligible", "count": ex_data["1"], "pid": "All", "form": "All", "key": "All", "time_bucket": "Total"})
+
+    elif (mode == "surged") or ("historical" in source and mode != "grouped"):
+        if isinstance(data, dict):
+            for time_key, content in data.items():
+                h_val = time_key
+                if "hour" in str(time_key):
+                    try: h_val = int(time_key.replace("hour ", ""))
+                    except: pass
+
+                if isinstance(content, dict):
+                    # Check for nested raid_level
+                    if "raid_level" in content and isinstance(content["raid_level"], dict):
+                        for lvl, count in content["raid_level"].items():
+                            records.append({"metric": str(lvl), "time_bucket": h_val, "count": count, "pid": "All", "form": "All", "key": "All"})
+                    # Check for flattened keys
+                    else:
+                        for k, v in content.items():
+                            if isinstance(v, (int, float)) and k != "total":
+                                records.append({"metric": str(k), "time_bucket": h_val, "count": v, "pid": "All", "form": "All", "key": "All"})
+
+    elif mode == "grouped":
+        if isinstance(data, dict) and "data" in data:
+            data = data['data']
+
+        if isinstance(data, dict):
+            poke_data = data.get("raid_pokemon+raid_form", {})
+            if poke_data and isinstance(poke_data, dict):
+                for key_str, count in poke_data.items():
+                    if not isinstance(count, (int, float)): continue
+                    parts = key_str.split(":")
+                    if len(parts) >= 2:
+                        pid, form = parts[0], parts[1]
+                        # Resolve Name here for search filtering using Maps
+                        name = resolve_pokemon_name(pid, form)
+                        records.append({"metric": "count", "pid": int(pid), "form": int(form), "key": name, "count": count, "time_bucket": "Total"})
+
+    df = pd.DataFrame(records)
+    if df.empty:
+        return pd.DataFrame(columns=["metric", "count", "pid", "form", "key", "time_bucket"])
+    return df
+
+# Callbacks
+
+@callback(
+    [Output("raids-live-controls", "style"), Output("raids-historical-controls", "style"), Output("raids-interval-control-container", "style")],
+    Input("raids-data-source-selector", "value")
+)
+def toggle_source(source):
+    if "live" in source: return {"display": "block"}, {"display": "none"}, {"display": "none"}
+    return {"display": "none"}, {"display": "block", "position": "relative", "zIndex": 1002}, {"display": "block"}
+
+@callback(
+    [Output("raids-mode-selector", "options"), Output("raids-mode-selector", "value")],
+    Input("raids-data-source-selector", "value"),
+    [State("raids-mode-persistence-store", "data"), State("raids-mode-selector", "value")]
+)
+def restrict_modes(source, stored_mode, current_ui_mode):
+    full_options = [
+        {"label": "Surged (Hourly)", "value": "surged"},
+        {"label": "Grouped (Table)", "value": "grouped"},
+        {"label": "Sum (Totals)", "value": "sum"},
+    ]
+    allowed_values = [o['value'] for o in full_options]
+    if current_ui_mode in allowed_values: final_value = current_ui_mode
+    elif stored_mode in allowed_values: final_value = stored_mode
+    else: final_value = allowed_values[0]
+    return full_options, final_value
+
+@callback(Output("raids-mode-persistence-store", "data"), Input("raids-mode-selector", "value"), prevent_initial_call=True)
+def save_mode(val): return val
+
+@callback(
+    [Output("raids-area-modal", "is_open"), Output("raids-search-input", "style")],
+    [Input("raids-open-area-modal", "n_clicks"), Input("raids-close-area-modal", "n_clicks"), Input("raids-mode-selector", "value")],
+    [State("raids-area-modal", "is_open")]
+)
+def handle_modals_and_search(ao, ac, mode, isa):
+    search_style = {"display": "block", "width": "100%"} if mode == "grouped" else {"display": "none"}
+    tid = ctx.triggered_id
+    if tid in ["raids-open-area-modal", "raids-close-area-modal"]: return not isa, search_style
+    return isa, search_style
+
+# Area Cards Filter & Scroll
+@callback(Output("raids-area-cards-container", "children"), [Input("raids-area-filter-input", "value")], [State("raids-area-selector", "value")])
+def filter_area_cards(search_term, selected_area):
+    geofences = get_cached_geofences() or []
+    if search_term: geofences = [g for g in geofences if search_term.lower() in g['name'].lower()]
+    return generate_area_cards(geofences, selected_area)
+
+dash.clientside_callback(
+    ClientsideFunction(namespace='clientside', function_name='scrollToSelected'),
+    Output("raids-clientside-dummy-store", "data"), Input("raids-area-modal", "is_open")
+)
+
+@callback(
+    [Output("raids-raw-data-store", "data"), Output("raids-stats-container", "style"), Output("raids-notification-area", "children")],
+    [Input("raids-submit-btn", "n_clicks"), Input("raids-data-source-selector", "value")],
+    [State("raids-area-selector", "value"), State("raids-live-time-input", "value"), State("raids-historical-date-picker", "start_date"), State("raids-historical-date-picker", "end_date"), State("raids-interval-selector", "value"), State("raids-mode-selector", "value")]
+)
+def fetch_data(n, source, area, live_h, start, end, interval, mode):
+    if not n: return {}, {"display": "none"}, None
+    if not area:
+        return {}, {"display": "none"}, dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
+
+    try:
+        if source == "live":
+            hours = max(1, min(int(live_h or 1), 72))
+            params = {"start_time": f"{hours} hours", "end_time": "now", "mode": mode, "area": area, "response_format": "json"}
+            data = get_raids_stats("timeseries", params)
+        else:
+            params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
+            data = get_raids_stats("counter", params)
+        return data, {"display": "block"}, None
+    except Exception as e:
+        logger.info(f"Fetch error: {e}")
+        return {}, {"display": "none"}, dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
+
+# Sorting
+@callback(
+    Output("raids-table-sort-store", "data"), Input({"type": "raids-sort-header", "index": ALL}, "n_clicks"), State("raids-table-sort-store", "data"), prevent_initial_call=True
+)
+def update_sort_order(n_clicks, current_sort):
+    if not ctx.triggered_id or not any(n_clicks): return dash.no_update
+    col = ctx.triggered_id['index']
+    return {"col": col, "dir": "asc" if current_sort['col'] == col and current_sort['dir'] == "desc" else "desc"}
+
+# Pagination
+@callback(
+    Output("raids-table-page-store", "data"),
+    [Input("raids-first-page-btn", "n_clicks"), Input("raids-prev-page-btn", "n_clicks"), Input("raids-next-page-btn", "n_clicks"), Input("raids-last-page-btn", "n_clicks"), Input("raids-rows-per-page-selector", "value"), Input("raids-goto-page-input", "value")],
+    [State("raids-table-page-store", "data"), State("raids-total-pages-store", "data")],
+    prevent_initial_call=True
+)
+def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
+    trigger = ctx.triggered_id
+    if not trigger: return dash.no_update
+    current = state.get('current_page', 1)
+    total_pages = total_pages or 1
+    new_page = current
+    if trigger == "raids-first-page-btn": new_page = 1
+    elif trigger == "raids-last-page-btn": new_page = total_pages
+    elif trigger == "raids-prev-page-btn": new_page = max(1, current - 1)
+    elif trigger == "raids-next-page-btn": new_page = min(total_pages, current + 1)
+    elif trigger == "raids-goto-page-input":
+        if goto is not None: new_page = min(total_pages, max(1, goto))
+    elif trigger == "raids-rows-per-page-selector": return {"current_page": 1, "rows_per_page": rows}
+    return {**state, "current_page": new_page, "rows_per_page": state.get('rows_per_page', 25)}
+
+# Visuals Update
+@callback(
+    [Output("raids-total-counts-display", "children"), Output("raids-main-visual-container", "children"), Output("raids-raw-data-display", "children"), Output("raids-total-pages-store", "data"), Output("raids-main-visual-container", "style")],
+    [Input("raids-raw-data-store", "data"), Input("raids-search-input", "value"), Input("raids-table-sort-store", "data"), Input("raids-table-page-store", "data")],
+    [State("raids-mode-selector", "value"), State("raids-data-source-selector", "value")]
+)
+def update_visuals(data, search_term, sort, page, mode, source):
+    if not data: return [], html.Div(), "", 1, {"display": "block"}
+
+    df = parse_data_to_df(data, mode, source)
+    if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "block"}
+
+    # Search Logic Grouped Mode
+    if mode == "grouped" and search_term:
+        df = df[df['key'].str.lower().str.contains(search_term.lower(), na=False)]
+
+    total_div = html.P("No data.")
+
+    # Sidebar
+    sidebar_metrics = []
+
+    # Time Series / Nested
+    if (mode in ["surged", "live"] or "historical" in source) and isinstance(data, dict):
+        total_sum, level_counts = 0, {}
+        costume_count, exclusive_count, ex_count = 0, 0, 0
+        is_ts = False
+        for k, content in data.items():
+             if isinstance(content, dict) and ("total" in content or "raid_level" in content):
+                is_ts = True
+                total_sum += content.get("total", 0)
+                if "raid_level" in content:
+                    for lvl, cnt in content["raid_level"].items(): level_counts[str(lvl)] = level_counts.get(str(lvl), 0) + cnt
+                if "raid_costume" in content: costume_count += content["raid_costume"].get("1", 0)
+                if "raid_is_exclusive" in content: exclusive_count += content["raid_is_exclusive"].get("1", 0)
+                if "raid_ex_eligible" in content: ex_count += content["raid_ex_eligible"].get("1", 0)
+
+        if is_ts:
+             sidebar_metrics.append({'metric': 'total', 'count': total_sum})
+             for lvl, cnt in level_counts.items(): sidebar_metrics.append({'metric': str(lvl), 'count': cnt})
+             if costume_count: sidebar_metrics.append({'metric': 'Costume', 'count': costume_count})
+             if exclusive_count: sidebar_metrics.append({'metric': 'Exclusive', 'count': exclusive_count})
+             if ex_count: sidebar_metrics.append({'metric': 'EX Eligible', 'count': ex_count})
+
+    # Standard Sum - Flat
+    if not sidebar_metrics and isinstance(data, dict):
+        raw_inner = data.get('data', data) if 'data' in data else data
+        if 'total' in raw_inner: sidebar_metrics.append({'metric': 'total', 'count': raw_inner['total']})
+        if 'raid_level' in raw_inner:
+             for k, v in raw_inner['raid_level'].items(): sidebar_metrics.append({'metric': str(k), 'count': v})
+        if 'raid_costume' in raw_inner and '1' in raw_inner['raid_costume']: sidebar_metrics.append({'metric': 'Costume', 'count': raw_inner['raid_costume']['1']})
+        if 'raid_is_exclusive' in raw_inner and '1' in raw_inner['raid_is_exclusive']: sidebar_metrics.append({'metric': 'Exclusive', 'count': raw_inner['raid_is_exclusive']['1']})
+
+    if sidebar_metrics:
+        total_val = next((item['count'] for item in sidebar_metrics if item['metric'] == 'total'), 0)
+        total_div = [html.H1(f"{total_val:,}", className="text-primary")]
+
+        def sidebar_sort_key(item):
+            m = str(item['metric'])
+            if m.isdigit(): return (0, int(m))
+            if m == 'total': return (-1, 0)
+            return (1, m)
+
+        sorted_metrics = sorted(sidebar_metrics, key=sidebar_sort_key)
+        for item in sorted_metrics:
+            m = str(item['metric'])
+            if m != 'total':
+                label, color, icon_url = get_raid_info(m)
+                total_div.append(html.Div([
+                    html.Img(src=icon_url, style={"width": "28px", "marginRight": "8px", "verticalAlign": "middle"}),
+                    html.Span(f"{item['count']:,}", style={"fontSize": "1.1em", "fontWeight": "bold", "color": color}),
+                    html.Span(f" {label}" if not m.isdigit() else "", style={"fontSize": "0.8em", "color": "#aaa", "marginLeft": "5px"})
+                ], className="d-flex align-items-center mb-1"))
+
+    visual_content = html.Div("No data")
+    total_pages_val = 1
+
+    # Grouped Table
+    if mode == "grouped" and not df.empty:
+        col, ascending = sort['col'], sort['dir'] == "asc"
+        if col in df.columns: df = df.sort_values(col, ascending=ascending)
+        else: df = df.sort_values('count', ascending=False)
+
+        rows_per_page = page['rows_per_page']
+        total_rows = len(df)
+        total_pages_val = max(1, (total_rows + rows_per_page - 1) // rows_per_page)
+        current_page = min(max(1, page['current_page']), total_pages_val)
+        page_df = df.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
+
+        header_row = html.Tr([
+            html.Th("Image", style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center", "width": "60px"}),
+            html.Th(html.Span(["Pokémon", html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "raids-sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"}),
+            html.Th(html.Span(["Count", html.Span(" ▲" if col == 'count' and ascending else (" ▼" if col == 'count' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "raids-sort-header", "index": "count"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"})
+        ])
+
+        rows = []
+        for i, r in enumerate(page_df.iterrows()):
+            _, r = r
+            bg = "#1a1a1a" if i % 2 == 0 else "#242424"
+            rows.append(html.Tr([
+                html.Td(html.Img(src=get_pokemon_icon_url(r['pid'], r['form']), style={"width":"40px", "display":"block", "margin":"auto"}), style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
+                html.Td(f"{r['key']}", style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
+                html.Td(f"{int(r['count']):,}", style={"textAlign":"center", "backgroundColor":bg, "verticalAlign": "middle"})
+            ]))
+
+        controls = html.Div([
+            dbc.Row([
+                dbc.Col([html.Span(f"Total: {total_rows} | Rows: ", className="me-2 align-middle"), dcc.Dropdown(id="raids-rows-per-page-selector", options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': 'All', 'value': total_rows}], value=rows_per_page, clearable=False, className="rows-per-page-selector", style={"width":"80px", "display":"inline-block", "color":"black", "verticalAlign": "middle"})], width="auto", className="d-flex align-items-center"),
+                dbc.Col([
+                    dbc.ButtonGroup([dbc.Button("<<", id="raids-first-page-btn", size="sm", disabled=current_page <= 1), dbc.Button("<", id="raids-prev-page-btn", size="sm", disabled=current_page <= 1)], className="me-2"),
+                    html.Span("Page ", className="align-middle me-1"), dcc.Input(id="raids-goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True, style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}), html.Span(f" of {total_pages_val}", className="align-middle ms-1 me-2"),
+                    dbc.ButtonGroup([dbc.Button(">", id="raids-next-page-btn", size="sm", disabled=current_page >= total_pages_val), dbc.Button(">>", id="raids-last-page-btn", size="sm", disabled=current_page >= total_pages_val)]),
+                ], width="auto", className="d-flex align-items-center justify-content-end ms-auto")
+            ], className="g-0")
+        ], className="p-2 bg-dark rounded mb-2 border border-secondary")
+
+        visual_content = html.Div([controls, html.Div(html.Table([html.Thead(header_row), html.Tbody(rows)], style={"width":"100%", "color":"#fff"}), style={"overflowX":"auto", "maxHeight":"600px"})])
+
+    # Charts Sum / Surged
+    elif mode in ["surged", "sum"]:
+        graph_df = df[df['metric'] != 'total'].copy()
+        fig = go.Figure()
+        sorter = lambda x: int(x) if str(x).isdigit() else 999
+
+        if mode == "sum":
+            d = graph_df.copy()
+            d['sort'] = d['metric'].apply(sorter)
+            d = d.sort_values('sort')
+            bar_colors = []
+            for m in d['metric']:
+                _, c, _ = get_raid_info(m)
+                bar_colors.append(c)
+            fig.add_trace(go.Bar(x=d['metric'], y=d['count'], marker=dict(color=bar_colors)))
+
+            max_y = d['count'].max() if not d.empty else 10
+            icon_size_y = max_y * 0.15
+            for i, (idx, row) in enumerate(d.iterrows()):
+                _, _, icon_url = get_raid_info(row['metric'])
+                fig.add_layout_image(dict(source=icon_url, x=i, y=row['count'], xref="x", yref="y", sizex=0.6, sizey=icon_size_y, xanchor="center", yanchor="bottom"))
+            fig.update_layout(margin=dict(t=50))
+            fig.update_yaxes(range=[0, max_y * 1.25])
+            fig.update_xaxes(type='category')
+
+        else:
+            agg = graph_df if "live" in source else graph_df.groupby(["time_bucket", "metric"])["count"].sum().reset_index()
+            agg['time_bucket'] = pd.to_numeric(agg['time_bucket'], errors='coerce').fillna(0).astype(int)
+            for m in sorted(agg['metric'].unique(), key=sorter):
+                d = agg[agg['metric'] == m].sort_values("time_bucket")
+                _, c, _ = get_raid_info(m)
+                fig.add_trace(go.Scatter(x=d['time_bucket'], y=d['count'], mode='lines+markers', name=str(m), line=dict(color=c)))
+            fig.update_xaxes(range=[-0.5, 23.5], dtick=1)
+
+        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{mode.title()} Data")
+        visual_content = dcc.Graph(figure=fig, id="raids-main-graph")
+
+    return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "block"}
