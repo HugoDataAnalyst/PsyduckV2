@@ -24,6 +24,7 @@ data/*
 logs/
 config/config.json
 dashboard/dashboard_config.json
+dashboard/assets/custom_images/*
 docker-compose.yml
 
 # Database rubbish
