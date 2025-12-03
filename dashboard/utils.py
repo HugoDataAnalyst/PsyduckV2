@@ -210,6 +210,8 @@ def _download_pokemon_icon(pid, form=0):
     """
     Downloads a single Pokemon icon to local cache.
     Returns True if successful, False otherwise.
+
+    If a form-specific image returns 404, falls back to base {pid}.webp
     """
     try:
         form_int = int(form)
@@ -217,6 +219,7 @@ def _download_pokemon_icon(pid, form=0):
         # Determine filename based on form
         if form_int == 0:
             filename = f"{pid}.webp"
+            fallback_filename = None  # No fallback needed for base form
         else:
             # Check if this form is a _NORMAL variant
             pokedex_forms = _load_pokedex_forms()
@@ -224,8 +227,10 @@ def _download_pokemon_icon(pid, form=0):
 
             if form_name.endswith("_NORMAL"):
                 filename = f"{pid}.webp"
+                fallback_filename = None
             else:
                 filename = f"{pid}_f{form_int}.webp"
+                fallback_filename = f"{pid}.webp"  # Fallback to base image
 
         local_path = ICON_CACHE_DIR / filename
 
@@ -235,17 +240,41 @@ def _download_pokemon_icon(pid, form=0):
 
         # Download from remote
         remote_url = f"{ICON_BASE_URL}/{filename}"
+        logger.debug(f"📥 Attempting to download icon: {filename}")
         response = requests.get(remote_url, timeout=10)
 
         if response.status_code == 200:
             local_path.write_bytes(response.content)
+            logger.debug(f"✅ Successfully downloaded icon: {filename}")
             return True
+        elif response.status_code == 404 and fallback_filename:
+            # Form-specific image not found, try fallback to base image
+            logger.debug(f"⚠️ Form icon not found ({filename}), trying fallback: {fallback_filename}")
+
+            fallback_path = ICON_CACHE_DIR / fallback_filename
+
+            # Check if fallback already cached
+            if fallback_path.exists():
+                logger.debug(f"✅ Fallback icon already cached: {fallback_filename}")
+                return True
+
+            # Try downloading fallback
+            fallback_url = f"{ICON_BASE_URL}/{fallback_filename}"
+            fallback_response = requests.get(fallback_url, timeout=10)
+
+            if fallback_response.status_code == 200:
+                fallback_path.write_bytes(fallback_response.content)
+                logger.debug(f"✅ Successfully downloaded fallback icon: {fallback_filename}")
+                return True
+            else:
+                logger.warning(f"❌ Fallback icon also not found ({fallback_filename}): HTTP {fallback_response.status_code}")
+                return False
         else:
-            logger.warning(f"Failed to download icon {filename}: HTTP {response.status_code}")
+            logger.warning(f"❌ Failed to download icon {filename}: HTTP {response.status_code}")
             return False
 
     except Exception as e:
-        logger.warning(f"Error downloading icon for Pokemon {pid} form {form}: {e}")
+        logger.warning(f"❌ Error downloading icon for Pokemon {pid} form {form}: {e}")
         return False
 
 def _get_pokemon_list_from_uicons():
@@ -258,7 +287,7 @@ def _get_pokemon_list_from_uicons():
     """
     pokemon_dict = {}  # Use dict to deduplicate: key=(pid, form), value={'pid': X, 'form': Y}
 
-    # Get forms from UICONS_index.json
+    # Step 1: Get forms from UICONS_index.json
     try:
         uicons_path = os.path.join(os.path.dirname(__file__), 'assets', 'UICONS_index.json')
         with open(uicons_path, 'r') as f:
@@ -287,7 +316,7 @@ def _get_pokemon_list_from_uicons():
     except Exception as e:
         logger.warning(f"Error loading Pokemon list from UICONS_index.json: {e}")
 
-    # Add forms from pokedex.json that might not be in UICONS
+    # Step 2: Add forms from pokedex.json that might not be in UICONS
     try:
         pokedex_path = os.path.join(os.path.dirname(__file__), 'assets', 'pokedex.json')
         species_path = os.path.join(os.path.dirname(__file__), 'assets', 'pokedex_id.json')
@@ -379,6 +408,7 @@ def get_pokemon_icon_url(pid, form=0):
 
     - If form ends with _NORMAL in pokedex: {pid}.webp
     - Otherwise: {pid}_f{form}.webp
+    - If form-specific file doesn't exist locally, falls back to base {pid}.webp
     """
     try:
         form_int = int(form)
@@ -386,6 +416,7 @@ def get_pokemon_icon_url(pid, form=0):
         # Determine filename
         if form_int == 0:
             filename = f"{pid}.webp"
+            fallback_filename = None
         else:
             # Load pokedex forms and check if this form is a _NORMAL variant
             pokedex_forms = _load_pokedex_forms()
@@ -393,8 +424,10 @@ def get_pokemon_icon_url(pid, form=0):
 
             if form_name.endswith("_NORMAL"):
                 filename = f"{pid}.webp"
+                fallback_filename = None
             else:
                 filename = f"{pid}_f{form_int}.webp"
+                fallback_filename = f"{pid}.webp"
 
         # Check if cached locally
         local_path = ICON_CACHE_DIR / filename
@@ -402,7 +435,18 @@ def get_pokemon_icon_url(pid, form=0):
             # Return relative path for Dash assets
             return f"/assets/pokemon_icons/{filename}"
 
-        # Fallback to remote URL
+        # If form-specific file not found, try fallback to base image
+        if fallback_filename:
+            fallback_path = ICON_CACHE_DIR / fallback_filename
+            if fallback_path.exists():
+                return f"/assets/pokemon_icons/{fallback_filename}"
+
+        # Fallback to remote URL (try form-specific first, browser will handle 404)
+        # But prefer base image URL if we know form-specific doesn't exist locally
+        if fallback_filename:
+            # Return base image URL since form-specific likely doesn't exist
+            return f"{ICON_BASE_URL}/{fallback_filename}"
+
         return f"{ICON_BASE_URL}/{filename}"
 
     except Exception as e:
