@@ -188,5 +188,42 @@ body, .dash-app, .container {
 }
 
 /* -------------------------
+   Pokemon Filter Grid Styles
+   Client-Side State Management
+   ------------------------- */
+
+/* Base style for Pokemon filter items - unselected state (red border) */
+.pokemon-filter-item {
+    cursor: pointer;
+    border-radius: 10px;
+    padding: 5px;
+    background-color: #333;
+    margin: 2px;
+    border: 3px solid #dc3545; /* Red border by default (unselected) */
+    opacity: 0.5;
+    transition: all 0.2s ease;
+}
+
+/* Selected state (green border) */
+.pokemon-filter-item.selected {
+    border-color: #28a745; /* Green border when selected */
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(40, 167, 69, 0.4);
+}
+
+/* Hover effect for better UX feedback */
+.pokemon-filter-item:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
+}
+
+/* Pokemon icon images inside filter items */
+.pokemon-filter-item img {
+    width: 48px;
+    height: 48px;
+    display: block;
+}
+
+/* -------------------------
    End of file
    ------------------------- */

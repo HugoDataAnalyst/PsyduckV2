@@ -231,7 +231,7 @@
                 updateLegend(1, maxGridCount, 'grid');
 
             } else {
-                // --- MARKERS MODE ---
+                // MARKERS MODE
                 // Use MarkerClusterGroup if available, otherwise fallback to regular LayerGroup
                 if (typeof L.markerClusterGroup === 'function') {
                     markersLayer = L.markerClusterGroup({
