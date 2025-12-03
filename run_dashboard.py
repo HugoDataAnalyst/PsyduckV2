@@ -7,6 +7,7 @@ from dashboard.tasks.global_pokemons import start_background_task as start_pokem
 from dashboard.tasks.global_raids import start_background_task_raids as start_raids_task
 from dashboard.tasks.global_invasions import start_background_task_invasions as start_invasions_task
 from dashboard.tasks.global_quests import start_background_task_quests as start_quests_task
+from dashboard.utils import precache_pokemon_icons
 import config as AppConfig
 
 if __name__ == "__main__":
@@ -16,7 +17,10 @@ if __name__ == "__main__":
     logger.info(f"🔗 Connecting to API at {AppConfig.api_base_url}")
 
     if not DEBUG_MODE or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        print("✅ Starting Background Tasks...")
+        logger.info("📦 Pre-caching Pokemon icons...")
+        precache_pokemon_icons(max_workers=20)
+
+        logger.info("✅ Starting Background Tasks...")
         start_pokemon_task()
         start_raids_task()
         start_invasions_task()

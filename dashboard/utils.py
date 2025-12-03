@@ -5,10 +5,16 @@ import config as AppConfig
 from urllib.parse import quote
 import json
 import os
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.logger import logger
 
 API_BASE_URL = AppConfig.api_base_url
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main/pokemon"
+ICON_CACHE_DIR = Path(__file__).parent / "assets" / "pokemon_icons"
+
+# Ensure cache directory exists
+ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _POKEDEX_FORMS = None
 def _load_pokedex_forms():
@@ -200,29 +206,158 @@ def get_quests_stats(endpoint_type="counter", params=None):
         logger.info(f"Error fetching quests stats: {e}")
     return {}
 
+def _download_pokemon_icon(pid, form=0):
+    """
+    Downloads a single Pokemon icon to local cache.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        form_int = int(form)
+
+        # Determine filename based on form
+        if form_int == 0:
+            filename = f"{pid}.webp"
+        else:
+            # Check if this form is a _NORMAL variant
+            pokedex_forms = _load_pokedex_forms()
+            form_name = pokedex_forms.get(form_int, "")
+
+            if form_name.endswith("_NORMAL"):
+                filename = f"{pid}.webp"
+            else:
+                filename = f"{pid}_f{form_int}.webp"
+
+        local_path = ICON_CACHE_DIR / filename
+
+        # Skip if already cached
+        if local_path.exists():
+            return True
+
+        # Download from remote
+        remote_url = f"{ICON_BASE_URL}/{filename}"
+        response = requests.get(remote_url, timeout=10)
+
+        if response.status_code == 200:
+            local_path.write_bytes(response.content)
+            return True
+        else:
+            logger.warning(f"Failed to download icon {filename}: HTTP {response.status_code}")
+            return False
+
+    except Exception as e:
+        logger.warning(f"Error downloading icon for Pokemon {pid} form {form}: {e}")
+        return False
+
+def _get_pokemon_list_from_uicons():
+    """
+    Extracts Pokemon list from UICONS_index.json.
+    Returns list of dicts with 'pid' and 'form' keys.
+    """
+    try:
+        uicons_path = os.path.join(os.path.dirname(__file__), 'assets', 'UICONS_index.json')
+        with open(uicons_path, 'r') as f:
+            uicons_data = json.load(f)
+
+        pokemon_icons = uicons_data.get('pokemon', [])
+        pokemon_list = []
+
+        for icon in pokemon_icons:
+            # Icons are in format: "1.webp" or "1_f2.webp"
+            filename = icon.replace('.webp', '')
+
+            if '_f' in filename:
+                # Form variant: e.g., "1_f2" -> pid=1, form=2
+                parts = filename.split('_f')
+                pid = int(parts[0])
+                form = int(parts[1])
+            else:
+                # Base form: e.g., "1" -> pid=1, form=0
+                pid = int(filename)
+                form = 0
+
+            pokemon_list.append({'pid': pid, 'form': form})
+
+        return pokemon_list
+
+    except Exception as e:
+        logger.warning(f"Error loading Pokemon list from UICONS_index.json: {e}")
+        # Fallback: Gen 1-9 base forms (approx 1025 Pokemon)
+        return [{'pid': i, 'form': 0} for i in range(1, 1026)]
+
+def precache_pokemon_icons(pokemon_list=None, max_workers=10):
+    """
+    Pre-downloads Pokemon icons to local cache for faster loading.
+
+    Args:
+        pokemon_list: List of dicts with 'pid' and 'form' keys. If None, loads from UICONS_index.json.
+        max_workers: Number of parallel download threads.
+
+    Returns:
+        Tuple of (successful_count, failed_count)
+    """
+    if pokemon_list is None:
+        pokemon_list = _get_pokemon_list_from_uicons()
+
+    successful = 0
+    failed = 0
+    total = len(pokemon_list)
+
+    logger.info(f"Starting icon pre-cache for {total} Pokemon...")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all download tasks
+        future_to_pokemon = {
+            executor.submit(_download_pokemon_icon, p['pid'], p['form']): p
+            for p in pokemon_list
+        }
+
+        # Process completed downloads
+        for future in as_completed(future_to_pokemon):
+            if future.result():
+                successful += 1
+            else:
+                failed += 1
+
+            # Log progress every 100 icons
+            if (successful + failed) % 100 == 0:
+                logger.info(f"Icon cache progress: {successful + failed}/{total} ({successful} succeeded, {failed} failed)")
+
+    logger.info(f"Icon pre-cache complete: {successful}/{total} succeeded, {failed} failed")
+    return successful, failed
+
 def get_pokemon_icon_url(pid, form=0):
     """
-    Generates the URL for the Pokemon icon using pokedex form mapping.
+    Generates the URL for the Pokemon icon, preferring local cache.
+    Falls back to remote URL if not cached.
+
     - If form ends with _NORMAL in pokedex: {pid}.webp
     - Otherwise: {pid}_f{form}.webp
     """
     try:
         form_int = int(form)
 
-        # Special case: form 0 is always the base form
+        # Determine filename
         if form_int == 0:
-            return f"{ICON_BASE_URL}/{pid}.webp"
+            filename = f"{pid}.webp"
+        else:
+            # Load pokedex forms and check if this form is a _NORMAL variant
+            pokedex_forms = _load_pokedex_forms()
+            form_name = pokedex_forms.get(form_int, "")
 
-        # Load pokedex forms and check if this form is a _NORMAL variant
-        pokedex_forms = _load_pokedex_forms()
-        form_name = pokedex_forms.get(form_int, "")
+            if form_name.endswith("_NORMAL"):
+                filename = f"{pid}.webp"
+            else:
+                filename = f"{pid}_f{form_int}.webp"
 
-        # If form name ends with _NORMAL, use base image without form suffix
-        if form_name.endswith("_NORMAL"):
-            return f"{ICON_BASE_URL}/{pid}.webp"
+        # Check if cached locally
+        local_path = ICON_CACHE_DIR / filename
+        if local_path.exists():
+            # Return relative path for Dash assets
+            return f"/assets/pokemon_icons/{filename}"
 
-        # Otherwise use the form-specific image
-        return f"{ICON_BASE_URL}/{pid}_f{form_int}.webp"
+        # Fallback to remote URL
+        return f"{ICON_BASE_URL}/{filename}"
+
     except Exception as e:
         # Fallback to base image on any error
         return f"{ICON_BASE_URL}/{pid}.webp"
