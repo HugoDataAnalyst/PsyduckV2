@@ -250,16 +250,21 @@ def _download_pokemon_icon(pid, form=0):
 
 def _get_pokemon_list_from_uicons():
     """
-    Extracts Pokemon list from UICONS_index.json.
+    Extracts Pokemon list from UICONS_index.json AND pokedex.json.
     Returns list of dicts with 'pid' and 'form' keys.
+
+    This ensures we cache ALL forms that might be displayed in the dashboard,
+    including forms from pokedex.json that might not be in UICONS_index.json.
     """
+    pokemon_dict = {}  # Use dict to deduplicate: key=(pid, form), value={'pid': X, 'form': Y}
+
+    # Get forms from UICONS_index.json
     try:
         uicons_path = os.path.join(os.path.dirname(__file__), 'assets', 'UICONS_index.json')
         with open(uicons_path, 'r') as f:
             uicons_data = json.load(f)
 
         pokemon_icons = uicons_data.get('pokemon', [])
-        pokemon_list = []
 
         for icon in pokemon_icons:
             # Icons are in format: "1.webp" or "1_f2.webp"
@@ -275,14 +280,56 @@ def _get_pokemon_list_from_uicons():
                 pid = int(filename)
                 form = 0
 
-            pokemon_list.append({'pid': pid, 'form': form})
+            pokemon_dict[(pid, form)] = {'pid': pid, 'form': form}
 
-        return pokemon_list
+        logger.info(f"Loaded {len(pokemon_dict)} Pokemon icons from UICONS_index.json")
 
     except Exception as e:
         logger.warning(f"Error loading Pokemon list from UICONS_index.json: {e}")
-        # Fallback: Gen 1-9 base forms (approx 1025 Pokemon)
-        return [{'pid': i, 'form': 0} for i in range(1, 1026)]
+
+    # Add forms from pokedex.json that might not be in UICONS
+    try:
+        pokedex_path = os.path.join(os.path.dirname(__file__), 'assets', 'pokedex.json')
+        species_path = os.path.join(os.path.dirname(__file__), 'assets', 'pokedex_id.json')
+
+        # Load species map (name -> pid)
+        with open(species_path, 'r') as f:
+            species_map = json.load(f)
+
+        # Load forms map (form_name -> form_id)
+        with open(pokedex_path, 'r') as f:
+            forms_map = json.load(f)
+
+        # Add base forms for all species
+        for _, pid in species_map.items():
+            pokemon_dict[(pid, 0)] = {'pid': pid, 'form': 0}
+
+        # Add all forms
+        for form_name, form_id in forms_map.items():
+            if form_id == 0:
+                continue
+
+            # Match form to Pokemon ID by finding species name prefix
+            matched_pid = None
+            for species_name, pid in species_map.items():
+                if form_name.startswith(species_name + "_"):
+                    if matched_pid is None or len(species_name) > len([n for n, p in species_map.items() if p == matched_pid][0]):
+                        matched_pid = pid
+
+            if matched_pid:
+                pokemon_dict[(matched_pid, form_id)] = {'pid': matched_pid, 'form': form_id}
+
+        logger.info(f"Total {len(pokemon_dict)} unique Pokemon forms to cache (including pokedex.json forms)")
+
+    except Exception as e:
+        logger.warning(f"Error loading forms from pokedex.json: {e}")
+
+    # Fallback: Gen 1-9 base forms if everything failed
+    if not pokemon_dict:
+        logger.warning("All loading methods failed, using fallback base forms")
+        pokemon_dict = {(i, 0): {'pid': i, 'form': 0} for i in range(1, 1026)}
+
+    return list(pokemon_dict.values())
 
 def precache_pokemon_icons(pokemon_list=None, max_workers=10):
     """
