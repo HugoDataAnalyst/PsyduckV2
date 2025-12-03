@@ -200,6 +200,7 @@ def layout(area=None, **kwargs):
         dcc.Store(id="heatmap-hidden-pokemon", data=[]),
         dcc.Dropdown(id="area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="mode-persistence-store", storage_type="local"),
+        dcc.Store(id="source-persistence-store", storage_type="local"),
         dcc.Store(id="combined-source-store", data="live"),  # Tracks combined data source value
 
         # New Selection Stores
@@ -570,10 +571,10 @@ def parse_data_to_df(data, mode, source):
 
 # Callback to combine all three data source selectors into one value
 @callback(
-    [Output("combined-source-store", "data"),
-     Output("data-source-selector", "value"),
-     Output("data-source-tth-selector", "value"),
-     Output("data-source-sql-selector", "value")],
+    [Output("combined-source-store", "data", allow_duplicate=True),
+     Output("data-source-selector", "value", allow_duplicate=True),
+     Output("data-source-tth-selector", "value", allow_duplicate=True),
+     Output("data-source-sql-selector", "value", allow_duplicate=True)],
     [Input("data-source-selector", "value"),
      Input("data-source-tth-selector", "value"),
      Input("data-source-sql-selector", "value")],
@@ -665,6 +666,38 @@ def restrict_modes(source, stored_mode, current_ui_mode):
 
 @callback(Output("mode-persistence-store", "data"), Input("mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
+
+@callback(Output("source-persistence-store", "data"), Input("combined-source-store", "data"), prevent_initial_call=True)
+def save_source(val): return val
+
+# Use a dummy interval that fires once on page load to trigger source restoration
+@callback(
+    [Output("data-source-selector", "value"),
+     Output("data-source-tth-selector", "value"),
+     Output("data-source-sql-selector", "value"),
+     Output("combined-source-store", "data")],
+    Input("source-persistence-store", "modified_timestamp"),
+    State("source-persistence-store", "data"),
+    prevent_initial_call=False
+)
+def load_persisted_source(ts, stored_source):
+    """Load persisted data source on page load and set appropriate selector."""
+    # Only run on initial page load (ts will be -1 or None initially)
+    if ts is not None and ts > 0:
+        raise dash.exceptions.PreventUpdate
+
+    stats_sources = ["live", "historical"]
+    tth_sources = ["live_tth", "historical_tth"]
+    sql_sources = ["sql_heatmap", "sql_shiny"]
+
+    if stored_source in stats_sources:
+        return stored_source, None, None, stored_source
+    elif stored_source in tth_sources:
+        return None, stored_source, None, stored_source
+    elif stored_source in sql_sources:
+        return None, None, stored_source, stored_source
+    # Default fallback
+    return "live", None, None, "live"
 
 @callback(Output("heatmap-mode-store", "data"), Input("heatmap-display-mode", "value"))
 def update_heatmap_mode_store(val): return val
