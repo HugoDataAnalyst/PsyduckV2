@@ -20,9 +20,14 @@ try:
 except:
     MAX_RETENTION_HOURS = 72
 
+try:
+    SHINY_RETENTION_MONTHS = AppConfig.clean_pokemon_shiny_older_than_x_months
+except:
+    SHINY_RETENTION_MONTHS = 3
+
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
 
-# Data Loading
+# --- Data Loading ---
 _SPECIES_MAP = None
 _FORM_MAP = None
 _ALL_POKEMON_OPTIONS = None
@@ -195,6 +200,7 @@ def layout(area=None, **kwargs):
         dcc.Store(id="heatmap-hidden-pokemon", data=[]),
         dcc.Dropdown(id="area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="mode-persistence-store", storage_type="local"),
+        dcc.Store(id="combined-source-store", data="live"),  # Tracks combined data source value
 
         # New Selection Stores
         dcc.Store(id="selection-store", data=[]),
@@ -220,19 +226,50 @@ def layout(area=None, **kwargs):
                     ], width=12, md=6),
                     dbc.Col([
                         dbc.Label("Data Source", className="fw-bold"),
-                        html.Div(
-                            dbc.RadioItems(
-                                id="data-source-selector",
-                                options=[
-                                    {"label": "Live (Stats)", "value": "live"},
-                                    {"label": "Live (TTH)", "value": "live_tth"},
-                                    {"label": "Historical (Stats)", "value": "historical"},
-                                    {"label": "Historical (TTH)", "value": "historical_tth"},
-                                    {"label": "Heatmap (SQL)", "value": "sql_heatmap"},
-                                ],
-                                value="live", inline=True, inputClassName="btn-check", labelClassName="btn btn-outline-secondary", labelCheckedClassName="active"
-                            ), className="mb-3"
-                        )
+                        html.Div([
+                            # Row 1: Stats (Live & Historical)
+                            html.Div([
+                                html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                dbc.RadioItems(
+                                    id="data-source-selector",
+                                    options=[
+                                        {"label": "Live", "value": "live"},
+                                        {"label": "Historical", "value": "historical"},
+                                    ],
+                                    value="live", inline=True, inputClassName="btn-check",
+                                    labelClassName="btn btn-outline-info btn-sm",
+                                    labelCheckedClassName="active"
+                                ),
+                            ], className="d-flex align-items-center mb-1"),
+                            # Row 2: TTH (Live & Historical)
+                            html.Div([
+                                html.Span("TTH: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                dbc.RadioItems(
+                                    id="data-source-tth-selector",
+                                    options=[
+                                        {"label": "Live", "value": "live_tth"},
+                                        {"label": "Historical", "value": "historical_tth"},
+                                    ],
+                                    value=None, inline=True, inputClassName="btn-check",
+                                    labelClassName="btn btn-outline-warning btn-sm",
+                                    labelCheckedClassName="active"
+                                ),
+                            ], className="d-flex align-items-center mb-1"),
+                            # Row 3: SQL Sources (Heatmap & Shiny Odds)
+                            html.Div([
+                                html.Span("SQL: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                dbc.RadioItems(
+                                    id="data-source-sql-selector",
+                                    options=[
+                                        {"label": "Heatmap", "value": "sql_heatmap"},
+                                        {"label": "Shiny Odds", "value": "sql_shiny"},
+                                    ],
+                                    value=None, inline=True, inputClassName="btn-check",
+                                    labelClassName="btn btn-outline-success btn-sm",
+                                    labelCheckedClassName="active"
+                                ),
+                            ], className="d-flex align-items-center"),
+                        ], className="mb-3")
                     ], width=12, md=6)
                 ], className="g-3"),
 
@@ -250,6 +287,31 @@ def layout(area=None, **kwargs):
                         html.Div(id="historical-controls", style={"display": "none"}, children=[
                             dbc.Label("📅 Date Range"),
                             dcc.DatePickerRange(id="historical-date-picker", start_date=date.today(), end_date=date.today(), className="d-block w-100")
+                        ]),
+                        html.Div(id="shiny-month-controls", style={"display": "none"}, children=[
+                            dbc.Label("📅 Month Range"),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label("Start", className="small text-muted"),
+                                    dcc.Dropdown(
+                                        id="shiny-start-month",
+                                        options=[],  # Populated by callback
+                                        placeholder="Start Month",
+                                        clearable=False,
+                                        className="text-dark"
+                                    )
+                                ], width=6),
+                                dbc.Col([
+                                    dbc.Label("End", className="small text-muted"),
+                                    dcc.Dropdown(
+                                        id="shiny-end-month",
+                                        options=[],  # Populated by callback
+                                        placeholder="End Month",
+                                        clearable=False,
+                                        className="text-dark"
+                                    )
+                                ], width=6)
+                            ])
                         ])
                     ], width=6, md=3),
                     dbc.Col([
@@ -506,37 +568,96 @@ def parse_data_to_df(data, mode, source):
 
 # Callbacks
 
+# Callback to combine all three data source selectors into one value
+@callback(
+    [Output("combined-source-store", "data"),
+     Output("data-source-selector", "value"),
+     Output("data-source-tth-selector", "value"),
+     Output("data-source-sql-selector", "value")],
+    [Input("data-source-selector", "value"),
+     Input("data-source-tth-selector", "value"),
+     Input("data-source-sql-selector", "value")],
+    prevent_initial_call=True
+)
+def combine_data_sources(stats_val, tth_val, sql_val):
+    trigger = ctx.triggered_id
+    if trigger == "data-source-selector" and stats_val:
+        return stats_val, stats_val, None, None
+    elif trigger == "data-source-tth-selector" and tth_val:
+        return tth_val, None, tth_val, None
+    elif trigger == "data-source-sql-selector" and sql_val:
+        return sql_val, None, None, sql_val
+    return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+# Callback to populate shiny month dropdowns
+@callback(
+    [Output("shiny-start-month", "options"), Output("shiny-start-month", "value"),
+     Output("shiny-end-month", "options"), Output("shiny-end-month", "value")],
+    Input("combined-source-store", "data")
+)
+def populate_shiny_months(source):
+    # Generate month options for last N months based on retention config
+    today = date.today()
+    options = []
+    for i in range(SHINY_RETENTION_MONTHS):
+        # Go back i months
+        month = today.month - i
+        year = today.year
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_str = f"{year}{month:02d}"
+        month_label = f"{datetime(year, month, 1).strftime('%B %Y')}"
+        options.append({"label": month_label, "value": month_str})
+
+    # Default: start = oldest, end = current
+    start_val = options[-1]["value"] if options else None
+    end_val = options[0]["value"] if options else None
+
+    return options, start_val, options, end_val
+
 @callback(
     [Output("live-controls", "style"), Output("historical-controls", "style"),
      Output("interval-control-container", "style"), Output("heatmap-filters-container", "style"),
-     Output("open-selection-modal", "style")], # Toggle Selection Button
-    Input("data-source-selector", "value")
+     Output("open-selection-modal", "style"), Output("shiny-month-controls", "style")],
+    Input("combined-source-store", "data")
 )
 def toggle_source_controls(source):
-    live_s, hist_s, int_s, heat_s, btn_s = {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
-    if "live" in source:
+    live_s = {"display": "none"}
+    hist_s = {"display": "none"}
+    int_s = {"display": "none"}
+    heat_s = {"display": "none"}
+    btn_s = {"display": "none"}
+    shiny_s = {"display": "none"}
+
+    if source and "live" in source:
         live_s = {"display": "block"}
     elif source == "sql_heatmap":
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         heat_s = {"display": "block"}
-        btn_s = {"display": "block"} # Show Selection Filter button only for Heatmap
-    else:
+        btn_s = {"display": "block"}
+    elif source == "sql_shiny":
+        shiny_s = {"display": "block"}
+    elif source:  # historical or historical_tth
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         int_s = {"display": "block"}
-    return live_s, hist_s, int_s, heat_s, btn_s
+
+    return live_s, hist_s, int_s, heat_s, btn_s, shiny_s
 
 @callback(
     [Output("mode-selector", "options"), Output("mode-selector", "value")],
-    Input("data-source-selector", "value"),
+    Input("combined-source-store", "data"),
     [State("mode-persistence-store", "data"), State("mode-selector", "value")]
 )
 def restrict_modes(source, stored_mode, current_ui_mode):
     full_options = [{"label": "Surged (Hourly)", "value": "surged"}, {"label": "Grouped (Table)", "value": "grouped"}, {"label": "Sum (Totals)", "value": "sum"}]
     tth_options = [{"label": "Surged (Hourly)", "value": "surged"}, {"label": "Sum (Totals)", "value": "sum"}]
     heatmap_options = [{"label": "Map View", "value": "map"}]
+    shiny_options = [{"label": "Grouped (Table)", "value": "grouped"}]
 
-    if "tth" in source: allowed = tth_options
+    if source and "tth" in source: allowed = tth_options
     elif source == "sql_heatmap": allowed = heatmap_options
+    elif source == "sql_shiny": allowed = shiny_options
     else: allowed = full_options
     allowed_vals = [o['value'] for o in allowed]
     final_val = current_ui_mode if current_ui_mode in allowed_vals else (stored_mode if stored_mode in allowed_vals else allowed_vals[0])
@@ -714,18 +835,48 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
 
 @callback(
     [Output("raw-data-store", "data"), Output("stats-container", "style"), Output("heatmap-data-store", "data"), Output("notification-area", "children")],
-    [Input("submit-btn", "n_clicks"), Input("data-source-selector", "value")],
+    [Input("submit-btn", "n_clicks"), Input("combined-source-store", "data")],
     [State("area-selector", "value"), State("live-time-input", "value"), State("historical-date-picker", "start_date"),
      State("historical-date-picker", "end_date"), State("interval-selector", "value"),
      State("mode-selector", "value"), State("iv-slider", "value"), State("level-slider", "value"),
-     State("selection-store", "data")]
+     State("selection-store", "data"), State("shiny-start-month", "value"), State("shiny-end-month", "value")]
 )
-def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, level_range, selected_keys):
+def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, level_range, selected_keys, shiny_start, shiny_end):
     if not n: return {}, {"display": "none"}, [], None
     if not area: return {}, {"display": "none"}, [], dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
 
     try:
-        if source == "sql_heatmap":
+        if source == "sql_shiny":
+            logger.info(f"🔍 Starting Shiny Odds Fetch for Area: {area}")
+
+            if not shiny_start or not shiny_end:
+                return {}, {"display": "none"}, [], dbc.Alert("Please select start and end months.", color="warning", dismissable=True, duration=4000)
+
+            params = {
+                "start_time": shiny_start,
+                "end_time": shiny_end,
+                "response_format": "json",
+                "area": area,
+                "username": "all",
+                "pokemon_id": "all",
+                "form": "all",
+                "min_user_n": 0,
+                "limit": 0,
+                "concurrency": 4
+            }
+
+            logger.info("🚀 SENDING SHINY API REQUEST:")
+            logger.info(f"   URL: /api/sql/get_shiny_rate_data")
+            logger.info(f"   Params: {params}")
+
+            raw_data = get_pokemon_stats("sql_shiny_rate", params)
+
+            if not raw_data:
+                return {}, {"display": "block"}, [], dbc.Alert("No Shiny data found for this period.", color="info", dismissable=True, duration=4000)
+
+            return raw_data, {"display": "block"}, [], None
+
+        elif source == "sql_heatmap":
             logger.info(f"🔍 Starting Heatmap Fetch for Area: {area}")
 
             # IV filter logic
@@ -753,7 +904,7 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
             total_count = len(all_options)
             selected_count = len(selected_keys) if selected_keys else 0
 
-            # Show red warning if no Pokemon selected (don't query "all")
+            # Rule 3: Show red warning if no Pokemon selected (don't query "all")
             if selected_count == 0:
                 return {}, {"display": "none"}, [], dbc.Alert([
                     html.I(className="bi bi-exclamation-triangle-fill me-2"),
@@ -898,7 +1049,7 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
      Input("heatmap-hidden-pokemon", "data"),
      Input("quick-filter-search", "n_submit"),    # Trigger 1: Enter Key
      Input("quick-filter-go-btn", "n_clicks")],   # Trigger 2: Go Button
-    [State("data-source-selector", "value"),
+    [State("combined-source-store", "data"),
      State("quick-filter-search", "value")]       # State: Only read text when triggered
 )
 def populate_quick_filter(heatmap_data, hidden_pokemon, n_submit, n_clicks, source, search_term):
@@ -906,7 +1057,7 @@ def populate_quick_filter(heatmap_data, hidden_pokemon, n_submit, n_clicks, sour
     if source != "sql_heatmap" or not heatmap_data:
         return [], ""
 
-    # Process Data
+    # 1. Process Data
     pokemon_set = {}
     for record in heatmap_data:
         pid = record.get('pokemon_id')
@@ -921,10 +1072,10 @@ def populate_quick_filter(heatmap_data, hidden_pokemon, n_submit, n_clicks, sour
         else:
             pokemon_set[key]['count'] += record.get('count', 0)
 
-    # Sort (ID Ascending)
+    # 2. Sort (ID Ascending)
     sorted_pokemon = sorted(pokemon_set.items(), key=lambda x: (x[1]['pid'], x[1]['form']))
 
-    # Filter (Search)
+    # 3. Filter (Search)
     search_lower = search_term.lower() if search_term else ""
     filtered_list = []
 
@@ -935,7 +1086,7 @@ def populate_quick_filter(heatmap_data, hidden_pokemon, n_submit, n_clicks, sour
                 continue
         filtered_list.append((key, data))
 
-    # Generate UI
+    # 4. Generate UI
     hidden_set = set(hidden_pokemon or [])
     pokemon_images = []
 
@@ -1020,7 +1171,7 @@ def reset_hidden_pokemon_on_new_data(heatmap_data):
     [Output("total-counts-display", "children"), Output("main-visual-container", "children"), Output("raw-data-display", "children"), Output("total-pages-store", "data"),
      Output("heatmap-map-container", "style"), Output("main-visual-container", "style"), Output("heatmap-toggle-container", "style"), Output("quick-filter-container", "style")],
     [Input("raw-data-store", "data"), Input("table-search-input", "value"), Input("table-sort-store", "data"), Input("table-page-store", "data"), Input("heatmap-data-store", "data")],
-    [State("mode-selector", "value"), State("data-source-selector", "value")]
+    [State("mode-selector", "value"), State("combined-source-store", "data")]
 )
 def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
     if source == "sql_heatmap":
@@ -1028,6 +1179,152 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         raw_text = json.dumps(heatmap_data, indent=2)
         total_div = [html.H1(f"{count:,} Spawns", className="text-primary")]
         return total_div, html.Div(), raw_text, 1, {"height": "600px", "width": "100%", "display": "block"}, {"display": "none"}, {"display": "block", "float": "right"}, {"display": "block"}
+
+    # Handle Shiny Odds data
+    if source == "sql_shiny" and data:
+        raw_text = json.dumps(data, indent=2)
+
+        # Parse shiny data - it's a list directly
+        if isinstance(data, list):
+            shiny_df = pd.DataFrame(data)
+        else:
+            return [], html.Div("Invalid data format"), raw_text, 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+
+        if shiny_df.empty:
+            return [], html.Div("No shiny data"), raw_text, 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+
+        # Search filter
+        if search_term:
+            def build_search_name(row):
+                species, form = resolve_pokemon_name_parts(row['pokemon_id'], int(row['form']) if row['form'] else 0)
+                return f"{species} {form}".lower() if form else species.lower()
+            shiny_df['search_name'] = shiny_df.apply(build_search_name, axis=1)
+            shiny_df = shiny_df[shiny_df['search_name'].str.contains(search_term.lower(), na=False)]
+
+        # Total counts sidebar
+        total_encounters = shiny_df['total_encounters'].sum() if 'total_encounters' in shiny_df.columns else 0
+        total_pokemon = len(shiny_df)
+        shiny_eligible = len(shiny_df[shiny_df['shiny_pct_pooled'] > 0]) if 'shiny_pct_pooled' in shiny_df.columns else 0
+
+        icon_base_url = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+        total_div = [
+            html.H1(f"{total_pokemon:,}", className="text-primary"),
+            html.Div("Pokémon Species", className="text-muted mb-3"),
+            html.Div([
+                html.Img(src=f"{icon_base_url}/misc/sparkles.webp", style={"width": "28px", "marginRight": "10px", "verticalAlign": "middle"}),
+                html.Span(f"{shiny_eligible:,} Shiny Eligible", style={"fontWeight": "bold"})
+            ], className="d-flex align-items-center mb-2"),
+            html.Div([
+                html.I(className="bi bi-eye-fill me-2", style={"fontSize": "1.2rem"}),
+                html.Span(f"{total_encounters:,} Encounters", style={"fontWeight": "bold"})
+            ], className="d-flex align-items-center mb-2"),
+        ]
+
+        # Sorting
+        col, ascending = sort['col'], sort['dir'] == "asc"
+        if col in shiny_df.columns:
+            shiny_df = shiny_df.sort_values(col, ascending=ascending)
+        else:
+            shiny_df = shiny_df.sort_values('total_encounters', ascending=False)
+
+        # Pagination
+        rows_per_page = page['rows_per_page']
+        total_rows = len(shiny_df)
+        total_pages_val = max(1, (total_rows + rows_per_page - 1) // rows_per_page)
+        current_page = min(max(1, page['current_page']), total_pages_val)
+        page_df = shiny_df.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
+
+        # Build table header
+        header_style = {"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}
+
+        header_cells = [
+            html.Th("Image", style={**header_style, "width": "60px"}),
+            html.Th(html.Span(["Pokémon", html.Span(" ▲" if col == 'pokemon_id' and ascending else (" ▼" if col == 'pokemon_id' else ""), style={"color": "#aaa"})],
+                    id={"type": "sort-header", "index": "pokemon_id"}, style={"cursor": "pointer"}), style=header_style),
+            html.Th(html.Span(["Shiny Rate", html.Span(" ▲" if col == 'shiny_pct_pooled' and ascending else (" ▼" if col == 'shiny_pct_pooled' else ""), style={"color": "#aaa"})],
+                    id={"type": "sort-header", "index": "shiny_pct_pooled"}, style={"cursor": "pointer"}), style=header_style),
+            html.Th(html.Span(["Encounters", html.Span(" ▲" if col == 'total_encounters' and ascending else (" ▼" if col == 'total_encounters' else ""), style={"color": "#aaa"})],
+                    id={"type": "sort-header", "index": "total_encounters"}, style={"cursor": "pointer"}), style=header_style),
+            html.Th(html.Span(["Users", html.Span(" ▲" if col == 'users_contributing' and ascending else (" ▼" if col == 'users_contributing' else ""), style={"color": "#aaa"})],
+                    id={"type": "sort-header", "index": "users_contributing"}, style={"cursor": "pointer"}), style=header_style),
+        ]
+
+        # Build table rows
+        rows = []
+        for i, (_, r) in enumerate(page_df.iterrows()):
+            bg = "#1a1a1a" if i % 2 == 0 else "#242424"
+            cell_style = {"backgroundColor": bg, "verticalAlign": "middle", "textAlign": "center"}
+
+            pid = r['pokemon_id']
+            form = int(r['form']) if r['form'] else 0
+            species_name, form_name = resolve_pokemon_name_parts(pid, form)
+
+            # Format shiny rate - convert from percentage to 1/X odds
+            shiny_pct = r.get('shiny_pct_pooled', 0)
+            if shiny_pct and shiny_pct > 0:
+                odds = int(100 / shiny_pct)
+                shiny_display = html.Span([
+                    html.Img(src=f"{icon_base_url}/misc/sparkles.webp", style={"width": "16px", "marginRight": "4px", "verticalAlign": "middle"}),
+                    f"1/{odds}"
+                ], style={"color": "#ffd700", "fontWeight": "bold"})
+            else:
+                shiny_display = html.Span("—", style={"color": "#666"})
+
+            # Pokemon name cell
+            if form_name:
+                name_cell = html.Div([
+                    html.Div(species_name, style={"fontWeight": "bold", "lineHeight": "1.2"}),
+                    html.Div(form_name, style={"fontSize": "11px", "color": "#aaa", "lineHeight": "1.2"})
+                ], style={"textAlign": "center"})
+            else:
+                name_cell = html.Div(species_name, style={"fontWeight": "bold", "textAlign": "center"})
+
+            rows.append(html.Tr([
+                html.Td(html.Img(src=get_pokemon_icon_url(pid, form), style={"width": "40px", "height": "40px", "display": "block", "margin": "auto"}), style=cell_style),
+                html.Td(name_cell, style=cell_style),
+                html.Td(shiny_display, style=cell_style),
+                html.Td(f"{int(r.get('total_encounters', 0)):,}", style=cell_style),
+                html.Td(f"{int(r.get('users_contributing', 0)):,}", style=cell_style),
+            ]))
+
+        # Pagination controls
+        controls = html.Div([
+            dbc.Row([
+                dbc.Col([
+                    html.Span(f"Total: {total_rows} | Rows: ", className="me-2 align-middle"),
+                    dcc.Dropdown(
+                        id="rows-per-page-selector",
+                        options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': 'All', 'value': total_rows}],
+                        value=rows_per_page, clearable=False, className="rows-per-page-selector",
+                        style={"width": "80px", "display": "inline-block", "color": "black", "verticalAlign": "middle"}
+                    )
+                ], width="auto", className="d-flex align-items-center"),
+                dbc.Col([
+                    dbc.ButtonGroup([
+                        dbc.Button("<<", id="first-page-btn", size="sm", disabled=current_page <= 1),
+                        dbc.Button("<", id="prev-page-btn", size="sm", disabled=current_page <= 1)
+                    ], className="me-2"),
+                    html.Span("Page ", className="align-middle me-1"),
+                    dcc.Input(id="goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True,
+                              style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}),
+                    html.Span(f" of {total_pages_val}", className="align-middle ms-1 me-2"),
+                    dbc.ButtonGroup([
+                        dbc.Button(">", id="next-page-btn", size="sm", disabled=current_page >= total_pages_val),
+                        dbc.Button(">>", id="last-page-btn", size="sm", disabled=current_page >= total_pages_val)
+                    ]),
+                ], width="auto", className="d-flex align-items-center justify-content-end ms-auto")
+            ], className="g-0")
+        ], className="p-2 bg-dark rounded mb-2 border border-secondary")
+
+        visual_content = html.Div([
+            controls,
+            html.Div(
+                html.Table([html.Thead(html.Tr(header_cells)), html.Tbody(rows)], style={"width": "100%", "color": "#fff"}),
+                style={"overflowX": "auto", "maxHeight": "600px", "overflowY": "auto"}
+            )
+        ])
+
+        return total_div, visual_content, raw_text, total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
     if not data: return [], html.Div(), "", 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
     df = parse_data_to_df(data, mode, source)
