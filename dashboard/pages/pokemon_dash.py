@@ -22,10 +22,78 @@ except:
 
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
 
+# Data Loading
 _SPECIES_MAP = None
 _FORM_MAP = None
-_ALL_VALID_FORMS = None
-_HEATMAP_VALID_FORMS = None  # For Heatmap(SQL) - no form 0 entries
+_ALL_POKEMON_OPTIONS = None
+
+def _load_pokedex_data():
+    global _SPECIES_MAP, _FORM_MAP, _ALL_POKEMON_OPTIONS
+
+    if _SPECIES_MAP is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex_id.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex_id.json')
+            with open(path, 'r') as f:
+                _SPECIES_MAP = json.load(f)
+        except: _SPECIES_MAP = {}
+
+    if _FORM_MAP is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex.json')
+            with open(path, 'r') as f:
+                _FORM_MAP = json.load(f)
+        except: _FORM_MAP = {}
+
+    if _ALL_POKEMON_OPTIONS is None and _SPECIES_MAP:
+        options = []
+        name_to_id = {k: v for k, v in _SPECIES_MAP.items()}
+
+        # 1. Add Base Forms (Form 0) - exclude MISSINGNO (pid 0)
+        for name, pid in _SPECIES_MAP.items():
+            if pid == 0:  # Skip MISSINGNO
+                continue
+            options.append({
+                "pid": pid,
+                "form": 0,
+                "name": name.title().replace("_", " "),
+                "key": f"{pid}:0",
+                "search_key": name.lower()
+            })
+
+        # 2. Add Forms from pokedex.json
+        for form_key, form_val in _FORM_MAP.items():
+            if form_val == 0: continue
+            # Skip _NORMAL forms (they're duplicates of form 0)
+            if form_key.endswith("_NORMAL"):
+                continue
+
+            matched_name = None
+            for species_name in _SPECIES_MAP.keys():
+                if form_key.startswith(species_name + "_"):
+                    if matched_name is None or len(species_name) > len(matched_name):
+                        matched_name = species_name
+
+            if matched_name:
+                pid = _SPECIES_MAP[matched_name]
+                if pid == 0:  # Skip MISSINGNO forms
+                    continue
+                pretty_name = form_key.replace(matched_name + "_", "").replace("_", " ").title()
+                full_name = f"{matched_name.title().replace('_', ' ')} ({pretty_name})"
+
+                options.append({
+                    "pid": pid,
+                    "form": form_val,
+                    "name": full_name,
+                    "key": f"{pid}:{form_val}",
+                    "search_key": form_key.lower().replace("_", " ")
+                })
+
+        options.sort(key=lambda x: (x['pid'], x['form']))
+        _ALL_POKEMON_OPTIONS = options
+
+    return _ALL_POKEMON_OPTIONS or []
 
 def safe_int(value):
     if value is None: return 0
@@ -36,109 +104,56 @@ def safe_int(value):
     if isinstance(value, (int, float)): return int(value)
     return 0
 
-def _get_species_map():
-    global _SPECIES_MAP
-    if _SPECIES_MAP is None:
-        try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex_id.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex_id.json')
-            with open(path, 'r') as f:
-                data = json.load(f)
-                _SPECIES_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
-        except: _SPECIES_MAP = {}
-    return _SPECIES_MAP
-
-def _get_form_map():
-    global _FORM_MAP
-    if _FORM_MAP is None:
-        try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex.json')
-            with open(path, 'r') as f:
-                data = json.load(f)
-                _FORM_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
-        except: _FORM_MAP = {}
-    return _FORM_MAP
-
-def _get_all_valid_forms():
-    """
-    Generates a master list of all Pokemon (PID:0) AND their specific forms from pokedex.json.
-    """
-    global _ALL_VALID_FORMS
-    if _ALL_VALID_FORMS is None:
-        species_map = _get_species_map()
-        form_map = _get_form_map()
-
-        master_list = []
-        # Add Base Forms - Form 0
-        for pid, name in species_map.items():
-            master_list.append({'pid': pid, 'form': 0, 'name': name, 'key': f"{pid}:0"})
-
-        # Add Mapped Forms
-        name_to_pid = {v.upper(): k for k, v in species_map.items()}
-
-        for fid, fname in form_map.items():
-            if fid == 0: continue
-            fname_upper = fname.upper()
-            matched_pid = None
-            for sname in sorted(name_to_pid.keys(), key=len, reverse=True):
-                if fname_upper.startswith(sname):
-                    matched_pid = name_to_pid[sname]
-                    break
-            if matched_pid:
-                master_list.append({'pid': matched_pid, 'form': fid, 'name': fname, 'key': f"{matched_pid}:{fid}"})
-
-        _ALL_VALID_FORMS = master_list
-
-    return _ALL_VALID_FORMS
-
-def _get_heatmap_valid_forms():
-    """
-    Generates a master list for Heatmap(SQL) filter using LOCAL files.
-    Only includes forms that actually exist in pokedex.json (no artificial form 0).
-    Example: bulbasaur_normal (form 163) and bulbasaur_fall_2019 (form 897)
-    Sorted by Pokemon ID for consistent ordering.
-    """
-    global _HEATMAP_VALID_FORMS
-    if _HEATMAP_VALID_FORMS is None:
-        species_map = _get_species_map()
-        form_map = _get_form_map()
-
-        master_list = []
-        # Build name to PID lookup
-        name_to_pid = {v.upper(): k for k, v in species_map.items()}
-
-        # Only add forms that exist in pokedex.json - no form 0
-        for fid, fname in form_map.items():
-            fname_upper = fname.upper()
-            matched_pid = None
-            # Match form name to species BULBASAUR_NORMAL - pid 1
-            for sname in sorted(name_to_pid.keys(), key=len, reverse=True):
-                if fname_upper.startswith(sname):
-                    matched_pid = name_to_pid[sname]
-                    break
-            if matched_pid:
-                master_list.append({'pid': matched_pid, 'form': fid, 'name': fname, 'key': f"{matched_pid}:{fid}"})
-
-        # Sort by PID for ordering
-        master_list.sort(key=lambda x: (x['pid'], x['form']))
-        _HEATMAP_VALID_FORMS = master_list
-        logger.info(f"Generated {len(_HEATMAP_VALID_FORMS)} total Pokemon forms from local files")
-
-    return _HEATMAP_VALID_FORMS
-
 def resolve_pokemon_name(pid, form_id):
-    species_map = _get_species_map()
-    form_map = _get_form_map()
-    pid, form_id = safe_int(pid), safe_int(form_id)
-    base_name = species_map.get(pid, f"Pokemon {pid}")
-    if form_id <= 0: return base_name
-    form_name_full = form_map.get(form_id)
-    if form_name_full:
-        if "Normal" in form_name_full and not any(x in form_name_full for x in ["Alola", "Galar", "Hisui"]):
-             return base_name
-        return form_name_full
-    return base_name
+    _load_pokedex_data()
+    for p in _ALL_POKEMON_OPTIONS:
+        if p['pid'] == pid and p['form'] == form_id:
+            return p['name']
+    for name, s_pid in _SPECIES_MAP.items():
+        if s_pid == pid:
+            return f"{name.title()} (Form {form_id})"
+    return f"Pokemon {pid}:{form_id}"
+
+def resolve_pokemon_name_parts(pid, form_id):
+    """Returns tuple of (species_name, form_name) for display purposes"""
+    _load_pokedex_data()
+    pid = int(pid) if isinstance(pid, str) and pid.isdigit() else (pid if isinstance(pid, int) else 0)
+    form_id = int(form_id) if isinstance(form_id, str) and str(form_id).isdigit() else (form_id if isinstance(form_id, int) else 0)
+
+    # Find the species name from pokedex_id.json (reverse lookup)
+    species_name = None
+    for name, s_pid in _SPECIES_MAP.items():
+        if s_pid == pid:
+            species_name = name.replace("_", " ").title()
+            break
+
+    if not species_name:
+        species_name = f"Pokemon #{pid}"
+
+    # For form 0, return just the species name with no form label
+    if form_id == 0:
+        return (species_name, None)
+
+    # Try to find form name from pokedex.json (FORM_MAP)
+    form_name = None
+    species_key = species_name.upper().replace(" ", "_")
+
+    for form_key, fid in _FORM_MAP.items():
+        if fid == form_id:
+            # Check if this form key starts with our species
+            for name_key in _SPECIES_MAP.keys():
+                if form_key.startswith(name_key + "_") and _SPECIES_MAP[name_key] == pid:
+                    # Extract form part after species name
+                    form_part = form_key.replace(name_key + "_", "")
+                    form_name = form_part.replace("_", " ").title()
+                    break
+            if form_name:
+                break
+
+    if not form_name:
+        form_name = f"Form {form_id}"
+
+    return (species_name, form_name)
 
 # Layout
 
@@ -167,17 +182,23 @@ def layout(area=None, **kwargs):
     area_options = [{"label": g["name"], "value": g["name"]} for g in geofences]
     area_label = area if area else "No Area Selected"
 
+    _load_pokedex_data()
+
     return dbc.Container([
         dcc.Store(id="raw-data-store"),
-        dcc.Store(id="whitelist-store", data=[]),
         dcc.Store(id="table-sort-store", data={"col": "total", "dir": "desc"}),
         dcc.Store(id="table-page-store", data={"current_page": 1, "rows_per_page": 25}),
         dcc.Store(id="total-pages-store", data=1),
         dcc.Store(id="clientside-dummy-store"),
         dcc.Store(id="heatmap-data-store", data=[]),
         dcc.Store(id="heatmap-mode-store", data="markers"),
+        dcc.Store(id="heatmap-hidden-pokemon", data=[]),
         dcc.Dropdown(id="area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="mode-persistence-store", storage_type="local"),
+
+        # New Selection Stores
+        dcc.Store(id="selection-store", data=[]),
+        dcc.Store(id="selection-page-store", data=1),
 
         dbc.Row([
             dbc.Col(html.H2("Pokémon Analytics", className="text-white"), width=12, className="my-4"),
@@ -254,13 +275,14 @@ def layout(area=None, **kwargs):
                     dbc.Col([
                         dbc.Label("Actions", style={"visibility": "hidden"}),
                         html.Div([
+                            # NEW: Selection Filter Button (Visibility toggled by callback)
+                            dbc.Button("Selection Filter", id="open-selection-modal", color="info", className="w-100 mb-2", style={"display": "none"}),
                             dbc.Button("Run Analysis", id="submit-btn", color="success", className="w-100 fw-bold mb-2"),
-                            dbc.Button("Select Pokémon", id="open-filter-btn", color="secondary", className="w-100", style={"display": "none"})
                         ])
                     ], width=6, md=3)
                 ], className="align-items-end g-3"),
 
-                # HEATMAP FILTERS - Layout
+                # HEATMAP FILTERS - Layout (IV/Level Sliders Only)
                 html.Div(id="heatmap-filters-container", style={"display": "none"}, children=[
                     html.Hr(className="my-3"),
                     dbc.Card([
@@ -297,6 +319,7 @@ def layout(area=None, **kwargs):
             ])
         ], className="shadow-sm border-0 mb-4"),
 
+        # AREA MODAL
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("Select an Area")),
             dbc.ModalBody([
@@ -309,27 +332,74 @@ def layout(area=None, **kwargs):
             dbc.ModalFooter(dbc.Button("Close", id="close-area-modal", className="ms-auto"))
         ], id="area-modal", size="xl", scrollable=True),
 
+        # NEW SELECTION MODAL
         dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle("Select Pokémon for Heatmap")),
+            dbc.ModalHeader(dbc.ModalTitle("Select Pokémon")),
             dbc.ModalBody([
-                dbc.Input(id="pokemon-filter-search", placeholder="Search by name (e.g. 'Pikachu')...", className="mb-3", autoFocus=True),
-                html.P("Click on a Pokémon to include it in the heatmap. Red = Excluded, Green = Included.", className="text-muted small"),
                 dbc.Row([
-                    dbc.Col(dbc.Button("Select All", id="filter-select-all", color="success", size="sm", style={"display": "none"}), width="auto"),
-                    dbc.Col(dbc.Button("Clear Selection", id="filter-clear-all", color="danger", size="sm"), width="auto"),
-                    dbc.Col(html.Div(id="select-all-info", className="text-muted small align-self-center"), width="auto")
-                ], className="mb-3"),
-                dcc.Loading(html.Div(id="pokemon-filter-grid", className="d-flex flex-wrap justify-content-center gap-2"))
+                    dbc.Col(dbc.Input(id="selection-search", placeholder="Search Pokémon...", className="mb-3"), width=8),
+                    dbc.Col(dbc.Button("Select All", id="selection-select-all", color="success", className="w-100"), width=2),
+                    dbc.Col(dbc.Button("Clear", id="selection-clear", color="danger", className="w-100"), width=2),
+                ]),
+                html.P("Select specific Pokémon to include. If >75% are selected, 'All' is queried.", className="text-muted small"),
+                html.Div(id="select-all-hint", className="small mb-2 fw-bold"),
+                html.Div(id="selection-count-display", className="text-warning small mb-2 fw-bold"),
+
+                # Pagination Controls Top
+                dbc.Row([
+                    dbc.Col(dbc.Button("Prev", id="sel-prev-top", size="sm"), width="auto"),
+                    dbc.Col(html.Span(id="sel-page-display-top", className="align-middle mx-2"), width="auto"),
+                    dbc.Col(dbc.Button("Next", id="sel-next-top", size="sm"), width="auto"),
+                ], className="mb-2 justify-content-center align-items-center"),
+
+                dcc.Loading(html.Div(id="selection-grid", className="d-flex flex-wrap justify-content-center gap-2"))
             ]),
-            dbc.ModalFooter(dbc.Button("Apply", id="apply-filter-btn", color="primary", className="ms-auto"))
-        ], id="filter-modal", size="lg", scrollable=True),
+            dbc.ModalFooter(dbc.Button("Done", id="close-selection-modal", color="primary"))
+        ], id="selection-modal", size="xl", scrollable=True),
 
         dcc.Loading(html.Div(id="stats-container", style={"display": "none"}, children=[
             dbc.Row([
-                dbc.Col(dbc.Card([
-                    dbc.CardHeader("📈 Total Counts"),
-                    dbc.CardBody(html.Div(id="total-counts-display"))
-                ], className="shadow-sm border-0 h-100"), width=12, lg=4, className="mb-4"),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader("📈 Total Counts"),
+                        dbc.CardBody(html.Div(id="total-counts-display"))
+                    ], className="shadow-sm border-0 mb-3"),
+                    html.Div(id="quick-filter-container", style={"display": "none"}, children=[
+                        dbc.Card([
+                            dbc.CardHeader([
+                                dbc.Row([
+                                    # Title and Count
+                                    dbc.Col([
+                                        html.Span("🎯 Quick Filter", className="me-2"),
+                                        html.Span(id="quick-filter-count", className="text-muted small")
+                                    ], width="auto", className="d-flex align-items-center"),
+
+                                    # Search Input (Live)
+                                    dbc.Col(
+                                        dbc.InputGroup([
+                                            dbc.Input(id="quick-filter-search", placeholder="Search...", size="sm", n_submit=0),
+                                            dbc.Button("Go", id="quick-filter-go-btn", size="sm", color="primary", n_clicks=0)
+                                        ], size="sm"),
+                                        className="px-2"
+                                    ),
+
+                                    # Buttons
+                                    dbc.Col([
+                                        dbc.ButtonGroup([
+                                            dbc.Button("All", id="quick-filter-show-all", title="Show All", size="sm", color="success", outline=True),
+                                            dbc.Button("None", id="quick-filter-hide-all", title="Hide All", size="sm", color="danger", outline=True),
+                                        ], size="sm")
+                                    ], width="auto")
+                                ], className="align-items-center g-0")
+                            ]),
+                            dbc.CardBody([
+                                html.P("Click to hide/show Pokémon from map", className="text-muted small mb-2"),
+                                html.Div(id="quick-filter-grid",
+                                         style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "300px", "overflowY": "auto"})
+                            ])
+                        ], className="shadow-sm border-0")
+                    ]),
+                ], width=12, lg=4, className="mb-4"),
 
                 dbc.Col(dbc.Card([
                     dbc.CardHeader([
@@ -337,7 +407,7 @@ def layout(area=None, **kwargs):
                         html.Div(
                             dbc.RadioItems(
                                 id="heatmap-display-mode",
-                                options=[{"label": "Markers", "value": "markers"}, {"label": "Heatmap", "value": "density"}],
+                                options=[{"label": "Markers", "value": "markers"}, {"label": "Heatmap", "value": "density"},{"label": "Grid", "value": "grid"}],
                                 value="markers", inline=True, className="ms-2"
                             ), id="heatmap-toggle-container", style={"display": "none", "float": "right"}
                         )
@@ -389,6 +459,9 @@ def parse_data_to_df(data, mode, source):
                                 try: h_val = int(str(h_key).replace("hour ", ""))
                                 except: pass
                             records.append({"metric": metric, "time_bucket": h_val, "count": count, "pid": "All", "form": "All", "key": "All"})
+                    # Fallback: If no dict buckets (flat structure due to missing interval), treat as totals
+                    elif isinstance(hours, (int, float)):
+                        records.append({"metric": metric, "time_bucket": 0, "count": hours, "pid": "All", "form": "All", "key": "All"})
 
     elif mode == "grouped":
         if isinstance(data, dict) and data:
@@ -436,21 +509,21 @@ def parse_data_to_df(data, mode, source):
 @callback(
     [Output("live-controls", "style"), Output("historical-controls", "style"),
      Output("interval-control-container", "style"), Output("heatmap-filters-container", "style"),
-     Output("open-filter-btn", "style")],
+     Output("open-selection-modal", "style")], # Toggle Selection Button
     Input("data-source-selector", "value")
 )
 def toggle_source_controls(source):
-    live_s, hist_s, int_s, heat_s, filt_btn_s = {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
+    live_s, hist_s, int_s, heat_s, btn_s = {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
     if "live" in source:
         live_s = {"display": "block"}
     elif source == "sql_heatmap":
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         heat_s = {"display": "block"}
-        filt_btn_s = {"display": "block"}
+        btn_s = {"display": "block"} # Show Selection Filter button only for Heatmap
     else:
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         int_s = {"display": "block"}
-    return live_s, hist_s, int_s, heat_s, filt_btn_s
+    return live_s, hist_s, int_s, heat_s, btn_s
 
 @callback(
     [Output("mode-selector", "options"), Output("mode-selector", "value")],
@@ -498,47 +571,23 @@ def update_level_display(value):
         return f"Level: {value[0]} - {value[1]}"
 
 @callback(
-    [Output("filter-select-all", "style"), Output("select-all-info", "children")],
-    Input("iv-slider", "value")
-)
-def toggle_select_all_button(iv_range):
-    """Show Select All button only if IV filter is exact or range < 25%"""
-    if not iv_range:
-        return {"display": "none"}, ""
-
-    min_iv, max_iv = iv_range[0], iv_range[1]
-    iv_range_size = max_iv - min_iv
-
-    # Allow Select All if exact value or range < 25%
-    if min_iv == max_iv:
-        return {"display": "inline-block"}, f"Select All allowed (exact IV: {min_iv}%)"
-    elif iv_range_size < 25:
-        return {"display": "inline-block"}, f"Select All allowed (range: {iv_range_size}%)"
-    else:
-        return {"display": "none"}, f"Select All disabled (range too wide: {iv_range_size}%)"
-
-@callback(
-    Output("whitelist-store", "data", allow_duplicate=True),
-    Input("iv-slider", "value"),
-    prevent_initial_call=True
-)
-def clear_selection_on_iv_change(iv_range):
-    """Clear Pokemon selection when IV filter changes"""
-    return []
-
-@callback(
-    [Output("area-modal", "is_open"), Output("filter-modal", "is_open"), Output("table-search-input", "style")],
+    [Output("area-modal", "is_open"), Output("selection-modal", "is_open"), Output("table-search-input", "style")],
     [Input("open-area-modal", "n_clicks"), Input("close-area-modal", "n_clicks"),
-     Input("open-filter-btn", "n_clicks"), Input("apply-filter-btn", "n_clicks"),
+     Input("open-selection-modal", "n_clicks"), Input("close-selection-modal", "n_clicks"),
      Input("mode-selector", "value")],
-    [State("area-modal", "is_open"), State("filter-modal", "is_open")]
+    [State("area-modal", "is_open"), State("selection-modal", "is_open")]
 )
-def handle_modals_and_search(ao, ac, fo, fa, mode, is_area, is_filter):
+def handle_modals_and_search(ao, ac, so, sc, mode, is_area, is_selection):
     search_style = {"display": "block", "width": "100%"} if mode == "grouped" else {"display": "none"}
     trigger = ctx.triggered_id
-    if trigger in ["open-area-modal", "close-area-modal"]: return not is_area, is_filter, search_style
-    if trigger in ["open-filter-btn", "apply-filter-btn"]: return is_area, not is_filter, search_style
-    return is_area, is_filter, search_style
+
+    if trigger in ["open-area-modal", "close-area-modal"]:
+        return not is_area, is_selection, search_style
+
+    if trigger in ["open-selection-modal", "close-selection-modal"]:
+        return is_area, not is_selection, search_style
+
+    return is_area, is_selection, search_style
 
 @callback(Output("area-cards-container", "children"), [Input("area-filter-input", "value")], [State("area-selector", "value")])
 def filter_area_cards(search, area):
@@ -551,103 +600,117 @@ dash.clientside_callback(
     Output("clientside-dummy-store", "data"), Input("area-modal", "is_open")
 )
 
-# FILTER GRID POPULATOR
-@callback(
-    Output("pokemon-filter-grid", "children"),
-    [Input("pokemon-filter-search", "value"), Input("whitelist-store", "data"), Input("data-source-selector", "value")]
-)
-def populate_filter_grid(search_term, whitelist, data_source):
-    if whitelist is None:
-        whitelist = []
-
-    # Convert whitelist to set for faster lookups
-    whitelist_set = set(whitelist)
-
-    # Use local heatmap data for Heatmap(SQL), regular data for everything else
-    if data_source == "sql_heatmap":
-        master_list = _get_heatmap_valid_forms()
-    else:
-        master_list = _get_all_valid_forms()
-
-    results = []
-    s_term = search_term.lower() if search_term else ""
-
-    # Filter and collect matching entries first
-    filtered_entries = []
-    for entry in master_list:
-        key, name, pid, form = entry['key'], entry['name'], entry['pid'], entry['form']
-        # Match search against Name or ID
-        if not s_term or (s_term in name.lower() or s_term == str(pid)):
-            filtered_entries.append(entry)
-
-    # Limit display for performance - but keep all filtered if searching
-    limit = 200 if not s_term else len(filtered_entries)
-    display_entries = filtered_entries[:limit]
-
-    # Create UI elements with consistent key-based selection
-    for entry in display_entries:
-        key, name, pid, form = entry['key'], entry['name'], entry['pid'], entry['form']
-        is_selected = key in whitelist_set
-
-        # Red if NOT selected, Green if selected
-        style = {
-            "border": "3px solid #28a745" if is_selected else "3px solid #dc3545",
-            "opacity": "1" if is_selected else "0.5",
-            "cursor": "pointer",
-            "borderRadius": "10px",
-            "padding": "5px",
-            "backgroundColor": "#333",
-            "margin": "2px"
-        }
-
-        results.append(html.Div(
-            html.Img(src=get_pokemon_icon_url(pid, form), style={"width": "48px", "height": "48px"}),
-            id={"type": "poke-filter-icon", "index": key},
-            n_clicks=0,
-            style=style,
-            title=f"{name} ({key})"
-        ))
-
-    # Add show more message if truncated
-    if len(filtered_entries) > limit:
-        results.append(html.P(
-            f"... and {len(filtered_entries) - limit} more. Use search to find specific Pokemon.",
-            className="text-muted text-center w-100 mt-2"
-        ))
-
-    return results
+# --- Selection Filter Logic ---
 
 @callback(
-    Output("whitelist-store", "data", allow_duplicate=True),
-    [Input({"type": "poke-filter-icon", "index": ALL}, "n_clicks"), Input("filter-clear-all", "n_clicks"), Input("filter-select-all", "n_clicks")],
-    [State("whitelist-store", "data"), State({"type": "poke-filter-icon", "index": ALL}, "id"), State("data-source-selector", "value")],
-    prevent_initial_call=True
+    [Output("selection-grid", "children"),
+     Output("sel-page-display-top", "children"),
+     Output("selection-page-store", "data"),
+     Output("selection-store", "data"),
+     Output("selection-select-all", "disabled"),
+     Output("select-all-hint", "children"),
+     Output("select-all-hint", "className"),
+     Output("selection-count-display", "children")],
+    [Input("selection-search", "value"),
+     Input("sel-prev-top", "n_clicks"),
+     Input("sel-next-top", "n_clicks"),
+     Input("selection-select-all", "n_clicks"),
+     Input("selection-clear", "n_clicks"),
+     Input({"type": "selection-item", "index": ALL}, "n_clicks"),
+     Input("iv-slider", "value")],
+    [State("selection-page-store", "data"),
+     State("selection-store", "data")]
 )
-def update_whitelist(icon_clicks, clear_click, select_all_click, current_list, icon_ids, data_source):
+def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, iv_range, page, selected):
     trigger = ctx.triggered_id
-    if current_list is None: current_list = []
+    options = _load_pokedex_data()
+    selected_set = set(selected or [])
 
-    # Clear all selections
-    if trigger == "filter-clear-all":
-        return []
+    # Calculate IV range span to determine if Select All should be enabled
+    iv_span = (iv_range[1] - iv_range[0]) if iv_range else 100
+    select_all_enabled = iv_span <= 25  # Only enable if range is 25% or less
 
-    # Select all visible Pokemon
-    if trigger == "filter-select-all":
-        if data_source == "sql_heatmap":
-            all_forms = _get_heatmap_valid_forms()
+    # If IV range moved outside of 25% and there was a selection, clear it
+    if trigger == "iv-slider" and not select_all_enabled and len(selected_set) > 0:
+        selected_set = set()
+        page = 1
+
+    # Filter options
+    if search:
+        s = search.lower()
+        options = [o for o in options if s in o['search_key'] or s == str(o['pid'])]
+
+    # Handle Bulk Actions
+    if trigger == "selection-clear":
+        selected_set = set()
+        page = 1
+    elif trigger == "selection-select-all" and select_all_enabled:
+        # Select all CURRENTLY VISIBLE/FILTERED options (only if IV range allows)
+        for o in options:
+            selected_set.add(o['key'])
+    elif isinstance(trigger, dict) and trigger.get("type") == "selection-item":
+        key = trigger["index"]
+        if key in selected_set:
+            selected_set.remove(key)
         else:
-            all_forms = _get_all_valid_forms()
-        return [entry['key'] for entry in all_forms]
+            selected_set.add(key)
 
-    # Individual Click Logic - Toggle inclusion
-    if isinstance(trigger, dict) and trigger.get('type') == 'poke-filter-icon':
-        clicked_key = trigger['index']
-        if clicked_key in current_list:
-            return [x for x in current_list if x != clicked_key]
-        else:
-            return current_list + [clicked_key]
+    # Pagination
+    items_per_page = 100
+    total_pages = max(1, (len(options) + items_per_page - 1) // items_per_page)
 
-    return current_list
+    if trigger == "sel-prev-top":
+        page = max(1, page - 1)
+    elif trigger == "sel-next-top":
+        page = min(total_pages, page + 1)
+    elif trigger == "selection-search":
+        page = 1
+
+    # Ensure valid page
+    page = max(1, min(page, total_pages))
+
+    start = (page - 1) * items_per_page
+    end = start + items_per_page
+    visible_items = options[start:end]
+
+    # Render
+    grid_children = []
+    for item in visible_items:
+        key = item['key']
+        is_sel = key in selected_set
+
+        # Use same styling class as quick filter for consistency
+        cls = "pokemon-filter-item" + (" selected" if is_sel else "")
+
+        grid_children.append(html.Div(
+            [
+                html.Img(src=get_pokemon_icon_url(item['pid'], item['form']), style={"width": "48px", "height": "48px", "display": "block"}),
+                html.Div(item['name'], style={"fontSize": "10px", "textAlign": "center", "overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap", "maxWidth": "60px"})
+            ],
+            id={"type": "selection-item", "index": key},
+            className=cls,
+            title=item['name']
+        ))
+
+    page_text = f"Page {page} / {total_pages} ({len(options)} total)"
+
+    # Dynamic hint message for Select All based on IV range
+    if select_all_enabled:
+        hint_msg = [html.I(className="bi bi-check-circle-fill me-1 text-success"), f"Select All allowed (range: {iv_span}%)"]
+        hint_class = "text-success"
+    else:
+        hint_msg = [html.I(className="bi bi-x-circle-fill me-1 text-danger"), f"Select All disabled (range too wide: {iv_span}%)"]
+        hint_class = "text-danger"
+
+    # Selection count message
+    selected_count = len(selected_set)
+    if selected_count == 0:
+        count_msg = [html.I(className="bi bi-exclamation-triangle-fill me-1"), "No Pokémon selected - selection required to run query"]
+    else:
+        count_msg = f"✓ {selected_count} Pokémon selected"
+
+    return grid_children, page_text, page, list(selected_set), not select_all_enabled, hint_msg, hint_class, count_msg
+
 
 @callback(
     [Output("raw-data-store", "data"), Output("stats-container", "style"), Output("heatmap-data-store", "data"), Output("notification-area", "children")],
@@ -655,65 +718,127 @@ def update_whitelist(icon_clicks, clear_click, select_all_click, current_list, i
     [State("area-selector", "value"), State("live-time-input", "value"), State("historical-date-picker", "start_date"),
      State("historical-date-picker", "end_date"), State("interval-selector", "value"),
      State("mode-selector", "value"), State("iv-slider", "value"), State("level-slider", "value"),
-     State("whitelist-store", "data")]
+     State("selection-store", "data")]
 )
-def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, level_range, whitelist):
+def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, level_range, selected_keys):
     if not n: return {}, {"display": "none"}, [], None
     if not area: return {}, {"display": "none"}, [], dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
 
     try:
         if source == "sql_heatmap":
-            # BLOCK if whitelist is empty
-            if not whitelist:
-                return {}, {"display": "none"}, [], dbc.Alert([html.I(className="bi bi-hand-index-thumb-fill me-2"), "Please select at least one Pokémon in the filter."], color="danger", dismissable=True, duration=5000)
+            logger.info(f"🔍 Starting Heatmap Fetch for Area: {area}")
 
-            # Check if all Pokemon are selected. If so, use "all" for efficiency
-            all_available = _get_heatmap_valid_forms()
-            all_keys = {entry['key'] for entry in all_available}
-            whitelist_set = set(whitelist)
-
-            if whitelist_set == all_keys:
-                # All Pokemon selected - use "all" for API
-                pids = "all"
-                forms = "all"
-            else:
-                # Specific Pokemon selected - send list
-                p_list = [x.split(":")[0] for x in whitelist]
-                f_list = [x.split(":")[1] for x in whitelist]
-                pids = ",".join(p_list)
-                forms = ",".join(f_list)
-
-            # IV filter logic: Use == for exact, >= when max is 100, otherwise >=min,<=max
+            # IV filter logic
             if iv_range[0] == iv_range[1]:
                 iv_str = f"=={iv_range[0]}"
             elif iv_range == [0, 100]:
                 iv_str = "all"
             elif iv_range[1] == 100:
-                iv_str = f">={iv_range[0]}"  # Max is 100, so just >=
+                iv_str = f">={iv_range[0]}"
             else:
                 iv_str = f">={iv_range[0]},<={iv_range[1]}"
 
-            # Level filter logic: Use == for exact, >= when max is 50, otherwise >=min,<=max
+            # Level filter logic
             if level_range[0] == level_range[1]:
                 level_str = f"=={level_range[0]}"
             elif level_range == [1, 50]:
                 level_str = "all"
             elif level_range[1] == 50:
-                level_str = f">={level_range[0]}"  # Max is 50, so just >=
+                level_str = f">={level_range[0]}"
             else:
                 level_str = f">={level_range[0]},<={level_range[1]}"
 
-            params = {"start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "area": area, "response_format": "json", "iv": iv_str, "level": level_str, "pokemon_id": pids, "form": forms}
+            # Pokemon Selection Logic
+            all_options = _load_pokedex_data()
+            total_count = len(all_options)
+            selected_count = len(selected_keys) if selected_keys else 0
+
+            # Show red warning if no Pokemon selected (don't query "all")
+            if selected_count == 0:
+                return {}, {"display": "none"}, [], dbc.Alert([
+                    html.I(className="bi bi-exclamation-triangle-fill me-2"),
+                    html.Strong("No Pokémon Selected! "),
+                    "Please open the Selection Filter and choose at least one Pokémon to query."
+                ], color="danger", dismissable=True, duration=6000)
+
+            # If > 75% selected, query ALL for efficiency
+            if (selected_count / total_count) > 0.75:
+                pids = "all"
+                forms = "all"
+            else:
+                # Build PID and Form lists
+                # For form 0 selections, also include corresponding _NORMAL form for backwards compatibility
+                sel_pids = set()
+                sel_forms = set()
+
+                # Build a lookup for _NORMAL forms: {pid: normal_form_id}
+                normal_form_lookup = {}
+                for form_key, form_val in _FORM_MAP.items():
+                    if form_key.endswith("_NORMAL"):
+                        species_name = form_key.replace("_NORMAL", "")
+                        if species_name in _SPECIES_MAP:
+                            normal_form_lookup[_SPECIES_MAP[species_name]] = form_val
+
+                for key in selected_keys:
+                    p, f = key.split(":")
+                    sel_pids.add(p)
+                    sel_forms.add(f)
+
+                    # If form 0 is selected, also add the _NORMAL form equivalent
+                    if f == "0":
+                        pid_int = int(p)
+                        if pid_int in normal_form_lookup:
+                            sel_forms.add(str(normal_form_lookup[pid_int]))
+
+                pids = ",".join(sel_pids)
+                forms = ",".join(sel_forms)
+
+            params = {
+                "start_time": f"{start}T00:00:00",
+                "end_time": f"{end}T23:59:59",
+                "area": area,
+                "response_format": "json",
+                "iv": iv_str,
+                "level": level_str,
+                "pokemon_id": pids,
+                "form": forms
+            }
+
+            logger.info("🚀 SENDING API REQUEST:")
+            logger.info(f"   URL: /api/sql/get_pokemon_heatmap_data")
+            param_str = str(params)
+            logger.info(f"   Params: {param_str}")
+
             raw_data = get_pokemon_stats("sql_heatmap", params)
 
             safe_data = []
-            if raw_data and isinstance(raw_data, list):
+            if raw_data is not None and isinstance(raw_data, list):
+                logger.info(f"✅ API returned {len(raw_data)} records")
                 df = pd.DataFrame(raw_data)
                 if "pokemon_id" in df.columns:
                     if "form" not in df.columns: df["form"] = 0
                     grouped = df.groupby(['latitude', 'longitude', 'pokemon_id', 'form'])['count'].sum().reset_index()
+
+                    # Add Pokemon names and icon URLs for display in JS
+                    def add_pokemon_info(row):
+                        species, form_name = resolve_pokemon_name_parts(row['pokemon_id'], row['form'])
+                        icon_url = get_pokemon_icon_url(row['pokemon_id'], row['form'])
+                        return pd.Series({'species_name': species, 'form_name': form_name or '', 'icon_url': icon_url})
+
+                    info_data = grouped.apply(add_pokemon_info, axis=1)
+                    grouped['species_name'] = info_data['species_name']
+                    grouped['form_name'] = info_data['form_name']
+                    grouped['icon_url'] = info_data['icon_url']
+
                     safe_data = grouped.to_dict('records')
-            if not safe_data: return {}, {"display": "block"}, [], dbc.Alert("No Heatmap data found for criteria.", color="info", dismissable=True, duration=4000)
+                    logger.info(f"📉 Aggregated to {len(safe_data)} unique map points")
+            else:
+                logger.warning(f"⚠️ API returned empty or invalid data: {type(raw_data)}")
+
+            if not safe_data:
+                # Still show the map container even if empty, so the user knows the query ran
+                return {}, {"display": "block"}, [], dbc.Alert("No Heatmap data found for criteria.", color="info", dismissable=True, duration=4000)
+
             return {}, {"display": "block"}, safe_data, None
 
         elif "tth" in source:
@@ -726,7 +851,7 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
                 data = get_pokemon_stats("counter", params)
         elif source == "live":
             hours = max(1, min(int(live_h or 1), MAX_RETENTION_HOURS))
-            params = {"start_time": f"{hours} hours", "end_time": "now", "mode": mode, "area": area, "response_format": "json"}
+            params = {"start_time": f"{hours} hours", "end_time": "now", "mode": mode, "area": area, "interval": "hourly", "response_format": "json"}
             data = get_pokemon_stats("timeseries", params)
         else:
             params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
@@ -735,7 +860,7 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
         if not data: return {}, {"display": "block"}, [], dbc.Alert("No data found for this period.", color="warning", dismissable=True, duration=4000)
         return data, {"display": "block"}, [], None
     except Exception as e:
-        logger.error(f"Fetch error: {e}")
+        logger.error(f"❌ FETCH ERROR: {e}", exc_info=True)
         return {}, {"display": "none"}, [], dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
 
 @callback(
@@ -768,8 +893,132 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
     return {**state, "current_page": new_page, "rows_per_page": state.get('rows_per_page', 25)}
 
 @callback(
+    [Output("quick-filter-grid", "children"), Output("quick-filter-count", "children")],
+    [Input("heatmap-data-store", "data"),
+     Input("heatmap-hidden-pokemon", "data"),
+     Input("quick-filter-search", "n_submit"),    # Trigger 1: Enter Key
+     Input("quick-filter-go-btn", "n_clicks")],   # Trigger 2: Go Button
+    [State("data-source-selector", "value"),
+     State("quick-filter-search", "value")]       # State: Only read text when triggered
+)
+def populate_quick_filter(heatmap_data, hidden_pokemon, n_submit, n_clicks, source, search_term):
+    """Populate Pokemon image grid for quick filtering with search (Enter/Button)"""
+    if source != "sql_heatmap" or not heatmap_data:
+        return [], ""
+
+    # Process Data
+    pokemon_set = {}
+    for record in heatmap_data:
+        pid = record.get('pokemon_id')
+        form = record.get('form') or 0
+        key = f"{pid}:{form}"
+        if key not in pokemon_set:
+            pokemon_set[key] = {
+                'pid': int(pid) if pid else 0,
+                'form': int(form) if form else 0,
+                'count': record.get('count', 0)
+            }
+        else:
+            pokemon_set[key]['count'] += record.get('count', 0)
+
+    # Sort (ID Ascending)
+    sorted_pokemon = sorted(pokemon_set.items(), key=lambda x: (x[1]['pid'], x[1]['form']))
+
+    # Filter (Search)
+    search_lower = search_term.lower() if search_term else ""
+    filtered_list = []
+
+    for key, data in sorted_pokemon:
+        if search_lower:
+            name = resolve_pokemon_name(data['pid'], data['form']).lower()
+            if search_lower not in name:
+                continue
+        filtered_list.append((key, data))
+
+    # Generate UI
+    hidden_set = set(hidden_pokemon or [])
+    pokemon_images = []
+
+    for key, data in filtered_list:
+        is_hidden = key in hidden_set
+        style = {
+            "cursor": "pointer",
+            "borderRadius": "8px",
+            "padding": "4px",
+            "margin": "2px",
+            "backgroundColor": "#2a2a2a",
+            "opacity": "0.3" if is_hidden else "1",
+            "border": "2px solid transparent",
+            "transition": "all 0.2s"
+        }
+
+        pokemon_images.append(html.Div([
+            html.Img(src=get_pokemon_icon_url(data['pid'], data['form']),
+                    style={"width": "40px", "height": "40px", "display": "block"}),
+            html.Div(f"{data['count']}",
+                    style={"fontSize": "10px", "textAlign": "center", "marginTop": "2px", "color": "#aaa"})
+        ], id={"type": "quick-filter-icon", "index": key}, style=style,
+           title=f"{resolve_pokemon_name(data['pid'], data['form'])}: {data['count']} spawns"))
+
+    count_text = f"({len(filtered_list)}/{len(sorted_pokemon)})" if search_lower else f"({len(sorted_pokemon)})"
+
+    return pokemon_images, count_text
+
+@callback(
+    Output("heatmap-hidden-pokemon", "data", allow_duplicate=True),
+    [Input({"type": "quick-filter-icon", "index": ALL}, "n_clicks"),
+     Input("quick-filter-show-all", "n_clicks"),
+     Input("quick-filter-hide-all", "n_clicks")],
+    [State("heatmap-hidden-pokemon", "data"),
+     State("heatmap-data-store", "data")],
+    prevent_initial_call=True
+)
+def toggle_pokemon_visibility(icon_clicks, show_clicks, hide_clicks, hidden_list, heatmap_data):
+    """Toggle Pokemon visibility in quick filter"""
+    trigger = ctx.triggered_id
+    if not trigger:
+        return dash.no_update
+
+    # Button Logic
+    if trigger == "quick-filter-show-all":
+        return []
+
+    if trigger == "quick-filter-hide-all":
+        if not heatmap_data: return []
+        # Generate list of all keys currently in the heatmap
+        all_keys = set()
+        for record in heatmap_data:
+            pid = record.get('pokemon_id')
+            form = record.get('form') or 0
+            all_keys.add(f"{pid}:{form}")
+        return list(all_keys)
+
+    # Icon Click Logic
+    if isinstance(trigger, dict) and trigger.get('type') == 'quick-filter-icon':
+        hidden_list = hidden_list or []
+        clicked_key = trigger['index']
+        if clicked_key in hidden_list:
+            return [k for k in hidden_list if k != clicked_key]
+        else:
+            return hidden_list + [clicked_key]
+
+    return dash.no_update
+
+@callback(
+    Output("heatmap-hidden-pokemon", "data", allow_duplicate=True),
+    Input("heatmap-data-store", "data"),
+    prevent_initial_call=True
+)
+def reset_hidden_pokemon_on_new_data(heatmap_data):
+    """Reset hidden Pokemon list when new heatmap data arrives"""
+    # Only reset if we actually have new data (not empty)
+    if heatmap_data:
+        return []
+    return dash.no_update
+
+@callback(
     [Output("total-counts-display", "children"), Output("main-visual-container", "children"), Output("raw-data-display", "children"), Output("total-pages-store", "data"),
-     Output("heatmap-map-container", "style"), Output("main-visual-container", "style"), Output("heatmap-toggle-container", "style")],
+     Output("heatmap-map-container", "style"), Output("main-visual-container", "style"), Output("heatmap-toggle-container", "style"), Output("quick-filter-container", "style")],
     [Input("raw-data-store", "data"), Input("table-search-input", "value"), Input("table-sort-store", "data"), Input("table-page-store", "data"), Input("heatmap-data-store", "data")],
     [State("mode-selector", "value"), State("data-source-selector", "value")]
 )
@@ -778,14 +1027,19 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         count = len(heatmap_data) if heatmap_data else 0
         raw_text = json.dumps(heatmap_data, indent=2)
         total_div = [html.H1(f"{count:,} Spawns", className="text-primary")]
-        return total_div, html.Div(), raw_text, 1, {"height": "600px", "width": "100%", "display": "block"}, {"display": "none"}, {"display": "block", "float": "right"}
+        return total_div, html.Div(), raw_text, 1, {"height": "600px", "width": "100%", "display": "block"}, {"display": "none"}, {"display": "block", "float": "right"}, {"display": "block"}
 
-    if not data: return [], html.Div(), "", 1, {"display": "none"}, {"display": "block"}, {"display": "none"}
+    if not data: return [], html.Div(), "", 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
     df = parse_data_to_df(data, mode, source)
-    if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "none"}, {"display": "block"}, {"display": "none"}
+    if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
     if mode == "grouped" and search_term:
-        df = df[df['key'].str.lower().str.contains(search_term.lower(), na=False)]
+        # Build searchable name column using species + form names
+        def build_search_name(row):
+            species, form = resolve_pokemon_name_parts(row['pid'], row['form'])
+            return f"{species} {form}".lower() if form else species.lower()
+        df['search_name'] = df.apply(build_search_name, axis=1)
+        df = df[df['search_name'].str.contains(search_term.lower(), na=False)]
 
     total_div = html.P("No data.")
     icon_base_url = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
@@ -824,13 +1078,14 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         current_page = min(max(1, page['current_page']), total_pages_val)
         page_df = pivot.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
 
-        header_cells = [html.Th("Image", style={"backgroundColor": "#1a1a1a", "width": "60px", "position": "sticky", "top": "0", "zIndex": "10"})]
-        header_cells.append(html.Th(html.Span(["Pokémon", html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10"}))
+        # Header with all columns centered
+        header_cells = [html.Th("Image", style={"backgroundColor": "#1a1a1a", "width": "60px", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"})]
+        header_cells.append(html.Th(html.Span(["Pokémon", html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}))
 
         for c in [x for x in pivot.columns if x not in ['pid', 'form', 'key']]:
-             label = html.Img(src=metric_icons[c.lower()], style={"width":"24px", "verticalAlign":"middle"}) if c.lower() in metric_icons else c
+             label = html.Img(src=metric_icons[c.lower()], style={"width":"24px", "height":"24px", "verticalAlign":"middle"}) if c.lower() in metric_icons else c
              arrow = " ▲" if col == c and ascending else (" ▼" if col == c else "")
-             header_cells.append(html.Th(html.Span([label, html.Span(arrow, style={"color": "#aaa"})], id={"type": "sort-header", "index": c}, style={"cursor": "pointer", "display":"inline-flex", "alignItems":"center"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center"}))
+             header_cells.append(html.Th(html.Span([label, html.Span(arrow, style={"color": "#aaa"})], id={"type": "sort-header", "index": c}, style={"cursor": "pointer", "display":"inline-flex", "alignItems":"center", "justifyContent": "center"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}))
 
         header_row = html.Tr(header_cells)
 
@@ -838,12 +1093,25 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         for i, r in enumerate(page_df.iterrows()):
             _, r = r
             bg = "#1a1a1a" if i % 2 == 0 else "#242424"
+
+            # Get species name and form name parts
+            species_name, form_name = resolve_pokemon_name_parts(r['pid'], r['form'])
+
+            # Build Pokemon name cell with bold species name and form name below
+            if form_name:
+                name_content = html.Div([
+                    html.Div(species_name, style={"fontWeight": "bold", "lineHeight": "1.2"}),
+                    html.Div(form_name, style={"fontSize": "11px", "color": "#aaa", "lineHeight": "1.2"})
+                ], style={"textAlign": "center"})
+            else:
+                name_content = html.Div(species_name, style={"fontWeight": "bold", "textAlign": "center"})
+
             cells = [
-                html.Td(html.Img(src=get_pokemon_icon_url(r['pid'], r['form']), style={"width":"40px", "display":"block", "margin":"auto"}), style={"backgroundColor":bg, "textAlign": "center"}),
-                html.Td(f"{r['key']}", style={"backgroundColor":bg})
+                html.Td(html.Img(src=get_pokemon_icon_url(r['pid'], r['form']), style={"width":"40px", "height":"40px", "display":"block", "margin":"auto"}), style={"backgroundColor":bg, "textAlign": "center", "verticalAlign": "middle"}),
+                html.Td(name_content, style={"backgroundColor":bg, "textAlign": "center", "verticalAlign": "middle"})
             ]
             for m in [x for x in pivot.columns if x not in ['pid', 'form', 'key']]:
-                cells.append(html.Td(f"{int(r[m]):,}", style={"backgroundColor":bg, "textAlign": "center"}))
+                cells.append(html.Td(f"{int(r[m]):,}", style={"backgroundColor":bg, "textAlign": "center", "verticalAlign": "middle"}))
             rows.append(html.Tr(cells))
 
         controls = html.Div([
@@ -922,20 +1190,13 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{mode.title()} Data")
         visual_content = dcc.Graph(figure=fig, id="main-graph")
 
-    return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}
+    return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
+# Update to use the correctly namespaced JS function
 dash.clientside_callback(
-    """
-    function(data, whitelist, mode) {
-        if (!window.renderPokemonHeatmap) return window.dash_clientside.no_update;
-        // renderPokemonHeatmap expects (data, blocklist, renderMode)
-        // Data is already filtered by SQL query, so pass empty blocklist
-        window.renderPokemonHeatmap(data, [], mode);
-        return window.dash_clientside.no_update;
-    }
-    """,
+    ClientsideFunction(namespace='clientside', function_name='triggerHeatmapRenderer'),
     Output("heatmap-map-container", "children"),
     Input("heatmap-data-store", "data"),
-    Input("whitelist-store", "data"),
-    Input("heatmap-mode-store", "data")
+    Input("heatmap-hidden-pokemon", "data"),
+    Input("heatmap-mode-store", "data"),
 )
