@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-from utils.logger import logger
+from utils.logger import setup_logging, logger
 from dashboard.app import app
 from dashboard.tasks.global_pokemons import start_background_task as start_pokemon_task
 from dashboard.tasks.global_raids import start_background_task_raids as start_raids_task
@@ -11,6 +11,19 @@ from dashboard.utils import precache_pokemon_icons
 import config as AppConfig
 
 if __name__ == "__main__":
+    setup_logging(
+        AppConfig.log_level_dashboard,
+        {
+            "to_file": AppConfig.log_file_dashboard,
+            "file_path": "logs/dashboard_psyduckv2.log",
+            "rotation": "5 MB",
+            "keep_total": 5,
+            "compression": "gz",
+            "show_file": True,
+            "show_function": True,
+        },
+    )
+
     DEBUG_MODE = AppConfig.dashboard_debug_mode
     logger.info(f"🚀 Starting Dash Dashboard on http://{AppConfig.dashboard_ip}:{AppConfig.dashboard_port} with debug mode: {DEBUG_MODE}")
 

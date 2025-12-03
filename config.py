@@ -3,6 +3,8 @@ import sys
 import json
 import dotenv
 import urllib.parse
+
+from requests import get
 from utils.logger import logger
 from typing import List, Optional, Dict
 
@@ -134,6 +136,9 @@ pokestop_refresh_interval_seconds = config.get("golbat_pokestops", {}).get("poke
 # Log Level
 log_level = get_env_var("LOG_LEVEL", "INFO").upper()
 log_file = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
+log_level_dashboard = get_env_var("LOG_LEVEL_DASHBOARD", "INFO").upper()
+log_file_dashboard = get_env_var("LOG_FILE_DASHBOARD", "FALSE").upper() == "TRUE"
+
 
 # Koji
 koji_bearer_token = get_env_var("KOJI_TOKEN")
