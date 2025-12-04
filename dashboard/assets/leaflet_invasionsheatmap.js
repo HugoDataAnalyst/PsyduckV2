@@ -58,6 +58,145 @@
         return "#607d8b";
     }
 
+    // Grunt name cache (loaded from grunts.json)
+    var gruntNameCache = null;
+
+    // Load grunts.json and build ID -> Name map
+    function loadGruntNames() {
+        if (gruntNameCache !== null) return; // Already loaded
+
+        gruntNameCache = {}; // Mark as loading
+
+        fetch('/assets/grunts.json')
+            .then(function(response) {
+                if (!response.ok) throw new Error('Failed to load grunts.json');
+                return response.json();
+            })
+            .then(function(data) {
+                // Build reverse map: ID -> formatted name
+                Object.keys(data).forEach(function(key) {
+                    var id = data[key];
+                    var name = formatGruntKey(key);
+                    gruntNameCache[id] = name;
+                });
+                console.log('✅ Loaded grunt names:', Object.keys(gruntNameCache).length);
+            })
+            .catch(function(err) {
+                console.warn('⚠️ Could not load grunts.json, using fallback:', err);
+                gruntNameCache = {}; // Empty cache, will use fallback
+            });
+    }
+
+    // Format grunt key from JSON (e.g., "BUG_GRUNT_FEMALE" -> "Bug Grunt ♀")
+    function formatGruntKey(key) {
+        var MALE = '♂';
+        var FEMALE = '♀';
+
+        // Handle special cases first
+        if (key === 'UNSET') return 'Unknown';
+        if (key === 'GIOVANNI') return 'Giovanni';
+        if (key === 'EXECUTIVE_CLIFF') return 'Cliff';
+        if (key === 'EXECUTIVE_ARLO') return 'Arlo';
+        if (key === 'EXECUTIVE_SIERRA') return 'Sierra';
+        if (key === 'PLAYER_TEAM_LEADER') return 'Team Leader';
+        if (key === 'BLANCHE') return 'Blanche';
+        if (key === 'CANDELA') return 'Candela';
+        if (key === 'SPARK') return 'Spark';
+        if (key === 'WILLOW') return 'Willow';
+        if (key === 'WILLOWB') return 'Willow B';
+        if (key === 'TRAVELER') return 'Traveler';
+        if (key === 'EXPLORER') return 'Explorer';
+
+        // Determine gender
+        var isMale = key.endsWith('_MALE');
+        var isFemale = key.endsWith('_FEMALE');
+        var genderSymbol = isMale ? MALE : (isFemale ? FEMALE : '');
+
+        // Remove gender suffix
+        var baseName = key.replace(/_MALE$/, '').replace(/_FEMALE$/, '');
+
+        // Handle EVENT_NPC variants
+        if (baseName.startsWith('EVENT_')) {
+            baseName = baseName.replace('EVENT_', '');
+            if (baseName.startsWith('NPC_')) {
+                var npcPart = baseName.replace('NPC_', '');
+                // Check if it's a named NPC (BLANCHE, CANDELA, etc.)
+                if (npcPart === 'BLANCHE') return 'Event Blanche';
+                if (npcPart === 'CANDELA') return 'Event Candela';
+                if (npcPart === 'SPARK') return 'Event Spark';
+                return 'Event NPC ' + npcPart;
+            }
+            // EVENT_GIOVANNI_UNTICKETED etc.
+            baseName = baseName.replace('_UNTICKETED', '');
+            return 'Event ' + formatWord(baseName);
+        }
+
+        // Handle BALLOON variants
+        var isBalloon = baseName.includes('BALLOON');
+        baseName = baseName.replace('_BALLOON', '').replace('BALLOON_', '');
+
+        // Handle GRUNT variants
+        var isGrunt = baseName.includes('GRUNT');
+        baseName = baseName.replace('_GRUNT', '').replace('GRUNT_', '').replace('GRUNT', '');
+
+        // Handle GRUNTB
+        if (key.startsWith('GRUNTB')) {
+            return 'Grunt B ' + genderSymbol;
+        }
+
+        // Handle DECOY
+        if (baseName.startsWith('DECOY')) {
+            return 'Decoy Grunt ' + genderSymbol;
+        }
+
+        // Build final name
+        var parts = [];
+
+        // Add type if present
+        if (baseName && baseName !== '') {
+            parts.push(formatWord(baseName));
+        }
+
+        // Add Balloon if applicable
+        if (isBalloon) {
+            parts.push('Balloon');
+        } else if (isGrunt) {
+            parts.push('Grunt');
+        }
+
+        // Add gender
+        if (genderSymbol) {
+            parts.push(genderSymbol);
+        }
+
+        return parts.join(' ') || key;
+    }
+
+    // Capitalize first letter, lowercase rest
+    function formatWord(word) {
+        if (!word) return '';
+        // Handle METAL -> Steel
+        if (word === 'METAL') return 'Steel';
+        if (word === 'DARKNESS') return 'Darkness';
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }
+
+    // Get grunt display name with gender symbols
+    function getGruntName(charId) {
+        var id = parseInt(charId);
+
+        // Try cache first
+        if (gruntNameCache && gruntNameCache[id]) {
+            return gruntNameCache[id];
+        }
+
+        // Fallback for unknown IDs
+        return 'Grunt #' + id;
+    }
+
+    // Initialize grunt names on load
+    loadGruntNames();
+
     // Dynamic Legend Control
     function updateLegend(min, max, mode) {
         if (legendControl) {
@@ -259,9 +398,10 @@
                     gruntList.forEach(function(grunt) {
                         if (shown < 5) {
                             var iconUrl = grunt.icon_url || 'https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main/invasion/0.webp';
+                            var gruntName = getGruntName(grunt.character);
                             tooltipHtml += '<div style="display: flex; align-items: center; gap: 5px; margin: 3px 0;">';
                             tooltipHtml += '<img src="' + iconUrl + '" style="width: 24px; height: 24px;">';
-                            tooltipHtml += '<span>x' + grunt.count + '</span>';
+                            tooltipHtml += '<span style="font-size: 11px;">' + gruntName + ' ×' + grunt.count + '</span>';
                             tooltipHtml += '</div>';
                             shown++;
                         }
@@ -352,7 +492,7 @@
                         popupHtml += '<div style="display: flex; align-items: center; margin: 8px 0; padding: 5px; background: #f8f8f8; border-radius: 8px; gap: 10px;">';
                         popupHtml += '<img src="' + iconUrl + '" style="width: 48px; height: 48px; flex-shrink: 0;" onerror="this.src=\'https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main/invasion/0.webp\'">';
                         popupHtml += '<div style="flex-grow: 1; text-align: left;">';
-                        popupHtml += '<div style="font-weight: bold; color: #333;">ID: ' + invasion.character + '</div>';
+                        popupHtml += '<div style="font-weight: bold; color: #333;">' + getGruntName(invasion.character) + '</div>';
                         popupHtml += '<div style="font-size: 12px; color: ' + gruntColor + '; font-weight: bold;">×' + invasion.count + '</div>';
                         popupHtml += '</div></div>';
                     });
