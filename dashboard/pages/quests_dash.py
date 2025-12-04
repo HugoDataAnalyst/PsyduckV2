@@ -202,7 +202,7 @@ def layout(area=None, **kwargs):
                     dbc.Col([
                         dbc.Label("Data Source", className="fw-bold"),
                         html.Div([
-                            # Row 1: Stats (Live & Historical)
+                            # Stats Live & Historical
                             html.Div([
                                 html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(

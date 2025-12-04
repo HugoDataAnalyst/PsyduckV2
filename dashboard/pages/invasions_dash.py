@@ -106,6 +106,10 @@ def layout(area=None, **kwargs):
         dcc.Dropdown(id="invasions-area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="invasions-mode-persistence-store", storage_type="local"),
         dcc.Store(id="invasions-source-persistence-store", storage_type="local"),
+        dcc.Store(id="invasions-combined-source-store", data="live"),
+        dcc.Store(id="invasions-heatmap-data-store", data=[]),
+        dcc.Store(id="invasions-heatmap-mode-store", data="markers"),
+        dcc.Store(id="invasions-heatmap-hidden-grunts", data=[]),
 
         # Header
         dbc.Row([
@@ -138,13 +142,24 @@ def layout(area=None, **kwargs):
                             html.Div([
                                 html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
-                                    id="invasions-data-source-selector",
+                                    id="invasions-stats-source-selector",
                                     options=[
                                         {"label": "Live", "value": "live"},
                                         {"label": "Historical", "value": "historical"},
                                     ],
                                     value="live", inline=True, inputClassName="btn-check",
                                     labelClassName="btn btn-outline-info btn-sm",
+                                    labelCheckedClassName="active"
+                                ),
+                            ], className="d-flex align-items-center mb-1"),
+                            # Row 2: SQL (Heatmap)
+                            html.Div([
+                                html.Span("SQL: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                dbc.RadioItems(
+                                    id="invasions-sql-source-selector",
+                                    options=[{"label": "Heatmap", "value": "sql_heatmap"}],
+                                    value=None, inline=True, inputClassName="btn-check",
+                                    labelClassName="btn btn-outline-success btn-sm",
                                     labelCheckedClassName="active"
                                 ),
                             ], className="d-flex align-items-center"),
@@ -168,14 +183,27 @@ def layout(area=None, **kwargs):
                         html.Div(id="invasions-historical-controls", style={"display": "none"}, children=[
                             dbc.Label("📅 Date Range"),
                             dcc.DatePickerRange(id="invasions-historical-date-picker", min_date_allowed=date(2023, 1, 1), max_date_allowed=date.today(), start_date=date.today(), end_date=date.today(), className="d-block w-100", persistence=True, persistence_type="local")
+                        ]),
+                        html.Div(id="invasions-heatmap-controls", style={"display": "none"}, children=[
+                            dbc.Label("📅 Date Range"),
+                            dcc.DatePickerRange(id="invasions-heatmap-date-picker", min_date_allowed=date(2023, 1, 1), max_date_allowed=date.today(), start_date=date.today(), end_date=date.today(), className="d-block w-100", persistence=True, persistence_type="local")
                         ])
                     ], width=6, md=3),
 
-                    # Interval
+                    # Interval / Display Mode
                     dbc.Col([
                         html.Div(id="invasions-interval-control-container", style={"display": "none"}, children=[
                             dbc.Label("⏱️ Interval"),
                             dcc.Dropdown(id="invasions-interval-selector", options=[{"label": "Hourly", "value": "hourly"}], value="hourly", clearable=False, className="text-dark")
+                        ]),
+                        html.Div(id="invasions-heatmap-display-container", style={"display": "none"}, children=[
+                            dbc.Label("🗺️ Display Mode"),
+                            dcc.Dropdown(id="invasions-heatmap-display-mode",
+                                options=[
+                                    {"label": "Markers (Pokestops)", "value": "markers"},
+                                    {"label": "Density Heatmap", "value": "density"},
+                                    {"label": "Grid Overlay", "value": "grid"}
+                                ], value="markers", clearable=False, className="text-dark")
                         ])
                     ], width=6, md=3),
 
@@ -238,7 +266,51 @@ def layout(area=None, **kwargs):
                 dbc.CardHeader("🛠️ Raw Data Inspector"),
                 dbc.CardBody(html.Pre(id="invasions-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
-        ]))
+        ])),
+
+        # Heatmap Container (separate from stats container)
+        html.Div(id="invasions-heatmap-container", style={"display": "none"}, children=[
+            dbc.Row([
+                # Left Column - Quick Filter
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Span("🎯 Grunt Filter", className="me-2"),
+                                    html.Span(id="invasions-quick-filter-count", className="text-muted small")
+                                ], width="auto", className="d-flex align-items-center"),
+                                dbc.Col([
+                                    dbc.ButtonGroup([
+                                        dbc.Button("All", id="invasions-quick-filter-show-all", title="Show All", size="sm", color="success", outline=True),
+                                        dbc.Button("None", id="invasions-quick-filter-hide-all", title="Hide All", size="sm", color="danger", outline=True),
+                                    ], size="sm")
+                                ], width="auto")
+                            ], className="align-items-center justify-content-between g-0")
+                        ]),
+                        dbc.CardBody([
+                            dbc.Input(id="invasions-quick-filter-search", placeholder="Search grunts...", size="sm", className="mb-2"),
+                            html.P("Click to hide/show grunts from map", className="text-muted small mb-2"),
+                            html.Div(id="invasions-quick-filter-grid",
+                                     style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
+                        ])
+                    ], className="shadow-sm border-0 h-100")
+                ], width=12, lg=3, className="mb-4"),
+
+                # Right Column - Map
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.Span("🗺️ Invasion Heatmap", className="fw-bold"),
+                            html.Span(id="invasions-heatmap-stats", className="ms-3 text-muted small")
+                        ]),
+                        dbc.CardBody([
+                            html.Div(id="invasions-heatmap-map-container", style={"height": "600px", "backgroundColor": "#1a1a1a"})
+                        ])
+                    ], className="shadow-sm border-0 h-100")
+                ], width=12, lg=9, className="mb-4")
+            ])
+        ])
     ])
 
 # Parsing Logic
@@ -335,20 +407,46 @@ def parse_data_to_df(data, mode, source):
 
 # Callbacks
 
+# Combine data sources into single store
 @callback(
-    [Output("invasions-live-controls", "style"), Output("invasions-historical-controls", "style"), Output("invasions-interval-control-container", "style")],
-    Input("invasions-data-source-selector", "value")
+    [Output("invasions-combined-source-store", "data", allow_duplicate=True),
+     Output("invasions-stats-source-selector", "value", allow_duplicate=True),
+     Output("invasions-sql-source-selector", "value", allow_duplicate=True)],
+    [Input("invasions-stats-source-selector", "value"),
+     Input("invasions-sql-source-selector", "value")],
+    prevent_initial_call=True
 )
-def toggle_source(source):
-    if "live" in source: return {"display": "block"}, {"display": "none"}, {"display": "none"}
-    return {"display": "none"}, {"display": "block", "position": "relative", "zIndex": 1002}, {"display": "block"}
+def combine_data_sources(stats_val, sql_val):
+    trigger = ctx.triggered_id
+    if trigger == "invasions-stats-source-selector" and stats_val:
+        return stats_val, stats_val, None
+    elif trigger == "invasions-sql-source-selector" and sql_val:
+        return sql_val, None, sql_val
+    return "live", None, "live"
+
+@callback(
+    [Output("invasions-live-controls", "style"), Output("invasions-historical-controls", "style"),
+     Output("invasions-interval-control-container", "style"), Output("invasions-heatmap-controls", "style"),
+     Output("invasions-heatmap-display-container", "style")],
+    Input("invasions-combined-source-store", "data")
+)
+def toggle_source_controls(source):
+    if source == "live":
+        return {"display": "block"}, {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
+    elif source == "historical":
+        return {"display": "none"}, {"display": "block", "position": "relative", "zIndex": 1002}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+    elif source == "sql_heatmap":
+        return {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "block", "position": "relative", "zIndex": 1002}, {"display": "block"}
+    return {"display": "block"}, {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
 
 @callback(
     [Output("invasions-mode-selector", "options"), Output("invasions-mode-selector", "value")],
-    Input("invasions-data-source-selector", "value"),
+    Input("invasions-combined-source-store", "data"),
     [State("invasions-mode-persistence-store", "data"), State("invasions-mode-selector", "value")]
 )
 def restrict_modes(source, stored_mode, current_ui_mode):
+    if source == "sql_heatmap":
+        return [{"label": "Map View", "value": "map"}], "map"
     full_options = [{"label": "Surged (Hourly)", "value": "surged"}, {"label": "Grouped (Table)", "value": "grouped"}, {"label": "Sum (Totals)", "value": "sum"}]
     allowed_values = [o['value'] for o in full_options]
     if current_ui_mode in allowed_values: final_value = current_ui_mode
@@ -359,11 +457,13 @@ def restrict_modes(source, stored_mode, current_ui_mode):
 @callback(Output("invasions-mode-persistence-store", "data"), Input("invasions-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
 
-@callback(Output("invasions-source-persistence-store", "data"), Input("invasions-data-source-selector", "value"), prevent_initial_call=True)
+@callback(Output("invasions-source-persistence-store", "data"), Input("invasions-combined-source-store", "data"), prevent_initial_call=True)
 def save_source(val): return val
 
 @callback(
-    Output("invasions-data-source-selector", "value"),
+    [Output("invasions-combined-source-store", "data"),
+     Output("invasions-stats-source-selector", "value"),
+     Output("invasions-sql-source-selector", "value")],
     Input("invasions-source-persistence-store", "modified_timestamp"),
     State("invasions-source-persistence-store", "data"),
     prevent_initial_call=False
@@ -372,10 +472,15 @@ def load_persisted_source(ts, stored_source):
     """Load persisted data source on page load."""
     if ts is not None and ts > 0:
         raise dash.exceptions.PreventUpdate
-    valid_sources = ["live", "historical"]
+    valid_sources = ["live", "historical", "sql_heatmap"]
     if stored_source in valid_sources:
-        return stored_source
-    return "live"
+        if stored_source == "sql_heatmap":
+            return stored_source, None, stored_source
+        return stored_source, stored_source, None
+    return "live", "live", None
+
+@callback(Output("invasions-heatmap-mode-store", "data"), Input("invasions-heatmap-display-mode", "value"))
+def update_heatmap_mode_store(val): return val
 
 @callback(
     [Output("invasions-area-modal", "is_open"), Output("invasions-search-input", "style")],
@@ -400,28 +505,189 @@ dash.clientside_callback(
     Output("invasions-clientside-dummy-store", "data"), Input("invasions-area-modal", "is_open")
 )
 
+# Quick Filter Callbacks
 @callback(
-    [Output("invasions-raw-data-store", "data"), Output("invasions-stats-container", "style"), Output("invasions-notification-area", "children")],
-    [Input("invasions-submit-btn", "n_clicks"), Input("invasions-data-source-selector", "value")],
-    [State("invasions-area-selector", "value"), State("invasions-live-time-input", "value"), State("invasions-historical-date-picker", "start_date"), State("invasions-historical-date-picker", "end_date"), State("invasions-interval-selector", "value"), State("invasions-mode-selector", "value")]
+    [Output("invasions-quick-filter-grid", "children"), Output("invasions-quick-filter-count", "children")],
+    [Input("invasions-heatmap-data-store", "data"),
+     Input("invasions-heatmap-hidden-grunts", "data"),
+     Input("invasions-quick-filter-search", "value")],
+    [State("invasions-combined-source-store", "data")]
 )
-def fetch_data(n, source, area, live_h, start, end, interval, mode):
-    if not n: return {}, {"display": "none"}, None
+def populate_invasions_quick_filter(heatmap_data, hidden_grunts, search_term, source):
+    """Populate grunt image grid for quick filtering"""
+    if source != "sql_heatmap" or not heatmap_data:
+        return [], ""
+
+    grunt_map = _get_grunt_map()
+
+    # 1. Process Data - aggregate by character
+    grunt_set = {}
+    for record in heatmap_data:
+        char_id = record.get('character') or 0
+        key = str(char_id)
+        if key not in grunt_set:
+            grunt_name = grunt_map.get(char_id, f"Grunt {char_id}")
+            grunt_set[key] = {
+                'char_id': int(char_id),
+                'name': grunt_name,
+                'count': record.get('count', 0),
+                'icon_url': get_invasion_icon_url(char_id)
+            }
+        else:
+            grunt_set[key]['count'] += record.get('count', 0)
+
+    # 2. Sort (by count descending, then ID)
+    sorted_grunts = sorted(grunt_set.items(), key=lambda x: (-x[1]['count'], x[1]['char_id']))
+
+    # 3. Filter (Search)
+    search_lower = search_term.lower() if search_term else ""
+    filtered_list = []
+
+    for key, data in sorted_grunts:
+        if search_lower:
+            if search_lower not in data['name'].lower():
+                continue
+        filtered_list.append((key, data))
+
+    # 4. Generate UI
+    hidden_set = set(hidden_grunts or [])
+    grunt_images = []
+
+    for key, data in filtered_list:
+        is_hidden = key in hidden_set
+
+        style = {
+            "cursor": "pointer",
+            "borderRadius": "8px",
+            "padding": "4px",
+            "margin": "2px",
+            "backgroundColor": "#2a2a2a",
+            "opacity": "0.3" if is_hidden else "1",
+            "border": "2px solid transparent",
+            "transition": "all 0.2s"
+        }
+
+        grunt_images.append(html.Div([
+            html.Img(src=data['icon_url'],
+                    style={"width": "40px", "height": "40px", "display": "block"}),
+            html.Div(f"{data['count']}",
+                    style={"fontSize": "10px", "textAlign": "center", "marginTop": "2px", "color": "#aaa"})
+        ], id={"type": "invasions-quick-filter-icon", "index": key}, style=style,
+           title=f"{data['name']}: {data['count']} invasions"))
+
+    count_text = f"({len(filtered_list)}/{len(sorted_grunts)})" if search_lower else f"({len(sorted_grunts)})"
+
+    return grunt_images, count_text
+
+@callback(
+    Output("invasions-heatmap-hidden-grunts", "data", allow_duplicate=True),
+    [Input({"type": "invasions-quick-filter-icon", "index": ALL}, "n_clicks"),
+     Input("invasions-quick-filter-show-all", "n_clicks"),
+     Input("invasions-quick-filter-hide-all", "n_clicks")],
+    [State("invasions-heatmap-hidden-grunts", "data"),
+     State("invasions-heatmap-data-store", "data")],
+    prevent_initial_call=True
+)
+def toggle_invasions_grunt_visibility(icon_clicks, show_clicks, hide_clicks, hidden_list, heatmap_data):
+    """Toggle grunt visibility in quick filter"""
+    trigger = ctx.triggered_id
+    if not trigger:
+        return dash.no_update
+
+    # Button Logic
+    if trigger == "invasions-quick-filter-show-all":
+        return []
+
+    if trigger == "invasions-quick-filter-hide-all":
+        if not heatmap_data: return []
+        all_keys = set()
+        for record in heatmap_data:
+            char_id = record.get('character') or 0
+            all_keys.add(str(char_id))
+        return list(all_keys)
+
+    # Icon Click Logic
+    if isinstance(trigger, dict) and trigger.get('type') == 'invasions-quick-filter-icon':
+        hidden_list = hidden_list or []
+        clicked_key = trigger['index']
+        if clicked_key in hidden_list:
+            return [k for k in hidden_list if k != clicked_key]
+        else:
+            return hidden_list + [clicked_key]
+
+    return dash.no_update
+
+@callback(
+    Output("invasions-heatmap-hidden-grunts", "data", allow_duplicate=True),
+    Input("invasions-heatmap-data-store", "data"),
+    prevent_initial_call=True
+)
+def reset_invasions_hidden_grunts_on_new_data(heatmap_data):
+    """Reset hidden grunts list when new heatmap data arrives"""
+    if heatmap_data:
+        return []
+    return dash.no_update
+
+@callback(
+    [Output("invasions-raw-data-store", "data"), Output("invasions-stats-container", "style"), Output("invasions-notification-area", "children"),
+     Output("invasions-heatmap-data-store", "data"), Output("invasions-heatmap-container", "style"), Output("invasions-heatmap-stats", "children")],
+    [Input("invasions-submit-btn", "n_clicks"), Input("invasions-combined-source-store", "data")],
+    [State("invasions-area-selector", "value"), State("invasions-live-time-input", "value"),
+     State("invasions-historical-date-picker", "start_date"), State("invasions-historical-date-picker", "end_date"),
+     State("invasions-heatmap-date-picker", "start_date"), State("invasions-heatmap-date-picker", "end_date"),
+     State("invasions-interval-selector", "value"), State("invasions-mode-selector", "value")]
+)
+def fetch_data(n, source, area, live_h, hist_start, hist_end, heatmap_start, heatmap_end, interval, mode):
+    # Default outputs: raw_data, stats_style, notification, heatmap_data, heatmap_style, heatmap_stats
+    if not n:
+        return {}, {"display": "none"}, None, [], {"display": "none"}, ""
     if not area:
-        return {}, {"display": "none"}, dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
+        return {}, {"display": "none"}, dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000), [], {"display": "none"}, ""
 
     try:
-        if source == "live":
+        if source == "sql_heatmap":
+            # SQL Heatmap Mode
+            logger.info(f"🔍 Starting Invasion Heatmap Fetch for area: {area}")
+            params = {
+                "start_time": f"{heatmap_start}T00:00:00",
+                "end_time": f"{heatmap_end}T23:59:59",
+                "area": area,
+                "response_format": "json"
+            }
+            data = get_invasions_stats("invasion_sql_data", params)
+
+            heatmap_data = []
+            if isinstance(data, dict) and "data" in data:
+                heatmap_data = data["data"]
+            elif isinstance(data, list):
+                heatmap_data = data
+
+            # Add icon URLs to each point
+            for point in heatmap_data:
+                char_id = point.get('character') or 0
+                point['icon_url'] = get_invasion_icon_url(char_id)
+
+            # Calculate stats
+            total_invasions = sum(p.get('count', 0) for p in heatmap_data)
+            unique_stops = len(set(p.get('pokestop_name', '') for p in heatmap_data))
+            stats_text = f"{unique_stops} pokestops • {total_invasions} invasions"
+
+            logger.info(f"✅ Invasion Heatmap: {len(heatmap_data)} data points, {unique_stops} pokestops, {total_invasions} invasions")
+
+            return {}, {"display": "none"}, None, heatmap_data, {"display": "block"}, stats_text
+
+        elif source == "live":
             hours = max(1, min(int(live_h or 1), 72))
             params = {"start_time": f"{hours} hours", "end_time": "now", "mode": mode, "area": area, "response_format": "json"}
             data = get_invasions_stats("timeseries", params)
         else:
-            params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
+            params = {"counter_type": "totals", "interval": interval, "start_time": f"{hist_start}T00:00:00", "end_time": f"{hist_end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
             data = get_invasions_stats("counter", params)
-        return data, {"display": "block"}, None
+
+        return data, {"display": "block"}, None, [], {"display": "none"}, ""
     except Exception as e:
         logger.info(f"Fetch error: {e}")
-        return {}, {"display": "none"}, dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
+        return {}, {"display": "none"}, dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True), [], {"display": "none"}, ""
 
 # Sorting
 @callback(
@@ -458,9 +724,12 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 @callback(
     [Output("invasions-total-counts-display", "children"), Output("invasions-main-visual-container", "children"), Output("invasions-raw-data-display", "children"), Output("invasions-total-pages-store", "data"), Output("invasions-main-visual-container", "style")],
     [Input("invasions-raw-data-store", "data"), Input("invasions-search-input", "value"), Input("invasions-table-sort-store", "data"), Input("invasions-table-page-store", "data")],
-    [State("invasions-mode-selector", "value"), State("invasions-data-source-selector", "value")]
+    [State("invasions-mode-selector", "value"), State("invasions-combined-source-store", "data")]
 )
 def update_visuals(data, search_term, sort, page, mode, source):
+    if source == "sql_heatmap":
+        return [], html.Div("View heatmap below"), "", 1, {"display": "none"}
+
     if not data: return [], html.Div(), "", 1, {"display": "block"}
 
     df = parse_data_to_df(data, mode, source)
@@ -599,3 +868,13 @@ def update_visuals(data, search_term, sort, page, mode, source):
         visual_content = dcc.Graph(figure=fig, id="invasions-main-graph")
 
     return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "block"}
+
+# Clientside callback for invasion heatmap rendering
+dash.clientside_callback(
+    ClientsideFunction(namespace='clientside', function_name='triggerInvasionHeatmapRenderer'),
+    Output("invasions-clientside-dummy-store", "data", allow_duplicate=True),
+    [Input("invasions-heatmap-data-store", "data"),
+     Input("invasions-heatmap-hidden-grunts", "data"),
+     Input("invasions-heatmap-mode-store", "data")],
+    prevent_initial_call=True
+)
