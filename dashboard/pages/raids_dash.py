@@ -162,6 +162,7 @@ def layout(area=None, **kwargs):
         dcc.Store(id="raids-clientside-dummy-store"),
         dcc.Dropdown(id="raids-area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="raids-mode-persistence-store", storage_type="local"),
+        dcc.Store(id="raids-source-persistence-store", storage_type="local"),
 
         # Header
         dbc.Row([
@@ -401,6 +402,24 @@ def restrict_modes(source, stored_mode, current_ui_mode):
 
 @callback(Output("raids-mode-persistence-store", "data"), Input("raids-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
+
+@callback(Output("raids-source-persistence-store", "data"), Input("raids-data-source-selector", "value"), prevent_initial_call=True)
+def save_source(val): return val
+
+@callback(
+    Output("raids-data-source-selector", "value"),
+    Input("raids-source-persistence-store", "modified_timestamp"),
+    State("raids-source-persistence-store", "data"),
+    prevent_initial_call=False
+)
+def load_persisted_source(ts, stored_source):
+    """Load persisted data source on page load."""
+    if ts is not None and ts > 0:
+        raise dash.exceptions.PreventUpdate
+    valid_sources = ["live", "historical"]
+    if stored_source in valid_sources:
+        return stored_source
+    return "live"
 
 @callback(
     [Output("raids-area-modal", "is_open"), Output("raids-search-input", "style")],

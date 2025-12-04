@@ -105,6 +105,7 @@ def layout(area=None, **kwargs):
         dcc.Store(id="invasions-clientside-dummy-store"),
         dcc.Dropdown(id="invasions-area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="invasions-mode-persistence-store", storage_type="local"),
+        dcc.Store(id="invasions-source-persistence-store", storage_type="local"),
 
         # Header
         dbc.Row([
@@ -348,6 +349,24 @@ def restrict_modes(source, stored_mode, current_ui_mode):
 
 @callback(Output("invasions-mode-persistence-store", "data"), Input("invasions-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
+
+@callback(Output("invasions-source-persistence-store", "data"), Input("invasions-data-source-selector", "value"), prevent_initial_call=True)
+def save_source(val): return val
+
+@callback(
+    Output("invasions-data-source-selector", "value"),
+    Input("invasions-source-persistence-store", "modified_timestamp"),
+    State("invasions-source-persistence-store", "data"),
+    prevent_initial_call=False
+)
+def load_persisted_source(ts, stored_source):
+    """Load persisted data source on page load."""
+    if ts is not None and ts > 0:
+        raise dash.exceptions.PreventUpdate
+    valid_sources = ["live", "historical"]
+    if stored_source in valid_sources:
+        return stored_source
+    return "live"
 
 @callback(
     [Output("invasions-area-modal", "is_open"), Output("invasions-search-input", "style")],
