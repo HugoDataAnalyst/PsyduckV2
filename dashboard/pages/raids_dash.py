@@ -163,6 +163,9 @@ def layout(area=None, **kwargs):
         dcc.Dropdown(id="raids-area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="raids-mode-persistence-store", storage_type="local"),
         dcc.Store(id="raids-source-persistence-store", storage_type="local"),
+        dcc.Store(id="raids-combined-source-store", data="live"),
+        dcc.Store(id="raids-heatmap-data-store", data=[]),
+        dcc.Store(id="raids-heatmap-mode-store", data="markers"),
 
         # Header
         dbc.Row([
@@ -190,20 +193,35 @@ def layout(area=None, **kwargs):
                     # Data Source
                     dbc.Col([
                         dbc.Label("Data Source", className="fw-bold"),
-                        html.Div(
-                            dbc.RadioItems(
-                                id="raids-data-source-selector",
-                                options=[
-                                    {"label": "Live (Real-time)", "value": "live"},
-                                    {"label": "Historical (Stats)", "value": "historical"}
-                                ],
-                                value="live",
-                                inline=True,
-                                inputClassName="btn-check",
-                                labelClassName="btn btn-outline-secondary",
-                                labelCheckedClassName="active"
-                            ), className="mb-3"
-                        )
+                        html.Div([
+                            # Row 1: Stats (Live & Historical)
+                            html.Div([
+                                html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                dbc.RadioItems(
+                                    id="raids-data-source-selector",
+                                    options=[
+                                        {"label": "Live", "value": "live"},
+                                        {"label": "Historical", "value": "historical"},
+                                    ],
+                                    value="live", inline=True, inputClassName="btn-check",
+                                    labelClassName="btn btn-outline-info btn-sm",
+                                    labelCheckedClassName="active"
+                                ),
+                            ], className="d-flex align-items-center mb-1"),
+                            # Row 2: SQL Sources (Heatmap)
+                            html.Div([
+                                html.Span("SQL: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                dbc.RadioItems(
+                                    id="raids-data-source-sql-selector",
+                                    options=[
+                                        {"label": "Heatmap", "value": "sql_heatmap"},
+                                    ],
+                                    value=None, inline=True, inputClassName="btn-check",
+                                    labelClassName="btn btn-outline-success btn-sm",
+                                    labelCheckedClassName="active"
+                                ),
+                            ], className="d-flex align-items-center"),
+                        ], className="mb-3")
                     ], width=12, md=6)
                 ], className="g-3"),
 
@@ -251,7 +269,30 @@ def layout(area=None, **kwargs):
                         dbc.Label("Actions", style={"visibility": "hidden"}),
                         dbc.Button("Run Analysis", id="raids-submit-btn", color="success", className="w-100 fw-bold")
                     ], width=6, md=3)
-                ], className="align-items-end g-3")
+                ], className="align-items-end g-3"),
+
+                # Heatmap Display Mode (only visible for heatmap)
+                html.Div(id="raids-heatmap-filters-container", style={"display": "none"}, children=[
+                    html.Hr(className="my-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("🗺️ Heatmap Display Mode", className="fw-bold"),
+                            dbc.RadioItems(
+                                id="raids-heatmap-display-mode",
+                                options=[
+                                    {"label": "Markers (Gyms)", "value": "markers"},
+                                    {"label": "Density Heatmap", "value": "density"},
+                                    {"label": "Grid Overlay", "value": "grid"}
+                                ],
+                                value="markers",
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-primary btn-sm",
+                                labelCheckedClassName="active"
+                            )
+                        ], width=12, md=6),
+                    ], className="g-3")
+                ])
             ])
         ], className="shadow-sm border-0 mb-4"),
 
@@ -299,7 +340,20 @@ def layout(area=None, **kwargs):
                 dbc.CardHeader("🛠️ Raw Data Inspector"),
                 dbc.CardBody(html.Pre(id="raids-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
-        ]))
+        ])),
+
+        # Heatmap Container (separate from stats container)
+        html.Div(id="raids-heatmap-container", style={"display": "none"}, children=[
+            dbc.Card([
+                dbc.CardHeader([
+                    html.Span("🗺️ Raid Heatmap", className="fw-bold"),
+                    html.Span(id="raids-heatmap-stats", className="ms-3 text-muted small")
+                ]),
+                dbc.CardBody([
+                    html.Div(id="raids-heatmap-map-container", style={"height": "600px", "backgroundColor": "#1a1a1a"})
+                ])
+            ], className="shadow-sm border-0 mb-4")
+        ])
     ])
 
 # Parsing Logic
@@ -375,17 +429,48 @@ def parse_data_to_df(data, mode, source):
 
 # Callbacks
 
+# Callback to combine both data source selectors into one value
 @callback(
-    [Output("raids-live-controls", "style"), Output("raids-historical-controls", "style"), Output("raids-interval-control-container", "style")],
-    Input("raids-data-source-selector", "value")
+    [Output("raids-combined-source-store", "data", allow_duplicate=True),
+     Output("raids-data-source-selector", "value", allow_duplicate=True),
+     Output("raids-data-source-sql-selector", "value", allow_duplicate=True)],
+    [Input("raids-data-source-selector", "value"),
+     Input("raids-data-source-sql-selector", "value")],
+    prevent_initial_call=True
 )
-def toggle_source(source):
-    if "live" in source: return {"display": "block"}, {"display": "none"}, {"display": "none"}
-    return {"display": "none"}, {"display": "block", "position": "relative", "zIndex": 1002}, {"display": "block"}
+def combine_data_sources(stats_val, sql_val):
+    trigger = ctx.triggered_id
+    if trigger == "raids-data-source-selector" and stats_val:
+        return stats_val, stats_val, None
+    elif trigger == "raids-data-source-sql-selector" and sql_val:
+        return sql_val, None, sql_val
+    return dash.no_update, dash.no_update, dash.no_update
+
+@callback(
+    [Output("raids-live-controls", "style"), Output("raids-historical-controls", "style"),
+     Output("raids-interval-control-container", "style"), Output("raids-heatmap-filters-container", "style")],
+    Input("raids-combined-source-store", "data")
+)
+def toggle_source_controls(source):
+    live_s = {"display": "none"}
+    hist_s = {"display": "none"}
+    int_s = {"display": "none"}
+    heat_s = {"display": "none"}
+
+    if source and "live" in source:
+        live_s = {"display": "block"}
+    elif source == "sql_heatmap":
+        hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
+        heat_s = {"display": "block"}
+    elif source == "historical":
+        hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
+        int_s = {"display": "block"}
+
+    return live_s, hist_s, int_s, heat_s
 
 @callback(
     [Output("raids-mode-selector", "options"), Output("raids-mode-selector", "value")],
-    Input("raids-data-source-selector", "value"),
+    Input("raids-combined-source-store", "data"),
     [State("raids-mode-persistence-store", "data"), State("raids-mode-selector", "value")]
 )
 def restrict_modes(source, stored_mode, current_ui_mode):
@@ -394,32 +479,50 @@ def restrict_modes(source, stored_mode, current_ui_mode):
         {"label": "Grouped (Table)", "value": "grouped"},
         {"label": "Sum (Totals)", "value": "sum"},
     ]
-    allowed_values = [o['value'] for o in full_options]
+    heatmap_options = [{"label": "Map View", "value": "map"}]
+
+    if source == "sql_heatmap":
+        allowed = heatmap_options
+    else:
+        allowed = full_options
+
+    allowed_values = [o['value'] for o in allowed]
     if current_ui_mode in allowed_values: final_value = current_ui_mode
     elif stored_mode in allowed_values: final_value = stored_mode
     else: final_value = allowed_values[0]
-    return full_options, final_value
+    return allowed, final_value
 
 @callback(Output("raids-mode-persistence-store", "data"), Input("raids-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
 
-@callback(Output("raids-source-persistence-store", "data"), Input("raids-data-source-selector", "value"), prevent_initial_call=True)
+@callback(Output("raids-source-persistence-store", "data"), Input("raids-combined-source-store", "data"), prevent_initial_call=True)
 def save_source(val): return val
 
 @callback(
-    Output("raids-data-source-selector", "value"),
+    [Output("raids-data-source-selector", "value"),
+     Output("raids-data-source-sql-selector", "value"),
+     Output("raids-combined-source-store", "data")],
     Input("raids-source-persistence-store", "modified_timestamp"),
     State("raids-source-persistence-store", "data"),
     prevent_initial_call=False
 )
 def load_persisted_source(ts, stored_source):
-    """Load persisted data source on page load."""
+    """Load persisted data source on page load and set appropriate selector."""
     if ts is not None and ts > 0:
         raise dash.exceptions.PreventUpdate
-    valid_sources = ["live", "historical"]
-    if stored_source in valid_sources:
-        return stored_source
-    return "live"
+
+    stats_sources = ["live", "historical"]
+    sql_sources = ["sql_heatmap"]
+
+    if stored_source in stats_sources:
+        return stored_source, None, stored_source
+    elif stored_source in sql_sources:
+        return None, stored_source, stored_source
+    # Default fallback
+    return "live", None, "live"
+
+@callback(Output("raids-heatmap-mode-store", "data"), Input("raids-heatmap-display-mode", "value"))
+def update_heatmap_mode_store(val): return val
 
 @callback(
     [Output("raids-area-modal", "is_open"), Output("raids-search-input", "style")],
@@ -445,27 +548,64 @@ dash.clientside_callback(
 )
 
 @callback(
-    [Output("raids-raw-data-store", "data"), Output("raids-stats-container", "style"), Output("raids-notification-area", "children")],
-    [Input("raids-submit-btn", "n_clicks"), Input("raids-data-source-selector", "value")],
-    [State("raids-area-selector", "value"), State("raids-live-time-input", "value"), State("raids-historical-date-picker", "start_date"), State("raids-historical-date-picker", "end_date"), State("raids-interval-selector", "value"), State("raids-mode-selector", "value")]
+    [Output("raids-raw-data-store", "data"), Output("raids-stats-container", "style"),
+     Output("raids-heatmap-data-store", "data"), Output("raids-heatmap-container", "style"),
+     Output("raids-heatmap-stats", "children"), Output("raids-notification-area", "children")],
+    [Input("raids-submit-btn", "n_clicks"), Input("raids-combined-source-store", "data")],
+    [State("raids-area-selector", "value"), State("raids-live-time-input", "value"),
+     State("raids-historical-date-picker", "start_date"), State("raids-historical-date-picker", "end_date"),
+     State("raids-interval-selector", "value"), State("raids-mode-selector", "value")]
 )
 def fetch_data(n, source, area, live_h, start, end, interval, mode):
-    if not n: return {}, {"display": "none"}, None
+    if not n:
+        return {}, {"display": "none"}, [], {"display": "none"}, "", None
     if not area:
-        return {}, {"display": "none"}, dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
+        return {}, {"display": "none"}, [], {"display": "none"}, "", dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
 
     try:
-        if source == "live":
+        if source == "sql_heatmap":
+            # SQL Heatmap - fetch raid data grouped by gym
+            logger.info(f"🔍 Starting Raid Heatmap Fetch for Area: {area}")
+            params = {
+                "start_time": f"{start}T00:00:00" if start else None,
+                "end_time": f"{end}T23:59:59" if end else None,
+                "area": area,
+                "response_format": "json"
+            }
+            raw_data = get_raids_stats("raid_sql_data", params)
+
+            if isinstance(raw_data, dict) and "data" in raw_data:
+                heatmap_list = raw_data.get("data", [])
+            elif isinstance(raw_data, list):
+                heatmap_list = raw_data
+            else:
+                heatmap_list = []
+
+            # Add icon URLs to each point
+            for point in heatmap_list:
+                pid = point.get("raid_pokemon", 0)
+                form = point.get("raid_form", 0)
+                point["icon_url"] = get_pokemon_icon_url(pid, form)
+
+            total_raids = sum(p.get("count", 0) for p in heatmap_list)
+            unique_gyms = len(set(p.get("gym_name", "") for p in heatmap_list))
+            stats_text = f"{unique_gyms:,} gyms • {total_raids:,} total raids"
+
+            logger.info(f"✅ Raid Heatmap: {len(heatmap_list)} data points, {unique_gyms} gyms, {total_raids} raids")
+            return {}, {"display": "none"}, heatmap_list, {"display": "block"}, stats_text, None
+
+        elif source == "live":
             hours = max(1, min(int(live_h or 1), 72))
             params = {"start_time": f"{hours} hours", "end_time": "now", "mode": mode, "area": area, "response_format": "json"}
             data = get_raids_stats("timeseries", params)
         else:
             params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
             data = get_raids_stats("counter", params)
-        return data, {"display": "block"}, None
+
+        return data, {"display": "block"}, [], {"display": "none"}, "", None
     except Exception as e:
         logger.info(f"Fetch error: {e}")
-        return {}, {"display": "none"}, dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
+        return {}, {"display": "none"}, [], {"display": "none"}, "", dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
 
 # Sorting
 @callback(
@@ -502,7 +642,7 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 @callback(
     [Output("raids-total-counts-display", "children"), Output("raids-main-visual-container", "children"), Output("raids-raw-data-display", "children"), Output("raids-total-pages-store", "data"), Output("raids-main-visual-container", "style")],
     [Input("raids-raw-data-store", "data"), Input("raids-search-input", "value"), Input("raids-table-sort-store", "data"), Input("raids-table-page-store", "data")],
-    [State("raids-mode-selector", "value"), State("raids-data-source-selector", "value")]
+    [State("raids-mode-selector", "value"), State("raids-combined-source-store", "data")]
 )
 def update_visuals(data, search_term, sort, page, mode, source):
     if not data: return [], html.Div(), "", 1, {"display": "block"}
@@ -653,3 +793,11 @@ def update_visuals(data, search_term, sort, page, mode, source):
         visual_content = dcc.Graph(figure=fig, id="raids-main-graph")
 
     return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "block"}
+
+# Clientside callback for raid heatmap rendering
+dash.clientside_callback(
+    ClientsideFunction(namespace='clientside', function_name='triggerRaidHeatmapRenderer'),
+    Output("raids-clientside-dummy-store", "data", allow_duplicate=True),
+    [Input("raids-heatmap-data-store", "data"), Input("raids-heatmap-mode-store", "data")],
+    prevent_initial_call=True
+)

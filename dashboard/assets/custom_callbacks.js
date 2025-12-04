@@ -16,7 +16,7 @@ window.dash_clientside.clientside = Object.assign({}, window.dash_clientside.cli
         return window.dash_clientside.no_update;
     },
 
-    // Fixed renderer trigger
+    // Fixed renderer trigger for Pokemon heatmap
     triggerHeatmapRenderer: function(data, blocklist, renderMode) {
         // Safety check if the renderer function is loaded
         if (!window.renderPokemonHeatmap) {
@@ -33,6 +33,24 @@ window.dash_clientside.clientside = Object.assign({}, window.dash_clientside.cli
 
         // Pass data directly to the renderer (filtering happens there now)
         window.renderPokemonHeatmap(data, blocklist || [], renderMode);
+        return window.dash_clientside.no_update;
+    },
+
+    // Raid heatmap renderer trigger
+    triggerRaidHeatmapRenderer: function(data, renderMode) {
+        // Safety check if the renderer function is loaded
+        if (!window.renderRaidHeatmap) {
+            console.warn("renderRaidHeatmap not found on window");
+            return window.dash_clientside.no_update;
+        }
+
+        // Safety check for data
+        if (!data || !Array.isArray(data)) {
+            window.renderRaidHeatmap([], renderMode);
+            return window.dash_clientside.no_update;
+        }
+
+        window.renderRaidHeatmap(data, renderMode);
         return window.dash_clientside.no_update;
     }
 });
