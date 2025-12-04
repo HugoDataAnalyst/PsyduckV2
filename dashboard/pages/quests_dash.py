@@ -236,7 +236,8 @@ def layout(area=None, **kwargs):
                             dcc.DatePickerRange(
                                 id="quests-historical-date-picker",
                                 start_date=date.today(), end_date=date.today(),
-                                className="d-block w-100"
+                                className="d-block w-100",
+                                persistence=True, persistence_type="local"
                             )
                         ])
                     ], width=6, md=3),

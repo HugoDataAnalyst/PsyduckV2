@@ -158,7 +158,7 @@ def layout(area=None, **kwargs):
                         ]),
                         html.Div(id="invasions-historical-controls", style={"display": "none"}, children=[
                             dbc.Label("📅 Date Range"),
-                            dcc.DatePickerRange(id="invasions-historical-date-picker", min_date_allowed=date(2023, 1, 1), max_date_allowed=date.today(), start_date=date.today(), end_date=date.today(), className="d-block w-100")
+                            dcc.DatePickerRange(id="invasions-historical-date-picker", min_date_allowed=date(2023, 1, 1), max_date_allowed=date.today(), start_date=date.today(), end_date=date.today(), className="d-block w-100", persistence=True, persistence_type="local")
                         ])
                     ], width=6, md=3),
 
