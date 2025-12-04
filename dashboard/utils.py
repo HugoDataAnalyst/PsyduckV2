@@ -57,7 +57,7 @@ def get_pokemon_stats(endpoint_type="counter", params=None):
     endpoint_type: 'counter' or 'timeseries' or 'tth_timeseries' or "sql_heatmap"
     """
     if params is None:
-            params = {}
+        params = {}
 
     if "area" not in params: params["area"] = "global"
     if "response_format" not in params: params["response_format"] = "json"
@@ -121,10 +121,10 @@ def get_raids_stats(endpoint_type="counter", params=None):
 def get_invasions_stats(endpoint_type="counter", params=None):
     """
     Generic fetcher for invasions stats.
-    endpoint_type: 'counter' or 'timeseries'
+    endpoint_type: 'counter' or 'timeseries' or 'invasion_sql_data'
     """
     if params is None:
-            params = {}
+        params = {}
 
     if "area" not in params: params["area"] = "global"
     if "response_format" not in params: params["response_format"] = "json"
@@ -132,6 +132,8 @@ def get_invasions_stats(endpoint_type="counter", params=None):
     # Determine endpoint based on type
     if endpoint_type == "counter":
         endpoint = "/api/redis/get_invasions_counterseries"
+    elif endpoint_type == "invasion_sql_data":
+        endpoint = "/api/sql/get_invasion_data"
     else:
         # Default standard timeseries
         endpoint = "/api/redis/get_invasion_timeseries"
@@ -154,7 +156,7 @@ def get_quests_stats(endpoint_type="counter", params=None):
     endpoint_type: 'counter' or 'timeseries'
     """
     if params is None:
-            params = {}
+        params = {}
 
     if "area" not in params: params["area"] = "global"
     if "response_format" not in params: params["response_format"] = "json"
