@@ -96,10 +96,10 @@ async def fetch_invasions_range(
     acc: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
     for rows in per_day_lists:
         for r in rows:
-            key = (str(r["pokestop"]), int(r["display_type"]), int(r["character"]))
+            key = (str(r["pokestop_name"]), int(r["display_type"]), int(r["character"]))
             if key not in acc:
                 acc[key] = {
-                    "pokestop": key[0],
+                    "pokestop_name": key[0],
                     "display_type": key[1],
                     "character": key[2],
                     "latitude": r.get("latitude"),

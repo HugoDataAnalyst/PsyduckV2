@@ -158,7 +158,7 @@ async def fetch_quests_pokemon_day(
 
     sql = f"""
         SELECT
-          qp.pokestop,
+          p.pokestop_name,
           qp.mode,
           qp.task_type,
           ANY_VALUE(p.latitude)  AS latitude,
@@ -205,9 +205,9 @@ async def fetch_quests_range(
     items_acc: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
     for rows in items_lists:
         for r in rows:
-            key = (str(r["pokestop"]), int(r["mode"]), int(r["task_type"]))
+            key = (str(r["pokestop_name"]), int(r["mode"]), int(r["task_type"]))
             items_acc.setdefault(key, {
-                "pokestop": key[0], "mode": key[1], "task_type": key[2],
+                "pokestop_name": key[0], "mode": key[1], "task_type": key[2],
                 "latitude": r.get("latitude"), "longitude": r.get("longitude"),
                 "count": 0,
             })["count"] += int(r.get("cnt", 0))
@@ -218,9 +218,9 @@ async def fetch_quests_range(
     mons_acc: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
     for rows in mons_lists:
         for r in rows:
-            key = (str(r["pokestop"]), int(r["mode"]), int(r["task_type"]))
+            key = (str(r["pokestop_name"]), int(r["mode"]), int(r["task_type"]))
             mons_acc.setdefault(key, {
-                "pokestop": key[0], "mode": key[1], "task_type": key[2],
+                "pokestop_name": key[0], "mode": key[1], "task_type": key[2],
                 "latitude": r.get("latitude"), "longitude": r.get("longitude"),
                 "count": 0,
             })["count"] += int(r.get("cnt", 0))

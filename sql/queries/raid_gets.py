@@ -103,10 +103,10 @@ async def fetch_raids_range(
     acc: Dict[Tuple[str, int, int, int], Dict[str, Any]] = {}
     for rows in per_day_lists:
         for r in rows:
-            key = (str(r["gym"]), int(r["raid_pokemon"]), int(r["raid_form"]), int(r["raid_level"]))
+            key = (str(r["gym_name"]), int(r["raid_pokemon"]), int(r["raid_form"]), int(r["raid_level"]))
             if key not in acc:
                 acc[key] = {
-                    "gym": key[0],
+                    "gym_name": key[0],
                     "raid_pokemon": key[1],
                     "raid_form": key[2],
                     "raid_level": key[3],
