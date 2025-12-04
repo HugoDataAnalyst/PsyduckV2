@@ -89,10 +89,10 @@ def get_pokemon_stats(endpoint_type="counter", params=None):
 def get_raids_stats(endpoint_type="counter", params=None):
     """
     Generic fetcher for raids stats.
-    endpoint_type: 'counter' or 'timeseries'
+    endpoint_type: 'counter' or 'timeseries' or 'raid_sql_data'
     """
     if params is None:
-            params = {}
+        params = {}
 
     if "area" not in params: params["area"] = "global"
     if "response_format" not in params: params["response_format"] = "json"
@@ -100,36 +100,8 @@ def get_raids_stats(endpoint_type="counter", params=None):
     # Determine endpoint based on type
     if endpoint_type == "counter":
         endpoint = "/api/redis/get_raids_counterseries"
-    else:
-        # Default standard timeseries
-        endpoint = "/api/redis/get_raid_timeseries"
-
-    try:
-        url = f"{API_BASE_URL}{endpoint}"
-        response = requests.get(url, headers=get_api_headers(), params=params)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict):
-                return data.get("data", data)
-            return data
-    except Exception as e:
-        logger.info(f"Error fetching raid stats: {e}")
-    return {}
-
-def get_raids_stats(endpoint_type="counter", params=None):
-    """
-    Generic fetcher for raids stats.
-    endpoint_type: 'counter' or 'timeseries'
-    """
-    if params is None:
-            params = {}
-
-    if "area" not in params: params["area"] = "global"
-    if "response_format" not in params: params["response_format"] = "json"
-
-    # Determine endpoint based on type
-    if endpoint_type == "counter":
-        endpoint = "/api/redis/get_raids_counterseries"
+    elif endpoint_type == "raid_sql_data":
+        endpoint = "/api/sql/get_raid_data"
     else:
         # Default standard timeseries
         endpoint = "/api/redis/get_raid_timeseries"
