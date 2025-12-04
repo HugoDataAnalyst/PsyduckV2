@@ -153,7 +153,7 @@ def get_invasions_stats(endpoint_type="counter", params=None):
 def get_quests_stats(endpoint_type="counter", params=None):
     """
     Generic fetcher for quests stats.
-    endpoint_type: 'counter' or 'timeseries'
+    endpoint_type: 'counter' or 'timeseries' or 'quest_sql_data'
     """
     if params is None:
         params = {}
@@ -164,6 +164,8 @@ def get_quests_stats(endpoint_type="counter", params=None):
     # Determine endpoint based on type
     if endpoint_type == "counter":
         endpoint = "/api/redis/get_quest_counterseries"
+    elif endpoint_type == "quest_sql_data":
+        endpoint = "/api/sql/get_quest_data"
     else:
         # Default standard timeseries
         endpoint = "/api/redis/get_quest_timeseries"
