@@ -133,13 +133,22 @@ def layout(area=None, **kwargs):
                     # Data Source
                     dbc.Col([
                         dbc.Label("Data Source", className="fw-bold"),
-                        html.Div(
-                            dbc.RadioItems(
-                                id="invasions-data-source-selector",
-                                options=[{"label": "Live (Real-time)", "value": "live"}, {"label": "Historical (Stats)", "value": "historical"}],
-                                value="live", inline=True, inputClassName="btn-check", labelClassName="btn btn-outline-secondary", labelCheckedClassName="active"
-                            ), className="mb-3"
-                        )
+                        html.Div([
+                            # Row 1: Stats (Live & Historical)
+                            html.Div([
+                                html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                dbc.RadioItems(
+                                    id="invasions-data-source-selector",
+                                    options=[
+                                        {"label": "Live", "value": "live"},
+                                        {"label": "Historical", "value": "historical"},
+                                    ],
+                                    value="live", inline=True, inputClassName="btn-check",
+                                    labelClassName="btn btn-outline-info btn-sm",
+                                    labelCheckedClassName="active"
+                                ),
+                            ], className="d-flex align-items-center"),
+                        ], className="mb-3")
                     ], width=12, md=6)
                 ], className="g-3"),
 
