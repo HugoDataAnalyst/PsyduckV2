@@ -509,12 +509,12 @@ dash.clientside_callback(
 @callback(
     [Output("invasions-quick-filter-grid", "children"), Output("invasions-quick-filter-count", "children")],
     [Input("invasions-heatmap-data-store", "data"),
-     Input("invasions-heatmap-hidden-grunts", "data"),
      Input("invasions-quick-filter-search", "value")],
-    [State("invasions-combined-source-store", "data")]
+    [State("invasions-combined-source-store", "data"),
+     State("invasions-heatmap-hidden-grunts", "data")]
 )
-def populate_invasions_quick_filter(heatmap_data, hidden_grunts, search_term, source):
-    """Populate grunt image grid for quick filtering"""
+def populate_invasions_quick_filter(heatmap_data, search_term, source, hidden_grunts):
+    """Populate grunt image grid for quick filtering - fluid search"""
     if source != "sql_heatmap" or not heatmap_data:
         return [], ""
 
@@ -579,6 +579,37 @@ def populate_invasions_quick_filter(heatmap_data, hidden_grunts, search_term, so
 
     return grunt_images, count_text
 
+# Clientside callback to update icon opacity without rebuilding the grid
+dash.clientside_callback(
+    """
+    function(hiddenGrunts) {
+        if (!hiddenGrunts) hiddenGrunts = [];
+        var hiddenSet = new Set(hiddenGrunts);
+
+        // Find the grid container and iterate its children
+        var grid = document.getElementById('invasions-quick-filter-grid');
+        if (!grid) return window.dash_clientside.no_update;
+
+        var icons = grid.children;
+        for (var i = 0; i < icons.length; i++) {
+            var icon = icons[i];
+            try {
+                var idObj = JSON.parse(icon.id);
+                if (idObj.type === 'invasions-quick-filter-icon') {
+                    var key = idObj.index;
+                    icon.style.opacity = hiddenSet.has(key) ? '0.3' : '1';
+                }
+            } catch(e) {}
+        }
+
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("invasions-quick-filter-grid", "className"),  # Dummy output
+    Input("invasions-heatmap-hidden-grunts", "data"),
+    prevent_initial_call=True
+)
+
 @callback(
     Output("invasions-heatmap-hidden-grunts", "data", allow_duplicate=True),
     [Input({"type": "invasions-quick-filter-icon", "index": ALL}, "n_clicks"),
@@ -606,8 +637,13 @@ def toggle_invasions_grunt_visibility(icon_clicks, show_clicks, hide_clicks, hid
             all_keys.add(str(char_id))
         return list(all_keys)
 
-    # Icon Click Logic
+    # Icon Click Logic - must verify an actual click occurred
     if isinstance(trigger, dict) and trigger.get('type') == 'invasions-quick-filter-icon':
+        # Check if any icon was actually clicked (n_clicks > 0)
+        # When grid rebuilds, all n_clicks are None or 0
+        if not icon_clicks or not any(c and c > 0 for c in icon_clicks):
+            return dash.no_update
+
         hidden_list = hidden_list or []
         clicked_key = trigger['index']
         if clicked_key in hidden_list:

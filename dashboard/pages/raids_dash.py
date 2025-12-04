@@ -560,12 +560,12 @@ def update_heatmap_mode_store(val): return val
 @callback(
     [Output("raids-quick-filter-grid", "children"), Output("raids-quick-filter-count", "children")],
     [Input("raids-heatmap-data-store", "data"),
-     Input("raids-heatmap-hidden-pokemon", "data"),
      Input("raids-quick-filter-search", "value")],
-    [State("raids-combined-source-store", "data")]
+    [State("raids-combined-source-store", "data"),
+     State("raids-heatmap-hidden-pokemon", "data")]
 )
-def populate_raids_quick_filter(heatmap_data, hidden_pokemon, search_term, source):
-    """Populate Pokemon image grid for quick filtering raid bosses"""
+def populate_raids_quick_filter(heatmap_data, search_term, source, hidden_pokemon):
+    """Populate Pokemon image grid for quick filtering raid bosses - fluid search"""
     if source != "sql_heatmap" or not heatmap_data:
         return [], ""
 
@@ -631,6 +631,37 @@ def populate_raids_quick_filter(heatmap_data, hidden_pokemon, search_term, sourc
 
     return pokemon_images, count_text
 
+# Clientside callback to update icon opacity without rebuilding the grid
+dash.clientside_callback(
+    """
+    function(hiddenPokemon) {
+        if (!hiddenPokemon) hiddenPokemon = [];
+        var hiddenSet = new Set(hiddenPokemon);
+
+        // Find the grid container and iterate its children
+        var grid = document.getElementById('raids-quick-filter-grid');
+        if (!grid) return window.dash_clientside.no_update;
+
+        var icons = grid.children;
+        for (var i = 0; i < icons.length; i++) {
+            var icon = icons[i];
+            try {
+                var idObj = JSON.parse(icon.id);
+                if (idObj.type === 'raids-quick-filter-icon') {
+                    var key = idObj.index;
+                    icon.style.opacity = hiddenSet.has(key) ? '0.3' : '1';
+                }
+            } catch(e) {}
+        }
+
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("raids-quick-filter-grid", "className"),  # Dummy output
+    Input("raids-heatmap-hidden-pokemon", "data"),
+    prevent_initial_call=True
+)
+
 @callback(
     Output("raids-heatmap-hidden-pokemon", "data", allow_duplicate=True),
     [Input({"type": "raids-quick-filter-icon", "index": ALL}, "n_clicks"),
@@ -659,8 +690,13 @@ def toggle_raids_pokemon_visibility(icon_clicks, show_clicks, hide_clicks, hidde
             all_keys.add(f"{pid}:{form}")
         return list(all_keys)
 
-    # Icon Click Logic
+    # Icon Click Logic - must verify an actual click occurred
     if isinstance(trigger, dict) and trigger.get('type') == 'raids-quick-filter-icon':
+        # Check if any icon was actually clicked (n_clicks > 0)
+        # When grid rebuilds, all n_clicks are None or 0
+        if not icon_clicks or not any(c and c > 0 for c in icon_clicks):
+            return dash.no_update
+
         hidden_list = hidden_list or []
         clicked_key = trigger['index']
         if clicked_key in hidden_list:
