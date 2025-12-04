@@ -52,5 +52,23 @@ window.dash_clientside.clientside = Object.assign({}, window.dash_clientside.cli
 
         window.renderRaidHeatmap(data, blocklist || [], renderMode);
         return window.dash_clientside.no_update;
+    },
+
+    // Invasion heatmap renderer trigger
+    triggerInvasionHeatmapRenderer: function(data, blocklist, renderMode) {
+        // Safety check if the renderer function is loaded
+        if (!window.renderInvasionHeatmap) {
+            console.warn("renderInvasionHeatmap not found on window");
+            return window.dash_clientside.no_update;
+        }
+
+        // Safety check for data
+        if (!data || !Array.isArray(data)) {
+            window.renderInvasionHeatmap([], [], renderMode);
+            return window.dash_clientside.no_update;
+        }
+
+        window.renderInvasionHeatmap(data, blocklist || [], renderMode);
+        return window.dash_clientside.no_update;
     }
 });
