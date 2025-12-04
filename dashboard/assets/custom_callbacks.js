@@ -37,7 +37,7 @@ window.dash_clientside.clientside = Object.assign({}, window.dash_clientside.cli
     },
 
     // Raid heatmap renderer trigger
-    triggerRaidHeatmapRenderer: function(data, renderMode) {
+    triggerRaidHeatmapRenderer: function(data, blocklist, renderMode) {
         // Safety check if the renderer function is loaded
         if (!window.renderRaidHeatmap) {
             console.warn("renderRaidHeatmap not found on window");
@@ -46,11 +46,11 @@ window.dash_clientside.clientside = Object.assign({}, window.dash_clientside.cli
 
         // Safety check for data
         if (!data || !Array.isArray(data)) {
-            window.renderRaidHeatmap([], renderMode);
+            window.renderRaidHeatmap([], [], renderMode);
             return window.dash_clientside.no_update;
         }
 
-        window.renderRaidHeatmap(data, renderMode);
+        window.renderRaidHeatmap(data, blocklist || [], renderMode);
         return window.dash_clientside.no_update;
     }
 });

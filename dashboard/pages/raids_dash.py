@@ -166,6 +166,7 @@ def layout(area=None, **kwargs):
         dcc.Store(id="raids-combined-source-store", data="live"),
         dcc.Store(id="raids-heatmap-data-store", data=[]),
         dcc.Store(id="raids-heatmap-mode-store", data="markers"),
+        dcc.Store(id="raids-heatmap-hidden-pokemon", data=[]),
 
         # Header
         dbc.Row([
@@ -344,15 +345,46 @@ def layout(area=None, **kwargs):
 
         # Heatmap Container (separate from stats container)
         html.Div(id="raids-heatmap-container", style={"display": "none"}, children=[
-            dbc.Card([
-                dbc.CardHeader([
-                    html.Span("🗺️ Raid Heatmap", className="fw-bold"),
-                    html.Span(id="raids-heatmap-stats", className="ms-3 text-muted small")
-                ]),
-                dbc.CardBody([
-                    html.Div(id="raids-heatmap-map-container", style={"height": "600px", "backgroundColor": "#1a1a1a"})
-                ])
-            ], className="shadow-sm border-0 mb-4")
+            dbc.Row([
+                # Left Column - Quick Filter
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Span("🎯 Raid Boss Filter", className="me-2"),
+                                    html.Span(id="raids-quick-filter-count", className="text-muted small")
+                                ], width="auto", className="d-flex align-items-center"),
+                                dbc.Col([
+                                    dbc.ButtonGroup([
+                                        dbc.Button("All", id="raids-quick-filter-show-all", title="Show All", size="sm", color="success", outline=True),
+                                        dbc.Button("None", id="raids-quick-filter-hide-all", title="Hide All", size="sm", color="danger", outline=True),
+                                    ], size="sm")
+                                ], width="auto")
+                            ], className="align-items-center justify-content-between g-0")
+                        ]),
+                        dbc.CardBody([
+                            dbc.Input(id="raids-quick-filter-search", placeholder="Search Pokemon...", size="sm", className="mb-2"),
+                            html.P("Click to hide/show Pokemon from map", className="text-muted small mb-2"),
+                            html.Div(id="raids-quick-filter-grid",
+                                     style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
+                        ])
+                    ], className="shadow-sm border-0 h-100")
+                ], width=12, lg=3, className="mb-4"),
+
+                # Right Column - Map
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.Span("🗺️ Raid Heatmap", className="fw-bold"),
+                            html.Span(id="raids-heatmap-stats", className="ms-3 text-muted small")
+                        ]),
+                        dbc.CardBody([
+                            html.Div(id="raids-heatmap-map-container", style={"height": "600px", "backgroundColor": "#1a1a1a"})
+                        ])
+                    ], className="shadow-sm border-0 h-100")
+                ], width=12, lg=9, className="mb-4")
+            ])
         ])
     ])
 
@@ -523,6 +555,131 @@ def load_persisted_source(ts, stored_source):
 
 @callback(Output("raids-heatmap-mode-store", "data"), Input("raids-heatmap-display-mode", "value"))
 def update_heatmap_mode_store(val): return val
+
+# Quick Filter Callbacks
+@callback(
+    [Output("raids-quick-filter-grid", "children"), Output("raids-quick-filter-count", "children")],
+    [Input("raids-heatmap-data-store", "data"),
+     Input("raids-heatmap-hidden-pokemon", "data"),
+     Input("raids-quick-filter-search", "value")],
+    [State("raids-combined-source-store", "data")]
+)
+def populate_raids_quick_filter(heatmap_data, hidden_pokemon, search_term, source):
+    """Populate Pokemon image grid for quick filtering raid bosses"""
+    if source != "sql_heatmap" or not heatmap_data:
+        return [], ""
+
+    # 1. Process Data - aggregate by Pokemon (not gym)
+    pokemon_set = {}
+    for record in heatmap_data:
+        pid = record.get('raid_pokemon')
+        form = record.get('raid_form') or 0
+        key = f"{pid}:{form}"
+        if key not in pokemon_set:
+            pokemon_set[key] = {
+                'pid': int(pid) if pid else 0,
+                'form': int(form) if form else 0,
+                'count': record.get('count', 0),
+                'icon_url': record.get('icon_url')
+            }
+        else:
+            pokemon_set[key]['count'] += record.get('count', 0)
+
+    # 2. Sort (by count descending, then ID)
+    sorted_pokemon = sorted(pokemon_set.items(), key=lambda x: (-x[1]['count'], x[1]['pid'], x[1]['form']))
+
+    # 3. Filter (Search)
+    search_lower = search_term.lower() if search_term else ""
+    filtered_list = []
+
+    for key, data in sorted_pokemon:
+        if search_lower:
+            name = resolve_pokemon_name(data['pid'], data['form']).lower()
+            if search_lower not in name:
+                continue
+        filtered_list.append((key, data))
+
+    # 4. Generate UI
+    hidden_set = set(hidden_pokemon or [])
+    pokemon_images = []
+
+    for key, data in filtered_list:
+        is_hidden = key in hidden_set
+        icon_url = data.get('icon_url') or get_pokemon_icon_url(data['pid'], data['form'])
+        pokemon_name = resolve_pokemon_name(data['pid'], data['form'])
+
+        style = {
+            "cursor": "pointer",
+            "borderRadius": "8px",
+            "padding": "4px",
+            "margin": "2px",
+            "backgroundColor": "#2a2a2a",
+            "opacity": "0.3" if is_hidden else "1",
+            "border": "2px solid transparent",
+            "transition": "all 0.2s"
+        }
+
+        pokemon_images.append(html.Div([
+            html.Img(src=icon_url,
+                    style={"width": "40px", "height": "40px", "display": "block"}),
+            html.Div(f"{data['count']}",
+                    style={"fontSize": "10px", "textAlign": "center", "marginTop": "2px", "color": "#aaa"})
+        ], id={"type": "raids-quick-filter-icon", "index": key}, style=style,
+           title=f"{pokemon_name}: {data['count']} raids"))
+
+    count_text = f"({len(filtered_list)}/{len(sorted_pokemon)})" if search_lower else f"({len(sorted_pokemon)})"
+
+    return pokemon_images, count_text
+
+@callback(
+    Output("raids-heatmap-hidden-pokemon", "data", allow_duplicate=True),
+    [Input({"type": "raids-quick-filter-icon", "index": ALL}, "n_clicks"),
+     Input("raids-quick-filter-show-all", "n_clicks"),
+     Input("raids-quick-filter-hide-all", "n_clicks")],
+    [State("raids-heatmap-hidden-pokemon", "data"),
+     State("raids-heatmap-data-store", "data")],
+    prevent_initial_call=True
+)
+def toggle_raids_pokemon_visibility(icon_clicks, show_clicks, hide_clicks, hidden_list, heatmap_data):
+    """Toggle Pokemon visibility in quick filter"""
+    trigger = ctx.triggered_id
+    if not trigger:
+        return dash.no_update
+
+    # Button Logic
+    if trigger == "raids-quick-filter-show-all":
+        return []
+
+    if trigger == "raids-quick-filter-hide-all":
+        if not heatmap_data: return []
+        all_keys = set()
+        for record in heatmap_data:
+            pid = record.get('raid_pokemon')
+            form = record.get('raid_form') or 0
+            all_keys.add(f"{pid}:{form}")
+        return list(all_keys)
+
+    # Icon Click Logic
+    if isinstance(trigger, dict) and trigger.get('type') == 'raids-quick-filter-icon':
+        hidden_list = hidden_list or []
+        clicked_key = trigger['index']
+        if clicked_key in hidden_list:
+            return [k for k in hidden_list if k != clicked_key]
+        else:
+            return hidden_list + [clicked_key]
+
+    return dash.no_update
+
+@callback(
+    Output("raids-heatmap-hidden-pokemon", "data", allow_duplicate=True),
+    Input("raids-heatmap-data-store", "data"),
+    prevent_initial_call=True
+)
+def reset_raids_hidden_pokemon_on_new_data(heatmap_data):
+    """Reset hidden Pokemon list when new heatmap data arrives"""
+    if heatmap_data:
+        return []
+    return dash.no_update
 
 @callback(
     [Output("raids-area-modal", "is_open"), Output("raids-search-input", "style")],
@@ -798,6 +955,8 @@ def update_visuals(data, search_term, sort, page, mode, source):
 dash.clientside_callback(
     ClientsideFunction(namespace='clientside', function_name='triggerRaidHeatmapRenderer'),
     Output("raids-clientside-dummy-store", "data", allow_duplicate=True),
-    [Input("raids-heatmap-data-store", "data"), Input("raids-heatmap-mode-store", "data")],
+    [Input("raids-heatmap-data-store", "data"),
+     Input("raids-heatmap-hidden-pokemon", "data"),
+     Input("raids-heatmap-mode-store", "data")],
     prevent_initial_call=True
 )

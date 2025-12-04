@@ -18,13 +18,20 @@
     // Get raid level color
     function getRaidLevelColor(level) {
         var lvl = String(level);
-        if (lvl === "1") return "#e0e0e0";
-        if (lvl === "3") return "#f0ad4e";
-        if (lvl === "5") return "#dc3545";
-        if (lvl === "6") return "#a020f0";
-        if (lvl === "7") return "#7fce83";
-        if (lvl === "8") return "#e881f1";
-        // Shadow raids (1xxx, 2xxx, 3xxx)
+        if (lvl === "1") return "#f0ad4e";  // Orange (more visible than gray)
+        if (lvl === "3") return "#f0ad4e";  // Orange
+        if (lvl === "5") return "#dc3545";  // Red (Legendary)
+        if (lvl === "6") return "#a020f0";  // Purple (Mega)
+        if (lvl === "7") return "#7fce83";  // Greenish (Mega 5)
+        if (lvl === "8") return "#e881f1";  // Pinkish (Ultra Beast)
+        if (lvl === "9") return "#ce2c2c";  // Dark Red (Extended Egg)
+        if (lvl === "10") return "#ad5b2c"; // Brown/Orange (Primal)
+        if (lvl === "11") return "#0a0a0a"; // Shadow Level 1
+        if (lvl === "12") return "#0a0a0a"; // Shadow Level 2
+        if (lvl === "13") return "#0a0a0a"; // Shadow Level 3
+        if (lvl === "14") return "#0a0a0a"; // Shadow Level 4
+        if (lvl === "15") return "#0a0a0a"; // Shadow Level 5
+        // Legacy shadow raids (1xxx, 2xxx, 3xxx)
         if (lvl.length === 4) {
             var base = lvl.charAt(0);
             if (base === "1") return "#4a3070";
@@ -43,6 +50,14 @@
         if (lvl === "6") return "Mega";
         if (lvl === "7") return "Mega 5★";
         if (lvl === "8") return "Ultra Beast";
+        if (lvl === "9") return "Extended";
+        if (lvl === "10") return "Primal";
+        if (lvl === "11") return "Shadow ★";
+        if (lvl === "12") return "Shadow ★★";
+        if (lvl === "13") return "Shadow ★★★";
+        if (lvl === "14") return "Shadow ★★★★";
+        if (lvl === "15") return "Shadow ★★★★★";
+        // Legacy shadow raids (1xxx, 2xxx, 3xxx)
         if (lvl.length === 4) {
             var base = lvl.charAt(0);
             if (base === "1") return "Shadow ★";
@@ -86,7 +101,7 @@
     }
 
     // MAIN RENDER FUNCTION
-    function renderRaidHeatmap(data, renderMode) {
+    function renderRaidHeatmap(data, blocklist, renderMode) {
         var container = document.getElementById('raids-heatmap-map-container');
         if (!container) return;
 
@@ -114,11 +129,28 @@
                 return;
             }
 
+            // Filter by blocklist (hidden Pokemon)
+            var filteredData = data;
+            if (blocklist && blocklist.length > 0) {
+                var blockedSet = new Set(blocklist);
+                filteredData = data.filter(function(p) {
+                    var key = p.raid_pokemon + ":" + (p.raid_form || 0);
+                    return !blockedSet.has(key);
+                });
+            }
+
+            if (filteredData.length === 0) {
+                if (mapInstance) mapInstance.remove();
+                mapInstance = null;
+                container.innerHTML = '<div style="color: #aaa; text-align: center; padding: 20px;">All raid bosses filtered out. Use the filter to show some Pokemon.</div>';
+                return;
+            }
+
             // MAP INITIALIZATION
             var minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
-            for (var i = 0; i < data.length; i++) {
-                var lat = data[i].latitude;
-                var lon = data[i].longitude;
+            for (var i = 0; i < filteredData.length; i++) {
+                var lat = filteredData[i].latitude;
+                var lon = filteredData[i].longitude;
                 if (lat < minLat) minLat = lat;
                 if (lat > maxLat) maxLat = lat;
                 if (lon < minLon) minLon = lon;
@@ -149,16 +181,16 @@
                 }
 
                 var maxSingleCount = 0;
-                for (var i = 0; i < data.length; i++) {
-                    if (data[i].count > maxSingleCount) maxSingleCount = data[i].count;
+                for (var i = 0; i < filteredData.length; i++) {
+                    if (filteredData[i].count > maxSingleCount) maxSingleCount = filteredData[i].count;
                 }
                 if (maxSingleCount === 0) maxSingleCount = 1;
 
-                var heatPoints = data.map(function(p) {
+                var heatPoints = filteredData.map(function(p) {
                     return [p.latitude, p.longitude, p.count / maxSingleCount];
                 });
 
-                var datasetSize = data.length;
+                var datasetSize = filteredData.length;
                 var saturationThreshold = 1.0;
                 if (datasetSize > 15000) saturationThreshold = 8.0;
                 else if (datasetSize > 5000) saturationThreshold = 5.0;
@@ -186,7 +218,7 @@
                 var grid = {};
                 var maxGridCount = 0;
 
-                data.forEach(function(p) {
+                filteredData.forEach(function(p) {
                     var latKey = Math.floor(p.latitude / step);
                     var lonKey = Math.floor(p.longitude / step);
                     var key = latKey + "_" + lonKey;
@@ -289,7 +321,7 @@
 
                 // Group by gym
                 var grouped = {};
-                data.forEach(function(p) {
+                filteredData.forEach(function(p) {
                     var key = p.gym_name || (p.latitude + "," + p.longitude);
                     if (!grouped[key]) {
                         grouped[key] = {
