@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timedelta
 from typing import final
 from my_redis.connect_redis import RedisManager
@@ -7,11 +6,6 @@ from my_redis.utils import filtering_keys
 from my_redis.utils.counter_transformer import CounterTransformer
 
 redis_manager = RedisManager()
-
-# Configuration
-USE_SCAN_INSTEAD_OF_KEYS = True  # Use SCAN (non-blocking) instead of KEYS (blocking)
-CONCURRENT_BATCH_SIZE = 500  # Batch size for concurrent operations
-
 
 class PokemonCounterRetrieval(CounterTransformer):
     def __init__(
@@ -43,16 +37,6 @@ class PokemonCounterRetrieval(CounterTransformer):
         self.pokemon_ids = _norm(pokemon_id)
         self.forms       = _norm(form)
         self.metrics     = _norm(metric)
-
-    async def _get_keys(self, client, pattern: str) -> list:
-        """
-        Get keys matching pattern using either SCAN (non-blocking) or KEYS.
-        SCAN is preferred for production as it doesn't block Redis.
-        """
-        if USE_SCAN_INSTEAD_OF_KEYS:
-            return await filtering_keys.scan_keys(client, pattern)
-        else:
-            return await client.keys(pattern)
 
     def _filter_aggregated_data(self, raw_data: dict) -> dict:
         """
@@ -149,12 +133,10 @@ class PokemonCounterRetrieval(CounterTransformer):
             pattern = "counter:pokemon_hourly:*"
         else:
             pattern = f"counter:pokemon_hourly:{self.area}:*"
-
-        keys = await self._get_keys(client, pattern)
+        keys = await client.keys(pattern)
         keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
-
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
         # Apply filtering by pokemon_id and form
         raw_aggregated = self._filter_aggregated_data(raw_aggregated)
@@ -187,8 +169,7 @@ class PokemonCounterRetrieval(CounterTransformer):
             pattern = "counter:pokemon_total:*"
         else:
             pattern = f"counter:pokemon_total:{self.area}:*"
-
-        keys = await self._get_keys(client, pattern)
+        keys = await client.keys(pattern)
         keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
@@ -221,7 +202,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         else:
             pattern = f"counter:tth_pokemon_hourly:{self.area}:*"
 
-        keys = await self._get_keys(client, pattern)
+        keys = await client.keys(pattern)
         keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
@@ -258,7 +239,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         else:
             pattern = f"counter:tth_pokemon:{self.area}:*"
 
-        keys = await self._get_keys(client, pattern)
+        keys = await client.keys(pattern)
         keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
@@ -268,19 +249,17 @@ class PokemonCounterRetrieval(CounterTransformer):
         final_data = self._filter_tth_data(final_data)
         return {"mode": self.mode, "data": final_data}
 
-    # --- Retrieval function for Weather (monthly) - OPTIMIZED ---
+    # --- Retrieval function for Weather (monthly) ---
 
     async def retrieve_weather_monthly(self) -> dict:
         """
-        Retrieve monthly weather counters CONCURRENTLY.
+        Retrieve monthly weather counters.
         Key format: "counter:pokemon_weather_iv:{area}:{YYYYMM}:{weather_boost}"
 
         In "sum" mode, for each weather boost flag (0 or 1) the function sums all IV bucket counts.
         In "grouped" mode, it groups keys by month and weather boost and sums the fields.
 
         Returns a dictionary with aggregated data.
-
-        OPTIMIZED: Uses pipeline/concurrent fetching instead of sequential.
         """
         time_format = "%Y%m"
         client = await redis_manager.check_redis_connection()
@@ -291,30 +270,23 @@ class PokemonCounterRetrieval(CounterTransformer):
         pattern = "counter:pokemon_weather_iv:*" if self.area.lower() in ["global", "all"] \
                   else f"counter:pokemon_weather_iv:{self.area}:*"
 
-        keys = await self._get_keys(client, pattern)
+        keys = await client.keys(pattern)
         keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end, component_index=-2)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
-        # Pre-filter keys by weather boost metric if specified
-        if self.metrics is not None:
-            keys = [k for k in keys if k.split(":")[-1] in self.metrics]
-
-        if not keys:
-            return {"mode": self.mode, "data": {}}
-
-        # Fetch all data concurrently using pipeline
-        all_data = await filtering_keys._fetch_keys_pipeline(client, keys)
-
         if self.mode == "sum":
             aggregated = {}
-            for key, data in all_data.items():
+            for key in keys:
                 parts = key.split(":")
                 if len(parts) < 5:
                     continue
                 weather_boost = parts[-1]  # "0".."9"
+                # filter by selected weather flags
+                if self.metrics is not None and weather_boost not in self.metrics:
+                    continue
 
-                # Convert to int and filter fields
+                data = await client.hgetall(key)
                 data = {k: int(v) for k, v in data.items()}
                 data = self._filter_weather_fields(data)
 
@@ -326,16 +298,17 @@ class PokemonCounterRetrieval(CounterTransformer):
 
         elif self.mode == "grouped":
             grouped = {}
-            for key, data in all_data.items():
+            for key in keys:
                 parts = key.split(":")
                 if len(parts) < 5:
                     continue
                 month = parts[-2]
                 weather_boost = parts[-1]
+                if self.metrics is not None and weather_boost not in self.metrics:
+                    continue
 
                 composite_key = f"{month}:{weather_boost}"
-
-                # Convert to int and filter fields
+                data = await client.hgetall(key)
                 data = {k: int(v) for k, v in data.items()}
                 data = self._filter_weather_fields(data)
 
@@ -344,5 +317,3 @@ class PokemonCounterRetrieval(CounterTransformer):
                 for field, value in data.items():
                     grouped[composite_key][field] = grouped[composite_key].get(field, 0) + value
             return {"mode": "grouped", "data": grouped}
-
-        return {"mode": self.mode, "data": {}}
