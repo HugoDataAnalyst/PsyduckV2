@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 from typing import Optional
@@ -9,32 +10,148 @@ from server_fastapi import global_state
 
 redis_manager = RedisManager()
 
+# Configuration for concurrent fetching
+CONCURRENT_BATCH_SIZE = 500  # Number of concurrent hgetall calls per batch
+USE_PIPELINE = True  # Use Redis pipeline for even faster fetching
+
+
 async def aggregate_keys(keys: list, mode: str) -> dict:
     """
-    Aggregates hash data from a list of keys.
+    Aggregates hash data from a list of keys CONCURRENTLY.
     For "sum" mode, sums all field values (assuming integer values).
     For "grouped" mode, returns a dictionary mapping each key to its hash data.
+
+    Uses asyncio.gather for concurrent fetching instead of sequential awaits.
     """
     client = await redis_manager.check_redis_connection()
     if not client:
         logger.error("❌ Retrieval pool connection not available")
         return {"mode": mode, "data": {}}
 
+    if not keys:
+        return {}
+
+    # Fetch all keys concurrently using pipeline or gather
+    if USE_PIPELINE:
+        all_data = await _fetch_keys_pipeline(client, keys)
+    else:
+        all_data = await _fetch_keys_concurrent(client, keys)
+
+    # Process the fetched data
     aggregated = {}
-    for key in keys:
-        data = await client.hgetall(key)
-        logger.debug(f"🔑 Aggregating key: {key} with data: {data}")
-        if mode == "sum":
+
+    if mode == "sum":
+        for key, data in all_data.items():
             for field, value in data.items():
                 try:
                     value = int(value)
                 except Exception:
                     value = 0
                 aggregated[field] = aggregated.get(field, 0) + value
-        elif mode in ["grouped", "surged"]:
+    elif mode in ["grouped", "surged"]:
+        for key, data in all_data.items():
             aggregated[key] = {k: int(v) for k, v in data.items()}
-    logger.debug(f"✅ Mode:{mode} Aggregation complete. Aggregated data: {aggregated}")
+
+    logger.debug(f"✅ Mode:{mode} Aggregation complete. Keys processed: {len(keys)}")
     return aggregated
+
+
+async def _fetch_keys_pipeline(client, keys: list) -> dict:
+    """
+    Fetch multiple keys using Redis pipeline for maximum efficiency.
+    Pipeline batches all commands and sends them in one network round-trip.
+    """
+    if not keys:
+        return {}
+
+    result = {}
+
+    # Process in batches to avoid memory issues with huge key lists
+    for i in range(0, len(keys), CONCURRENT_BATCH_SIZE):
+        batch_keys = keys[i:i + CONCURRENT_BATCH_SIZE]
+
+        # Create pipeline
+        pipe = client.pipeline(transaction=False)  # No transaction for better performance
+
+        for key in batch_keys:
+            pipe.hgetall(key)
+
+        # Execute pipeline - single network round trip for all commands
+        responses = await pipe.execute()
+
+        # Map responses back to keys
+        for key, data in zip(batch_keys, responses):
+            if data:  # Skip empty hashes
+                result[key] = data
+
+    logger.debug(f"✅ Pipeline fetch complete. Fetched {len(result)} keys with data")
+    return result
+
+
+async def _fetch_keys_concurrent(client, keys: list) -> dict:
+    """
+    Fetch multiple keys concurrently using asyncio.gather.
+    Falls back option if pipeline isn't available.
+    """
+    if not keys:
+        return {}
+
+    result = {}
+
+    async def fetch_single(key):
+        """Fetch a single key and return (key, data) tuple"""
+        try:
+            data = await client.hgetall(key)
+            return (key, data)
+        except Exception as e:
+            logger.warning(f"⚠️ Error fetching key {key}: {e}")
+            return (key, {})
+
+    # Process in batches to avoid overwhelming Redis
+    for i in range(0, len(keys), CONCURRENT_BATCH_SIZE):
+        batch_keys = keys[i:i + CONCURRENT_BATCH_SIZE]
+
+        # Fetch batch concurrently
+        tasks = [fetch_single(key) for key in batch_keys]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results
+        for item in batch_results:
+            if isinstance(item, Exception):
+                logger.warning(f"⚠️ Batch fetch exception: {item}")
+                continue
+            key, data = item
+            if data:  # Skip empty hashes
+                result[key] = data
+
+    logger.debug(f"✅ Concurrent fetch complete. Fetched {len(result)} keys with data")
+    return result
+
+
+async def scan_keys(client, pattern: str, count: int = 1000) -> list:
+    """
+    Use SCAN instead of KEYS for non-blocking key retrieval.
+    SCAN is cursor-based and doesn't block Redis.
+
+    Args:
+        client: Redis client
+        pattern: Key pattern to match
+        count: Hint for how many keys to return per iteration
+
+    Returns:
+        List of matching keys
+    """
+    keys = []
+    cursor = 0
+
+    while True:
+        cursor, batch = await client.scan(cursor=cursor, match=pattern, count=count)
+        keys.extend(batch)
+        if cursor == 0:
+            break
+
+    logger.debug(f"✅ SCAN complete. Found {len(keys)} keys matching pattern: {pattern}")
+    return keys
 
 def filter_keys_by_time(keys: list, time_format: str, start: datetime, end: datetime, component_index: int = -1) -> list:
     """
