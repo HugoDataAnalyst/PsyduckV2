@@ -7,6 +7,7 @@ from dashboard.tasks.global_pokemons import start_background_task as start_pokem
 from dashboard.tasks.global_raids import start_background_task_raids as start_raids_task
 from dashboard.tasks.global_invasions import start_background_task_invasions as start_invasions_task
 from dashboard.tasks.global_quests import start_background_task_quests as start_quests_task
+from dashboard.tasks.global_tasks import start_background_tasks
 from dashboard.utils import precache_pokemon_icons
 import config as AppConfig
 
@@ -34,9 +35,10 @@ if __name__ == "__main__":
         precache_pokemon_icons(max_workers=20)
 
         logger.info("✅ Starting Background Tasks...")
-        start_pokemon_task()
-        start_raids_task()
-        start_invasions_task()
-        start_quests_task()
+        start_background_tasks()
+        #start_pokemon_task()
+        #start_raids_task()
+        #start_invasions_task()
+        #start_quests_task()
 
     app.run(debug=DEBUG_MODE, port=f"{AppConfig.dashboard_port}", host=f"{AppConfig.dashboard_ip}")

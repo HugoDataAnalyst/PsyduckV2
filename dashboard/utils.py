@@ -5,7 +5,9 @@ import config as AppConfig
 from urllib.parse import quote
 import json
 import os
+import time
 from pathlib import Path
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.logger import logger
 
@@ -85,6 +87,7 @@ def get_pokemon_stats(endpoint_type="counter", params=None):
     except Exception as e:
         logger.info(f"Error fetching stats: {e}")
     return {}
+
 
 def get_raids_stats(endpoint_type="counter", params=None):
     """
@@ -503,3 +506,323 @@ def create_geofence_figure(geofence_data):
     except Exception as e:
         logger.info(f"Error creating figure for {name}: {e}")
         return go.Figure()
+
+# Global Tasks Functions.
+def get_global_pokemon_task(endpoint_type="counter", params=None):
+    """
+    Hybrid Function:
+    1. If params=None: Acts as Background Task (fetches global totals -> aggregates -> returns summary).
+    2. If params provided: Acts as Generic Fetcher (fetches endpoint -> returns raw data).
+    """
+
+    # Setup Defaults for Background Task if needed
+    if params is None:
+        params = {
+            "counter_type": "totals",
+            "area": "global",
+            "start_time": "24 hours",
+            "end_time": "now",
+            "mode": "sum",
+            "interval": "hourly",
+            "metric": "all",
+            "pokemon_id": "all",
+            "form_id": "all",
+            "response_format": "json"
+        }
+
+    if "area" not in params: params["area"] = "global"
+    if "response_format" not in params: params["response_format"] = "json"
+
+    # Determine Endpoint
+    if endpoint_type == "counter":
+        endpoint = "/api/redis/get_pokemon_counterseries"
+    elif endpoint_type == "tth_timeseries":
+        endpoint = "/api/redis/get_pokemon_tth_timeseries"
+    elif endpoint_type == "sql_heatmap":
+        endpoint = "/api/sql/get_pokemon_heatmap_data"
+    elif endpoint_type == "sql_shiny_rate":
+        endpoint = "/api/sql/get_shiny_rate_data"
+    else:
+        # Default standard timeseries
+        endpoint = "/api/redis/get_pokemon_timeseries"
+
+    # Execute Request
+    try:
+        url = f"{API_BASE_URL}{endpoint}"
+        response = requests.get(url, headers=get_api_headers(), params=params)
+
+        if response.status_code != 200:
+            logger.info(f"Error fetching global pokemon: HTTP {response.status_code}")
+            return None
+
+        raw_data = response.json()
+        if isinstance(raw_data, dict) and "data" in raw_data:
+            raw_data = raw_data.get("data", {})
+
+        if not raw_data:
+            return None
+
+        # Perform specific aggregation
+        if endpoint_type == "counter":
+            aggregated = defaultdict(int)
+            for area_name, content in raw_data.items():
+                if not isinstance(content, dict): continue
+                stats = content.get('data', {})
+                if not stats: continue
+                for key, value in stats.items():
+                    if isinstance(value, (int, float)):
+                        aggregated[key] += value
+
+            final_data = dict(aggregated)
+            final_data['last_updated'] = time.time()
+            return final_data
+
+        # Otherwise, return raw data
+        return raw_data
+
+    except Exception as e:
+        logger.error(f"Error in get_global_pokemon_task: {e}")
+        return None
+
+
+def get_global_raids_task(endpoint_type="counter", params=None):
+    """
+    Hybrid Function: Background Task (defaults) OR Generic Fetcher.
+    """
+
+    if params is None:
+        params = {
+            "counter_type": "totals",
+            "area": "global",
+            "start_time": "24 hours",
+            "end_time": "now",
+            "mode": "sum",
+            "interval": "hourly",
+            "raid_pokemon": "all",
+            "raid_form": "all",
+            "raid_level": "all",
+            "response_format": "json"
+        }
+
+    if "area" not in params: params["area"] = "global"
+    if "response_format" not in params: params["response_format"] = "json"
+
+    # Determine endpoint
+    if endpoint_type == "counter":
+        endpoint = "/api/redis/get_raids_counterseries"
+    elif endpoint_type == "raid_sql_data":
+        endpoint = "/api/sql/get_raid_data"
+    else:
+        # Default standard timeseries
+        endpoint = "/api/redis/get_raid_timeseries"
+
+    try:
+        url = f"{API_BASE_URL}{endpoint}"
+        response = requests.get(url, headers=get_api_headers(), params=params)
+
+        if response.status_code != 200:
+            logger.info(f"Error fetching global raids: HTTP {response.status_code}")
+            return None
+
+        raw_data = response.json()
+        if isinstance(raw_data, dict) and "data" in raw_data:
+            raw_data = raw_data.get("data", {})
+
+        if not raw_data:
+            return None
+
+        # Background Task Aggregation
+        if endpoint_type == "counter":
+            total_raids = 0
+            raid_levels_agg = defaultdict(int)
+
+            for area_name, content in raw_data.items():
+                if not isinstance(content, dict): continue
+                stats = content.get('data', {})
+                if not stats: continue
+
+                total_raids += stats.get('total', 0)
+                raid_levels = stats.get('raid_level', {})
+                if isinstance(raid_levels, dict):
+                    for level, count in raid_levels.items():
+                        raid_levels_agg[str(level)] += count
+
+            final_data = {
+                "total": total_raids,
+                "raid_level": dict(raid_levels_agg),
+                "last_updated": time.time()
+            }
+            return final_data
+
+        # Generic Return
+        return raw_data
+
+    except Exception as e:
+        logger.error(f"Error in get_global_raids_task: {e}")
+        return None
+
+
+def get_global_invasions_task(endpoint_type="counter", params=None):
+    """
+    Hybrid Function: Background Task (defaults) OR Generic Fetcher.
+    """
+
+    if params is None:
+        params = {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": "24 hours",
+            "end_time": "now",
+            "mode": "sum",
+            "response_format": "json",
+            "area": "global",
+            "display_type": "all",
+            "character": "all",
+            "grunt": "all",
+            "confirmed": "all"
+        }
+
+    if "area" not in params: params["area"] = "global"
+    if "response_format" not in params: params["response_format"] = "json"
+
+    # Determine endpoint
+    if endpoint_type == "counter":
+        endpoint = "/api/redis/get_invasions_counterseries"
+    elif endpoint_type == "invasion_sql_data":
+        endpoint = "/api/sql/get_invasion_data"
+    else:
+        # Default standard timeseries
+        endpoint = "/api/redis/get_invasion_timeseries"
+
+    try:
+        url = f"{API_BASE_URL}{endpoint}"
+        response = requests.get(url, headers=get_api_headers(), params=params)
+
+        if response.status_code != 200:
+            logger.info(f"Error fetching global invasions: HTTP {response.status_code}")
+            return None
+
+        raw_data = response.json()
+        if isinstance(raw_data, dict) and "data" in raw_data:
+            raw_data = raw_data.get("data", {})
+
+        if not raw_data:
+            return None
+
+        # Background Task Aggregation
+        if endpoint_type == "counter":
+            total_invasions = 0
+            confirmed_count = 0
+            unconfirmed_count = 0
+
+            for area_name, content in raw_data.items():
+                if not isinstance(content, dict): continue
+                stats = content.get('data', {})
+                if not stats: continue
+
+                total_invasions += stats.get('total', 0)
+                confirmed_data = stats.get('confirmed', {})
+                if isinstance(confirmed_data, dict):
+                    confirmed_count += confirmed_data.get('1', 0)
+                    unconfirmed_count += confirmed_data.get('0', 0)
+
+            final_data = {
+                "total": total_invasions,
+                "stats": {
+                    "confirmed": confirmed_count,
+                    "unconfirmed": unconfirmed_count
+                },
+                "last_updated": time.time()
+            }
+            return final_data
+
+        # Generic Return
+        return raw_data
+
+    except Exception as e:
+        logger.error(f"Error in get_global_invasions_task: {e}")
+        return None
+
+
+def get_global_quests_task(endpoint_type="counter", params=None):
+    """
+    Hybrid Function: Background Task (defaults) OR Generic Fetcher.
+    """
+
+    if params is None:
+        params = {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": "24 hours",
+            "end_time": "now",
+            "mode": "sum",
+            "response_format": "json",
+            "area": "global",
+            "with_ar": "all", "ar_type": "all", "reward_ar_type": "all",
+            "reward_ar_item_id": "all", "reward_ar_item_amount": "all",
+            "reward_ar_poke_id": "all", "reward_ar_poke_form": "all",
+            "normal_type": "all", "reward_normal_type": "all",
+            "reward_normal_item_id": "all", "reward_normal_item_amount": "all",
+            "reward_normal_poke_id": "all", "reward_normal_poke_form": "all"
+        }
+
+    if "area" not in params: params["area"] = "global"
+    if "response_format" not in params: params["response_format"] = "json"
+
+    # Determine endpoint
+    if endpoint_type == "counter":
+        endpoint = "/api/redis/get_quest_counterseries"
+    elif endpoint_type == "quest_sql_data":
+        endpoint = "/api/sql/get_quest_data"
+    else:
+        # Default standard timeseries
+        endpoint = "/api/redis/get_quest_timeseries"
+
+    try:
+        url = f"{API_BASE_URL}{endpoint}"
+        response = requests.get(url, headers=get_api_headers(), params=params)
+
+        if response.status_code != 200:
+            logger.info(f"Error fetching global quests: HTTP {response.status_code}")
+            return None
+
+        raw_data = response.json()
+        if isinstance(raw_data, dict) and "data" in raw_data:
+            raw_data = raw_data.get("data", {})
+
+        if not raw_data:
+            return None
+
+        # Background Task Aggregation
+        if endpoint_type == "counter":
+            total_scanned_stops = 0
+            total_ar_quests = 0
+            total_normal_quests = 0
+
+            for area_name, content in raw_data.items():
+                if not isinstance(content, dict): continue
+                stats = content.get('data', {})
+                if not stats: continue
+
+                total_scanned_stops += stats.get('total', 0)
+                quest_modes = stats.get('quest_mode', {})
+                if isinstance(quest_modes, dict):
+                    total_ar_quests += quest_modes.get('ar', 0)
+                    total_normal_quests += quest_modes.get('normal', 0)
+
+            final_data = {
+                "total_stops": total_scanned_stops,
+                "quests": {
+                    "ar": total_ar_quests,
+                    "normal": total_normal_quests
+                },
+                "last_updated": time.time()
+            }
+            return final_data
+
+        # Generic Return
+        return raw_data
+
+    except Exception as e:
+        logger.error(f"Error in get_global_quests_task: {e}")
+        return None
