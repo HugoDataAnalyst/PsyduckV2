@@ -1,4 +1,3 @@
-import asyncio
 from urllib import response
 import config as AppConfig
 from datetime import datetime
@@ -9,7 +8,6 @@ from sql.utils.area_parser import resolve_area_id_by_name
 from server_fastapi import global_state
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, dependencies
 from typing import Optional
-from utils.timer import time_execution
 from my_redis.utils import filtering_keys
 from my_redis.queries.gets.pokemons.pokemon_counter_retrieval import PokemonCounterRetrieval
 from my_redis.queries.gets.raids.raid_counter_retrieval import RaidCounterRetrieval
@@ -131,7 +129,6 @@ async def get_cached_geofences(
     tags=["Pokémon Counter Series"],
     dependencies=dependencies_list
 )
-@time_execution(label="get_pokemon_counterseries")
 async def get_pokemon_counterseries(
     counter_type: str = Query(..., description="Type of counter series: totals, tth, or weather"),
     interval: str = Query(..., description="Interval: hourly or weekly for totals and tth; monthly for weather"),
@@ -190,52 +187,37 @@ async def get_pokemon_counterseries(
         offset = filtering_keys.get_area_offset(area, global_state.geofences)
         area_offsets = {area: offset}
 
-    # Define the worker function for a single area
-    async def process_area(area_name, offset):
-        with time_execution(label=f"PROCESS AREA: {area_name}", log_level="info"):
-            try:
-                # Parse time relative to this specific area's timezone
-                start_dt = filtering_keys.parse_time_input(start_time, offset)
-                end_dt   = filtering_keys.parse_time_input(end_time,   offset)
+    # retrieval method mapping
+    def _method(obj):
+        return {
+            ("totals", "hourly"): obj.retrieve_totals_hourly,
+            ("totals", "weekly"): obj.retrieve_totals_weekly,
+            ("tth", "hourly"): obj.retrieve_tth_hourly,
+            ("tth", "weekly"): obj.retrieve_tth_weekly,
+            ("weather", "monthly"): obj.retrieve_weather_monthly,
+        }.get((counter_type, interval))
 
-                # Instantiate Retrieval Class
-                retr = PokemonCounterRetrieval(
-                    area=area_name,
-                    start=start_dt,
-                    end=end_dt,
-                    mode=mode,
-                    pokemon_id=pokemon_ids_set,
-                    form=forms_set,
-                    metric=metrics_set,
-                )
+    # Run per-area
+    results = {}
+    for area_name, offset in area_offsets.items():
+        try:
+            start_dt = filtering_keys.parse_time_input(start_time, offset)
+            end_dt   = filtering_keys.parse_time_input(end_time,   offset)
 
-                # Select Method
-                method_map = {
-                    ("totals", "hourly"): retr.retrieve_totals_hourly,
-                    ("totals", "weekly"): retr.retrieve_totals_weekly,
-                    ("tth", "hourly"): retr.retrieve_tth_hourly,
-                    ("tth", "weekly"): retr.retrieve_tth_weekly,
-                    ("weather", "monthly"): retr.retrieve_weather_monthly,
-                }
-                method = method_map.get((counter_type, interval))
+            retr = PokemonCounterRetrieval(
+                area=area_name,
+                start=start_dt,
+                end=end_dt,
+                mode=mode,
+                pokemon_id=pokemon_ids_set,   # sets or None
+                form=forms_set,
+                metric=metrics_set,
+            )
+            method = _method(retr)
+            results[area_name] = await method() if method else {}
+        except Exception as e:
+            results[area_name] = {"error": str(e)}
 
-                #  Await Result
-                data = await method() if method else {}
-                return area_name, data
-            except Exception as e:
-                return area_name, {"error": str(e)}
-
-    # Create a list of coroutine objects (tasks) - CONCURRENT execution
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-
-    # Run them all at once and wait for completion
-    with time_execution(label="TOTAL PARALLEL BATCH"):
-        results_list = await asyncio.gather(*tasks)
-
-    # Convert list of tuples back to dict
-    results = dict(results_list)
-
-    # Response Formatting
     if resp_fmt == "json":
         return results if area_is_global or (area_list and len(area_list) > 1) else next(iter(results.values()))
     else:
@@ -316,8 +298,9 @@ async def get_counter_raids(
             ("totals", "weekly"): obj.raid_retrieve_totals_weekly,
         }.get((counter_type, interval))
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    # Run per-area
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -335,22 +318,15 @@ async def get_counter_raids(
                 raid_ex_eligible=raid_ex_eligible_set,
             )
             method = _method(retr)
-            data = await method() if method else {}
-            return area_name, data
+            results[area_name] = await method() if method else {}
         except Exception as e:
-            return area_name, {"error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"error": str(e)}
 
     if resp_fmt == "json":
         # If multiple areas, return the dict; if only one, return that single result.
         return results if len(results) != 1 else next(iter(results.values()))
     else:
         return "\n".join(f"{k}: {v}" for k, v in results.items())
-
 
 @router.get(
     "/api/redis/get_invasions_counterseries",
@@ -419,8 +395,9 @@ async def get_counter_invasions(
             ("totals", "weekly"): obj.invasion_retrieve_totals_weekly,
         }.get((counter_type, interval))
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    # Per-area execution (keeps your per-area offset semantics)
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -436,15 +413,9 @@ async def get_counter_invasions(
                 confirmed=confirmed,
             )
             method = _method(retr)
-            data = await method() if method else {}
-            return area_name, data
+            results[area_name] = await method() if method else {}
         except Exception as e:
-            return area_name, {"error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"error": str(e)}
 
     if resp_fmt == "json":
         return results if len(results) != 1 else next(iter(results.values()))
@@ -542,8 +513,9 @@ async def get_counter_quests(
             ("totals", "weekly"): obj.quest_retrieve_totals_weekly,
         }.get((counter_type, interval))
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    # Per-area run
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -568,15 +540,9 @@ async def get_counter_quests(
                 reward_normal_poke_form=reward_normal_poke_form_set,
             )
             method = _method(retr)
-            data = await method() if method else {}
-            return area_name, data
+            results[area_name] = await method() if method else {}
         except Exception as e:
-            return area_name, {"error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"error": str(e)}
 
     if resp_fmt == "json":
         return results if len(results) != 1 else next(iter(results.values()))
@@ -631,8 +597,8 @@ async def get_pokemon_timeseries(
             raise HTTPException(400, f"❌ Area not found: {area}")
         area_offsets = resolved
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -645,15 +611,9 @@ async def get_pokemon_timeseries(
                 pokemon_id=pokemon_ids_set,
                 form=forms_set,
             )
-            data = await ts.retrieve_timeseries()
-            return area_name, data
+            results[area_name] = await ts.retrieve_timeseries()
         except Exception as e:
-            return area_name, {"mode": mode, "error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"mode": mode, "error": str(e)}
 
     if resp_fmt == "json":
         return results if len(results) != 1 else next(iter(results.values()))
@@ -704,8 +664,8 @@ async def get_pokemon_tth_timeseries(
             raise HTTPException(400, f"❌ Area not found: {area}")
         area_offsets = resolved
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -717,15 +677,9 @@ async def get_pokemon_tth_timeseries(
                 tth_bucket=tth_buckets_set,
                 mode=mode,
             )
-            data = await ts.retrieve_timeseries()
-            return area_name, data
+            results[area_name] = await ts.retrieve_timeseries()
         except Exception as e:
-            return area_name, {"mode": mode, "error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"mode": mode, "error": str(e)}
 
     if resp_fmt == "json":
         return results if len(results) != 1 else next(iter(results.values()))
@@ -782,8 +736,8 @@ async def get_raid_timeseries(
             raise HTTPException(400, f"❌ Area not found: {area}")
         area_offsets = resolved
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -797,15 +751,9 @@ async def get_raid_timeseries(
                 raid_form=raid_form_set,
                 raid_level=raid_level_set,
             )
-            data = await raid_timeseries.raid_retrieve_timeseries()
-            return area_name, data
+            results[area_name] = await raid_timeseries.raid_retrieve_timeseries()
         except Exception as e:
-            return area_name, {"mode": mode, "error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"mode": mode, "error": str(e)}
 
     if resp_fmt == "json":
         return results if len(results) != 1 else next(iter(results.values()))
@@ -861,8 +809,8 @@ async def get_invasion_timeseries(
             raise HTTPException(400, f"❌ Area not found: {area}")
         area_offsets = resolved
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -877,15 +825,9 @@ async def get_invasion_timeseries(
                 confirmed=confirmed,
             )
 
-            data = await invasion_timeseries.invasion_retrieve_timeseries()
-            return area_name, data
+            results[area_name] = await invasion_timeseries.invasion_retrieve_timeseries()
         except Exception as e:
-            return area_name, {"mode": mode, "error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"mode": mode, "error": str(e)}
 
     if resp_fmt == "json":
         return results if len(results) != 1 else next(iter(results.values()))
@@ -938,8 +880,8 @@ async def get_quest_timeseries(
             raise HTTPException(400, f"❌ Area not found: {area}")
         area_offsets = resolved
 
-    # Define worker function for concurrent execution
-    async def process_area(area_name, offset):
+    results = {}
+    for area_name, offset in area_offsets.items():
         try:
             start_dt = filtering_keys.parse_time_input(start_time, offset)
             end_dt   = filtering_keys.parse_time_input(end_time,   offset)
@@ -953,21 +895,14 @@ async def get_quest_timeseries(
                 field_details=quest_types_set,
             )
 
-            data = await quest_timeseries.quest_retrieve_timeseries()
-            return area_name, data
+            results[area_name] = await quest_timeseries.quest_retrieve_timeseries()
         except Exception as e:
-            return area_name, {"mode": mode, "error": str(e)}
-
-    # CONCURRENT execution with asyncio.gather
-    tasks = [process_area(name, off) for name, off in area_offsets.items()]
-    results_list = await asyncio.gather(*tasks)
-    results = dict(results_list)
+            results[area_name] = {"mode": mode, "error": str(e)}
 
     if resp_fmt == "json":
         return results if len(results) != 1 else next(iter(results.values()))
     else:
         return "\n".join(f"{k}: {v}" for k, v in results.items())
-
 
 # SQL section
 @router.get(
@@ -999,10 +934,8 @@ async def get_pokemon_heatmap_data(
     if area_norm.lower() in ("all", "global") or "," in area_norm:
         raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
     area_id = await resolve_area_id_by_name(area_norm)
-    if area_id is None:
-        raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
 
-    # time window
+    # parse time to DATETIME - precise seen_at window
     try:
         seen_from = parse_time_to_datetime(start_time)
         seen_to   = parse_time_to_datetime(end_time)
@@ -1011,29 +944,25 @@ async def get_pokemon_heatmap_data(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
 
-    # CSV parsing
-    poke_set = _parse_csv_param(pokemon_id)
+    # parse CSVs
+    pid_set  = _parse_csv_param(pokemon_id)
     form_set = _parse_csv_param(form)
-    iv_set   = _parse_csv_param(iv)
-    lvl_set  = _parse_csv_param(level)
+    try:
+        pid_list  = sorted({int(x) for x in pid_set}) if pid_set else None
+    except Exception:
+        raise HTTPException(status_code=400, detail="❌ pokemon_id must be integers (CSV).")
+    form_list = sorted(form_set) if form_set else None
 
-    poke_list = _to_int_list("pokemon_id", poke_set)
-    form_list = _to_int_list("form", form_set)
-    iv_list   = sorted(list(iv_set)) if iv_set else None  # strings like ">=90"
-    lvl_list  = sorted(list(lvl_set)) if lvl_set else None
-
-    # build filters
     filters = HeatmapFilters(
-        pokemon_ids=poke_list,
+        pokemon_ids=pid_list,
         forms=form_list,
-        iv_conditions=iv_list,
-        level_conditions=lvl_list,
+        iv_expr=None if (iv or "all").lower() == "all" else iv,
+        level_expr=None if (level or "all").lower() == "all" else level,
     )
 
     try:
         result = await fetch_pokemon_heatmap_range(
             area_id=int(area_id),
-            area_name=area_norm,
             seen_from=seen_from,
             seen_to=seen_to,
             filters=filters,
@@ -1049,67 +978,54 @@ async def get_pokemon_heatmap_data(
         return result
 
     # text fallback
-    lines = [f"range={result['start_time']}..{result['end_time']} area={result['area']} rows={result['rows']}"]
+    lines = [f"range={result['start_time']}..{result['end_time']} area={area_norm} rows={result['rows']}"]
     for r in result["data"]:
-        lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} (pokemon={r['pokemon_id']} form={r['form']})")
+        lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} (#{r['pokemon_id']}/{r['form']} @ {r['spawnpoint']})")
     return "\n".join(lines)
 
 
 @router.get(
-    "/api/sql/get_pokemon_shiny_data",
-    tags=["Pokémon Shiny Rate Data"],
+    "/api/sql/get_shiny_rate_data",
+    tags=["Shiny Rate Data"],
     dependencies=dependencies_list
 )
-async def get_pokemon_shiny_data(
-    start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
-    end_time: str   = Query(..., description="ISO or 'now' / relative"),
-    response_format: str = Query("json", description="json or text"),
-    area: str       = Query(..., description="Single area name (exactly one; no lists)"),
-    pokemon_id: str = Query("all", description="CSV of Pokémon IDs or 'all'"),
-    form: str       = Query("all", description="CSV of forms or 'all'"),
-    limit: Optional[int] = Query(0, description="Optional per-day limit; 0 = no limit."),
-    concurrency: Optional[int] = Query(4, description="Max parallel day-queries"),
+async def get_shiny_rate_data(
+    start_time: str = Query(..., description="Start month as 202503 (YYYYMM or YYMM)"),
+    end_time: str   = Query(..., description="End month as 202504 (YYYYMM or YYMM)"),
+    response_format: str = Query("json", description="Response format: json or text"),
+    area: str       = Query("global", description="Area name or 'all'/'global'"),
+    username: str   = Query("all", description="All or a specific username"),
+    pokemon_id: str = Query("all", description="All or CSV of Pokémon IDs"),
+    form: str       = Query("all", description="All or CSV of form strings"),
+    min_user_n: int = Query(0, description="Per-user minimum encounters to include (noise control)"),
+    limit: Optional[int] = Query(0, description="Limit rows in the final output; 0 = no limit"),
+    concurrency: Optional[int] = Query(4, description="Parallel month queries"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
 ):
     await secure_api.check_secret_header_value(api_secret_header)
 
-    fmt = (response_format or "json").lower()
-    if fmt not in ("json", "text"):
-        raise HTTPException(status_code=400, detail="❌ response_format must be json or text")
+    resp_fmt = (response_format or "json").lower()
+    if resp_fmt not in ("json", "text"):
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
 
-    # area to id - one area only
-    area_norm = (area or "").strip()
-    if area_norm.lower() in ("all", "global") or "," in area_norm:
-        raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
     try:
-        area_id = await resolve_area_id_by_name(area_norm)
-    except Exception:
-        raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
-
-    # time window
-    try:
-        seen_from = parse_time_to_datetime(start_time)
-        seen_to   = parse_time_to_datetime(end_time)
-        if seen_to < seen_from:
+        start_month_date = month_parse_time_input(start_time)  # returns date(y, m, 1)
+        end_month_date   = month_parse_time_input(end_time)
+        if end_month_date < start_month_date:
             raise ValueError("end_time before start_time")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
-
-    # CSV parsing
-    poke_set = _parse_csv_param(pokemon_id)
-    form_set = _parse_csv_param(form)
-    poke_list = _to_int_list("pokemon_id", poke_set)
-    form_list = _to_int_list("form", form_set)
+        raise HTTPException(status_code=400, detail=f"❌ Invalid time format: {e}")
 
     try:
         result = await fetch_shiny_rates_range(
-            area_id=int(area_id),
-            area_name=area_norm,
-            seen_from=seen_from,
-            seen_to=seen_to,
-            pokemon_ids=poke_list,
-            forms=form_list,
-            limit_per_day=int(limit or 0),
+            start_month_date=start_month_date,
+            end_month_date=end_month_date,
+            area_name=area,
+            usernames_csv=username,
+            pokemon_id=pokemon_id,
+            form=form,
+            min_user_n=int(min_user_n or 0),
+            limit=int(limit or 0),
             concurrency=int(concurrency or 4),
         )
     except ValueError as ve:
@@ -1117,18 +1033,23 @@ async def get_pokemon_shiny_data(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"❌ Query failed: {e}")
 
-    if fmt == "json":
+    if resp_fmt == "json":
         return result
 
     # text fallback
-    lines = [f"range={result['start_time']}..{result['end_time']} area={result['area']} rows={result['rows']}"]
+    lines = [
+        f"range={result['start_month']}..{result['end_month']}",
+        f"area={result['area']}",
+        f"rows={result['rows']}",
+    ]
     for r in result["data"]:
         lines.append(
-            f"pokemon_id={r['pokemon_id']} form={r['form']} "
-            f"shiny_count={r['shiny_count']} total_count={r['total_count']} "
-            f"shiny_rate={r['shiny_rate']:.4f}"
+            f"{r['pokemon_id']}/{r['form']} "
+            f"macro={r['shiny_pct_macro']}% pooled={r['shiny_pct_pooled']}% "
+            f"users={r['users_contributing']} n={r['total_encounters']}"
         )
     return "\n".join(lines)
+
 
 
 @router.get(
@@ -1141,12 +1062,10 @@ async def get_raid_data(
     end_time: str   = Query(..., description="ISO or 'now' / relative"),
     response_format: str = Query("json", description="json or text"),
     area: str = Query(..., description="Single area name (exactly one; no lists)"),
-    pokemon_id: str = Query("all", description="CSV of raid boss Pokémon IDs or 'all'"),
-    form: str       = Query("all", description="CSV of forms or 'all'"),
-    costume: str    = Query("all", description="CSV of costumes or 'all'"),
-    level: str      = Query("all", description="CSV of raid levels or 'all'"),
-    ex_eligible: str    = Query("all", description="CSV of ex_eligible (0/1) or 'all'"),
-    is_exclusive: str   = Query("all", description="CSV of is_exclusive (0/1) or 'all'"),
+    gym_id: str = Query("all"), raid_pokemon: str = Query("all"),
+    raid_level: str = Query("all"), raid_form: str = Query("all"),
+    raid_team: str = Query("all"), raid_costume: str = Query("all"),
+    raid_is_exclusive: str = Query("all"), raid_ex_raid_eligible: str = Query("all"),
     limit: Optional[int] = Query(0, description="Optional per-day limit; 0 = no limit."),
     concurrency: Optional[int] = Query(4, description="Max parallel day-queries"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
@@ -1155,18 +1074,18 @@ async def get_raid_data(
 
     fmt = (response_format or "json").lower()
     if fmt not in ("json", "text"):
-        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+        raise HTTPException(status_code=400, detail="❌ response_format must be json or text.")
 
-    # area
+    # Area to id - exactly one area
     area_norm = (area or "").strip()
     if area_norm.lower() in ("all", "global") or "," in area_norm:
         raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
     try:
         area_id = await resolve_area_id_by_name(area_norm)
-    except Exception:
+    except Exception as e:
         raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
 
-    # time window
+    # Parse times to DATETIME
     try:
         seen_from = parse_time_to_datetime(start_time)
         seen_to   = parse_time_to_datetime(end_time)
@@ -1175,29 +1094,36 @@ async def get_raid_data(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
 
-    # CSV parsing
-    poke_set = _parse_csv_param(pokemon_id)
-    form_set = _parse_csv_param(form)
-    costume_set = _parse_csv_param(costume)
-    level_set   = _parse_csv_param(level)
-    ex_set      = _parse_csv_param(ex_eligible)
-    excl_set    = _parse_csv_param(is_exclusive)
+    # CSVs parsing
+    gyms_set               = _parse_csv_param(gym_id)
+    raid_pokemon_set       = _parse_csv_param(raid_pokemon)
+    raid_form_set          = _parse_csv_param(raid_form)
+    raid_level_set         = _parse_csv_param(raid_level)
+    raid_team_set          = _parse_csv_param(raid_team)
+    raid_costume_set       = _parse_csv_param(raid_costume)
+    raid_is_exclusive_set  = _parse_csv_param(raid_is_exclusive)
+    raid_ex_eligible_set   = _parse_csv_param(raid_ex_raid_eligible)
 
-    poke_list    = _to_int_list("pokemon_id", poke_set)
-    form_list    = _to_int_list("form", form_set)
-    costume_list = _to_int_list("costume", costume_set)
-    level_list   = _to_int_list("level", level_set)
-    ex_list      = _to_int_list("ex_eligible", ex_set)
-    excl_list    = _to_int_list("is_exclusive", excl_set)
+    # Convert to proper types
+    gyms_list              = sorted(list(gyms_set)) if gyms_set else None
+    raid_pokemon_list      = _to_int_list("raid_pokemon", raid_pokemon_set)
+    raid_form_list         = _to_int_list("raid_form", raid_form_set)
+    raid_level_list        = _to_int_list("raid_level", raid_level_set)
+    raid_team_list         = _to_int_list("raid_team", raid_team_set)
+    raid_costume_list      = _to_int_list("raid_costume", raid_costume_set)
+    raid_is_exclusive_list = _to_int_list("raid_is_exclusive", raid_is_exclusive_set)
+    raid_ex_eligible_list  = _to_int_list("raid_ex_raid_eligible", raid_ex_eligible_set)
 
-    # build filters
+    # Build filters dataclass
     filters = RaidFilters(
-        pokemon_ids=poke_list,
-        forms=form_list,
-        costumes=costume_list,
-        levels=level_list,
-        ex_eligibles=ex_list,
-        is_exclusives=excl_list,
+        gyms=gyms_list,
+        raid_pokemon=raid_pokemon_list,
+        raid_form=raid_form_list,
+        raid_level=raid_level_list,
+        raid_team=raid_team_list,
+        raid_costume=raid_costume_list,
+        raid_is_exclusive=raid_is_exclusive_list,
+        raid_ex_raid_eligible=raid_ex_eligible_list,
     )
 
     try:
@@ -1218,14 +1144,15 @@ async def get_raid_data(
     if fmt == "json":
         return result
 
-    # text fallback
+    # Text fallback
     lines = [f"range={result['start_time']}..{result['end_time']} area={result['area']} rows={result['rows']}"]
     for r in result["data"]:
         lines.append(
             f"{r['latitude']},{r['longitude']} -> {r['count']} "
-            f"(pokemon={r['pokemon_id']} form={r['form']} level={r['level']})"
+            f"(gym={r['gym']} boss={r['raid_pokemon']}/{r['raid_form']} lvl={r['raid_level']})"
         )
     return "\n".join(lines)
+
 
 
 @router.get(
@@ -1238,11 +1165,11 @@ async def get_invasion_data(
     end_time: str   = Query(..., description="ISO or 'now' / relative"),
     response_format: str = Query("json", description="json or text"),
     area: str = Query(..., description="Single area name (exactly one; no lists)"),
-    pokestop_id: str = Query("all", description="CSV of pokestop IDs or 'all'"),
-    display_type: str = Query("all", description="CSV of display_type or 'all'"),
-    character: str = Query("all", description="CSV of invasion character or 'all'"),
-    grunt: str = Query("all", description="CSV of grunt type or 'all'"),
-    confirmed: str = Query("all", description="CSV of confirmed (0/1) or 'all'"),
+    pokestop_id: str = Query("all", description="CSV of pokestop ids or 'all'"),
+    display_type: str = Query("all", description="CSV of invasion display types or 'all'"),
+    character: str = Query("all", description="CSV of invasion characters or 'all'"),
+    grunt: str = Query("all", description="CSV of grunt ids or 'all'"),
+    confirmed: str = Query("all", description="CSV of 0/1 or 'all'"),
     limit: Optional[int] = Query(0, description="Optional per-day limit; 0 = no limit."),
     concurrency: Optional[int] = Query(4, description="Max parallel day-queries"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
@@ -1251,9 +1178,9 @@ async def get_invasion_data(
 
     fmt = (response_format or "json").lower()
     if fmt not in ("json", "text"):
-        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+        raise HTTPException(status_code=400, detail="❌ response_format must be json or text.")
 
-    # area
+    # one area only
     area_norm = (area or "").strip()
     if area_norm.lower() in ("all", "global") or "," in area_norm:
         raise HTTPException(status_code=400, detail="❌ Provide exactly one area name (no lists, no 'all/global').")
@@ -1262,7 +1189,7 @@ async def get_invasion_data(
     except Exception:
         raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
 
-    # time window
+    # time window to DATETIME
     try:
         seen_from = parse_time_to_datetime(start_time)
         seen_to   = parse_time_to_datetime(end_time)
@@ -1271,11 +1198,11 @@ async def get_invasion_data(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
 
-    # CSV parser
-    pstop_set = _parse_csv_param(pokestop_id)
-    dtype_set = _parse_csv_param(display_type)
-    char_set  = _parse_csv_param(character)
-    grunt_set = _parse_csv_param(grunt)
+    # CSV params
+    pstop_set     = _parse_csv_param(pokestop_id)
+    dtype_set     = _parse_csv_param(display_type)
+    char_set      = _parse_csv_param(character)
+    grunt_set     = _parse_csv_param(grunt)
     confirmed_set = _parse_csv_param(confirmed)
 
     pokestops_list = sorted(list(pstop_set)) if pstop_set else None  # strings
@@ -1376,7 +1303,7 @@ async def get_quest_data(
     ar_poke_set       = _parse_csv_param(reward_ar_poke_id)
     normal_poke_set   = _parse_csv_param(reward_normal_poke_id)
 
-    def _to_int_list_local(name: str, s: Optional[set[str]]) -> Optional[List[int]]:
+    def _to_int_list(name: str, s: Optional[set[str]]) -> Optional[List[int]]:
         if s is None: return None
         try: return sorted({int(x) for x in s})
         except Exception:
@@ -1391,16 +1318,16 @@ async def get_quest_data(
     allowed_modes = None if qt == "all" else ([1] if qt == "ar" else [0])
 
     # Items filters task_type only provided via reward_*_type
-    items_ar_types     = _to_int_list_local("reward_ar_type", r_ar_type_set)
-    items_normal_types = _to_int_list_local("reward_normal_type", r_norm_type_set)
-    items_ar_ids       = _to_int_list_local("reward_ar_item_id", ar_item_set)
-    items_norm_ids     = _to_int_list_local("reward_normal_item_id", normal_item_set)
+    items_ar_types     = _to_int_list("reward_ar_type", r_ar_type_set)
+    items_normal_types = _to_int_list("reward_normal_type", r_norm_type_set)
+    items_ar_ids       = _to_int_list("reward_ar_item_id", ar_item_set)
+    items_norm_ids     = _to_int_list("reward_normal_item_id", normal_item_set)
 
     # Pokémon filters no task_type CSV here; only per-mode poke ids
     mons_ar_types      = None
     mons_normal_types  = None
-    mons_ar_poke_ids   = _to_int_list_local("reward_ar_poke_id", ar_poke_set)
-    mons_norm_poke_ids = _to_int_list_local("reward_normal_poke_id", normal_poke_set)
+    mons_ar_poke_ids   = _to_int_list("reward_ar_poke_id", ar_poke_set)
+    mons_norm_poke_ids = _to_int_list("reward_normal_poke_id", normal_poke_set)
 
     items_filters = QuestItemFilters(
         pokestops=pokestops_list,
@@ -1447,7 +1374,7 @@ async def get_quest_data(
         lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
                      f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
     lines.append(f"[pokemon] rows={result['pokemon']['rows']}")
-    for r in result["pokemon"]["data"]:
+    for r in result["pokemon']['data"]:
         lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
                      f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
     return "\n".join(lines)
