@@ -11,7 +11,8 @@ from dashboard.utils import (
     get_global_pokemon_task,
     get_global_raids_task,
     get_global_invasions_task,
-    get_global_quests_task
+    get_global_quests_task,
+    get_global_pokestops_task,
 )
 
 # Relative path to data/ folder
@@ -19,6 +20,10 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 
 # Map
 TASK_CONFIG = {
+    "pokestops": {
+        "func": get_global_pokestops_task,
+        "file": os.path.join(DATA_DIR, 'global_pokestops.json')
+    },
     "pokemons_daily": {
         "func": get_global_pokemon_task,
         "file": os.path.join(DATA_DIR, 'global_pokes.json')
@@ -29,7 +34,7 @@ TASK_CONFIG = {
         "params": {
             "counter_type": "totals",
             "area": "global",
-            "start_time": "3 years", # This will now be honored
+            "start_time": "26280 hours", # This will now be honored
             "end_time": "now",
             "mode": "sum",
             "interval": "hourly",
@@ -49,7 +54,7 @@ TASK_CONFIG = {
         "params": {
             "counter_type": "totals",
             "area": "global",
-            "start_time": "3 years",
+            "start_time": "26280 hours",
             "end_time": "now",
             "mode": "sum",
             "interval": "hourly",
@@ -59,7 +64,7 @@ TASK_CONFIG = {
             "response_format": "json"
         }
     },
-    "invasions": {
+    "invasions_daily": {
         "func": get_global_invasions_task,
         "file": os.path.join(DATA_DIR, 'global_invasions.json')
     },
@@ -69,7 +74,7 @@ TASK_CONFIG = {
         "params": {
             "counter_type": "totals",
             "interval": "hourly",
-            "start_time": "3 years",
+            "start_time": "26280 hours",
             "end_time": "now",
             "mode": "sum",
             "response_format": "json",
@@ -80,7 +85,7 @@ TASK_CONFIG = {
             "confirmed": "all"
         }
     },
-    "quests": {
+    "quests_daily": {
         "func": get_global_quests_task,
         "file": os.path.join(DATA_DIR, 'global_quests.json')
     },
@@ -90,7 +95,7 @@ TASK_CONFIG = {
         "params": {
             "counter_type": "totals",
             "interval": "hourly",
-            "start_time": "3 years",
+            "start_time": "26280 hours",
             "end_time": "now",
             "mode": "sum",
             "response_format": "json",
@@ -140,8 +145,8 @@ def update_global_stats_concurrently():
             try:
                 final_data = future.result()
                 if final_data:
-                    with open(config["file"], 'w') as f:
-                        json.dump(final_data, f, indent=2)
+                    with open(config["file"], 'w', encoding='utf-8') as f:
+                        json.dump(final_data, f, indent=2, ensure_ascii=False)
 
                     # Success Logging
                     count_val = final_data.get('total', 0)

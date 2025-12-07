@@ -293,7 +293,7 @@ def update_quests(n, toggle_val):
                 data = json.load(f)
             quests = data.get('quests', {})
             content = [
-                get_total_header(data.get('total_stops', 0), "Total PokéStops"),
+                get_total_header(data.get('total_pokestops', 0), "Total PokéStops"),
                 create_mini_stat(quests.get('ar', 0), "AR Quests", "#17a2b8", icon_url=ICONS['ar_quest']),
                 create_mini_stat(quests.get('normal', 0), "Normal", "#e0e0e0", icon_class="bi bi-vinyl"),
             ]
