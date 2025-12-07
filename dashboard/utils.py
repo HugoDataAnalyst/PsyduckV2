@@ -743,6 +743,45 @@ def get_global_invasions_task(endpoint_type="counter", params=None):
         logger.error(f"Error in get_global_invasions_task: {e}")
         return None
 
+def get_global_pokestops_task(params=None):
+    if params is None:
+        params = {
+            "area": "global",
+            "response_format": "json"
+        }
+
+    if "area" not in params: params["area"] = "global"
+    if "response_format" not in params: params["response_format"] = "json"
+
+    endpoint = "/api/redis/get_cached_pokestops"
+
+    try:
+        url = f"{API_BASE_URL}{endpoint}"
+        response = requests.get(url, headers=get_api_headers(), params=params)
+
+        if response.status_code != 200:
+            logger.info(f"Error fetching global pokestops: HTTP {response.status_code}")
+            return None
+
+        raw_data = response.json()
+
+        # Extract the inner 'data' which contains 'areas' and 'total'
+        if isinstance(raw_data, dict) and "data" in raw_data:
+            final_data = raw_data.get("data", {})
+        else:
+            return None
+
+        if not final_data:
+            return None
+
+        # Add timestamp to the existing structure
+        final_data["last_updated"] = time.time()
+
+        return final_data
+
+    except Exception as e:
+        logger.error(f"Error in get_global_pokestops_task: {e}")
+        return None
 
 def get_global_quests_task(endpoint_type="counter", params=None):
     """
@@ -793,25 +832,37 @@ def get_global_quests_task(endpoint_type="counter", params=None):
         if not raw_data:
             return None
 
-        # Background Task Aggregation
+# Background Task Aggregation
         if endpoint_type == "counter":
-            total_scanned_stops = 0
             total_ar_quests = 0
             total_normal_quests = 0
 
+            # 1. Calculate Quest Stats from API response
             for area_name, content in raw_data.items():
                 if not isinstance(content, dict): continue
                 stats = content.get('data', {})
                 if not stats: continue
 
-                total_scanned_stops += stats.get('total', 0)
+                # Note: We skip 'total' here as we want the pokestop count from the file
                 quest_modes = stats.get('quest_mode', {})
                 if isinstance(quest_modes, dict):
                     total_ar_quests += quest_modes.get('ar', 0)
                     total_normal_quests += quest_modes.get('normal', 0)
 
+            # 2. Retrieve Total Pokestops from cached file
+            total_pokestops = 0
+            try:
+                with open('dashboard/data/global_pokestops.json', 'r') as f:
+                    cached_stops_data = json.load(f)
+                    # Support both direct 'total' or nested structure if file format varies
+                    total_pokestops = cached_stops_data.get('total', 0)
+            except FileNotFoundError:
+                logger.warning("global_pokestops.json not found, defaulting stops to 0")
+            except Exception as e:
+                logger.error(f"Error reading global_pokestops.json: {e}")
+
             final_data = {
-                "total_stops": total_scanned_stops,
+                "total_pokestops": total_pokestops,
                 "quests": {
                     "ar": total_ar_quests,
                     "normal": total_normal_quests
