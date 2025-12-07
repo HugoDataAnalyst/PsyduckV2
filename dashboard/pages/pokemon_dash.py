@@ -377,7 +377,27 @@ def layout(area=None, **kwargs):
                                 ], width=12, lg=6, className="mb-3")
                             ])
                         ])
-                    ], className="border-secondary mb-3", style={"backgroundColor": "rgba(0,0,0,0.3)"})
+                    ], className="border-secondary mb-3", style={"backgroundColor": "rgba(0,0,0,0.3)"}),
+
+                    # Heatmap Display Mode (Below sliders)
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("🗺️ Heatmap Display Mode", className="fw-bold"),
+                            dbc.RadioItems(
+                                id="heatmap-display-mode",
+                                options=[
+                                    {"label": "Markers", "value": "markers"},
+                                    {"label": "Density Heatmap", "value": "density"},
+                                    {"label": "Grid Overlay", "value": "grid"}
+                                ],
+                                value="markers",
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-primary btn-sm",
+                                labelCheckedClassName="active"
+                            )
+                        ], width=12, md=6),
+                    ], className="g-3")
                 ])
             ])
         ], className="shadow-sm border-0 mb-4"),
