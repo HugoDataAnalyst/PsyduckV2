@@ -196,15 +196,6 @@ def layout(area=None, **kwargs):
                             dbc.Label("⏱️ Interval"),
                             dcc.Dropdown(id="invasions-interval-selector", options=[{"label": "Hourly", "value": "hourly"}], value="hourly", clearable=False, className="text-dark")
                         ]),
-                        html.Div(id="invasions-heatmap-display-container", style={"display": "none"}, children=[
-                            dbc.Label("🗺️ Display Mode"),
-                            dcc.Dropdown(id="invasions-heatmap-display-mode",
-                                options=[
-                                    {"label": "Markers (Pokestops)", "value": "markers"},
-                                    {"label": "Density Heatmap", "value": "density"},
-                                    {"label": "Grid Overlay", "value": "grid"}
-                                ], value="markers", clearable=False, className="text-dark")
-                        ])
                     ], width=6, md=3),
 
                     # Mode
@@ -218,7 +209,29 @@ def layout(area=None, **kwargs):
                         dbc.Label("Actions", style={"visibility": "hidden"}),
                         dbc.Button("Run Analysis", id="invasions-submit-btn", color="success", className="w-100 fw-bold")
                     ], width=6, md=3)
-                ], className="align-items-end g-3")
+                ], className="align-items-end g-3"),
+                # Heatmap Display Mode (only visible for heatmap)
+                html.Div(id="invasions-heatmap-display-container", style={"display": "none"}, children=[
+                    html.Hr(className="my-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("🗺️ Heatmap Display Mode", className="fw-bold"),
+                            dbc.RadioItems(
+                                id="invasions-heatmap-display-mode",
+                                options=[
+                                    {"label": "Markers (PokéStops)", "value": "markers"},
+                                    {"label": "Density Heatmap", "value": "density"},
+                                    {"label": "Grid Overlay", "value": "grid"}
+                                ],
+                                value="markers",
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-primary btn-sm",
+                                labelCheckedClassName="active"
+                            )
+                        ], width=12, md=6),
+                    ], className="g-3")
+                ])
             ])
         ], className="shadow-sm border-0 mb-4"),
 
