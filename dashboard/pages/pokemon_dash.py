@@ -453,7 +453,7 @@ def layout(area=None, **kwargs):
                                 dbc.Row([
                                     # Title and Count
                                     dbc.Col([
-                                        html.Span("🎯 Quick Filter", className="me-2"),
+                                        html.Span("🎯 Pokémon Filter", className="me-2"),
                                         html.Span(id="quick-filter-count", className="text-muted small")
                                     ], width="auto", className="d-flex align-items-center"),
 
