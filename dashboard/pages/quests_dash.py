@@ -325,29 +325,32 @@ def layout(area=None, **kwargs):
             dbc.ModalFooter(dbc.Button("Close", id="quests-close-area-modal", className="ms-auto"))
         ], id="quests-area-modal", size="xl", scrollable=True),
 
-        # Results Container
-        dcc.Loading(html.Div(id="quests-stats-container", style={"display": "none"}, children=[
+        html.Div(id="quests-stats-container", style={"display": "none"}, children=[
             dbc.Row([
                 # Sidebar
                 dbc.Col(dbc.Card([
                     dbc.CardHeader("📈 Total Counts"),
-                    dbc.CardBody(html.Div(id="quests-total-counts-display"))
+                    dbc.CardBody(
+                        # Wrapped inner content in Loading
+                        dcc.Loading(html.Div(id="quests-total-counts-display"))
+                    )
                 ], className="shadow-sm border-0 h-100"), width=12, lg=4, className="mb-4"),
 
                 # Activity Data
                 dbc.Col(dbc.Card([
                     dbc.CardHeader("📋 Activity Data"),
                     dbc.CardBody([
-                        # Embedded Search Input
+                        # Search Input OUTSIDE of Loading for fluid typing
                         dcc.Input(
                             id="quests-search-input",
                             type="text",
                             placeholder="🔍 Search Quest, Reward or Item...",
-                            debounce=True,
+                            debounce=False,  # Set to False for fluid search
                             className="form-control mb-3",
                             style={"display": "none"}
                         ),
-                        html.Div(id="quests-main-visual-container")
+                        # Wrapped inner content in Loading
+                        dcc.Loading(html.Div(id="quests-main-visual-container"))
                     ])
                 ], className="shadow-sm border-0 h-100"), width=12, lg=8, className="mb-4"),
             ]),
@@ -357,7 +360,7 @@ def layout(area=None, **kwargs):
                 dbc.CardHeader("🛠️ Raw Data Inspector"),
                 dbc.CardBody(html.Pre(id="quests-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
-        ]))
+        ])
     ])
 
 # Parsing Logic
@@ -374,7 +377,7 @@ def parse_data_to_df(data, mode, source, area=None):
         if "total" in working_data:
             records.append({"type": "Total", "name": "Total Quests", "count": working_data["total"], "key": "total", "category": "General", "time_bucket": "Total"})
 
-        # 1. Inject Total Pokestops so it appears in the graph
+        # 1. Inject Total Pokestops
         total_stops = get_area_pokestops_count(area)
         if total_stops > 0:
             records.append({
@@ -387,10 +390,10 @@ def parse_data_to_df(data, mode, source, area=None):
                 "icon": f"{ICON_BASE_URL}/misc/pokestop.webp"
             })
 
-        # 2. Add Quest Mode AR/Normal with explicit category and icons
+        # 2. Add Quest Mode (AR/Normal) if > 0
         if "quest_mode" in working_data:
             for k, v in working_data["quest_mode"].items():
-                if safe_int(v) <= 0: continue  # Skip if count is 0 or less
+                if safe_int(v) <= 0: continue
 
                 k_str = str(k).lower()
                 name = "AR Quests" if k_str in ["1", "ar"] else "Normal Quests"
@@ -400,7 +403,7 @@ def parse_data_to_df(data, mode, source, area=None):
                     "name": name,
                     "count": v,
                     "key": f"mode_{k}",
-                    "category": "Quest Mode", # Special category to identify them
+                    "category": "Quest Mode",
                     "time_bucket": "Total",
                     "icon": icon
                 })
