@@ -12,6 +12,7 @@ import json
 import re
 import os
 from pathlib import Path
+from dashboard.translations.manager import translate
 
 dash.register_page(__name__, path='/pokemon', title='Pokémon Analytics')
 
@@ -32,7 +33,7 @@ ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/mai
 ASSETS_PATH = Path(__file__).parent / ".." / "assets"
 POKEMON_ICONS_PATH = ASSETS_PATH / "pokemon_icons"
 
-# --- Data Loading ---
+#  Data Loading
 _SPECIES_MAP = None
 _FORM_MAP = None
 _ALL_POKEMON_OPTIONS = None
@@ -60,7 +61,7 @@ def _load_pokedex_data():
         options = []
         name_to_id = {k: v for k, v in _SPECIES_MAP.items()}
 
-        # 1. Add Base Forms (Form 0) - exclude MISSINGNO (pid 0)
+        # 1. Add Base Forms Form 0 - exclude MISSINGNO pid 0
         for name, pid in _SPECIES_MAP.items():
             if pid == 0:  # Skip MISSINGNO
                 continue
@@ -75,7 +76,7 @@ def _load_pokedex_data():
         # 2. Add Forms from pokedex.json
         for form_key, form_val in _FORM_MAP.items():
             if form_val == 0: continue
-            # Skip _NORMAL forms (they're duplicates of form 0)
+            # Skip _NORMAL forms they're duplicates of form 0
             if form_key.endswith("_NORMAL"):
                 continue
 
@@ -130,7 +131,7 @@ def resolve_pokemon_name_parts(pid, form_id):
     pid = int(pid) if isinstance(pid, str) and pid.isdigit() else (pid if isinstance(pid, int) else 0)
     form_id = int(form_id) if isinstance(form_id, str) and str(form_id).isdigit() else (form_id if isinstance(form_id, int) else 0)
 
-    # Find the species name from pokedex_id.json (reverse lookup)
+    # Find the species name from pokedex_id.json reverse lookup
     species_name = None
     for name, s_pid in _SPECIES_MAP.items():
         if s_pid == pid:
@@ -198,28 +199,28 @@ def get_pokemon_icon_url(pid, form=0):
 
 # Layout
 
-def generate_area_cards(geofences, selected_area_name):
+def generate_area_cards(geofences, selected_area_name, lang="en"):
     cards = []
     for idx, geo in enumerate(geofences):
         safe_name = re.sub(r'[^a-zA-Z0-9]', '_', geo['name'])
         is_selected = (selected_area_name == geo['name'])
-        map_children = [html.Div("✓ Selected", style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
+        map_children = [html.Div("✓ " + translate("Selected", lang), style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
 
         card = dbc.Card([
             html.Div(map_children, id=f"poke-area-map-{safe_name}", **{'data-map-geofence': json.dumps(geo)}, style={'height': '150px', 'backgroundColor': '#1a1a1a', 'position': 'relative'}),
             dbc.CardBody([
                 html.H5(geo['name'], className="card-title text-truncate", style={'color': '#28a745' if is_selected else 'inherit'}),
-                dbc.Button("✓ Selected" if is_selected else "Select", href=f"/pokemon?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
+                dbc.Button("✓ " + translate("Selected", lang) if is_selected else translate("Select", lang), href=f"/pokemon?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
             ])
         ], style={"width": "14rem", "margin": "10px", "border": f"3px solid {'#28a745' if is_selected else 'transparent'}"}, className="shadow-sm")
 
         if is_selected: card.id = "selected-area-card"
         cards.append(card)
-    return cards if cards else html.Div("No areas match your search.", className="text-center text-muted my-4")
+    return cards if cards else html.Div(translate("No areas match your search.", lang), className="text-center text-muted my-4")
 
 def layout(area=None, **kwargs):
     geofences = get_cached_geofences() or []
-    initial_cards = generate_area_cards(geofences, area)
+    initial_cards = generate_area_cards(geofences, area, "en") # Default to EN
     area_options = [{"label": g["name"], "value": g["name"]} for g in geofences]
     area_label = area if area else "No Area Selected"
 
@@ -237,24 +238,24 @@ def layout(area=None, **kwargs):
         dcc.Dropdown(id="area-selector", options=area_options, value=area, style={'display': 'none'}),
         dcc.Store(id="mode-persistence-store", storage_type="local"),
         dcc.Store(id="source-persistence-store", storage_type="local"),
-        dcc.Store(id="combined-source-store", data="live"),  # Tracks combined data source value
+        dcc.Store(id="combined-source-store", data="live"),
 
         # New Selection Stores
         dcc.Store(id="selection-store", data=[]),
         dcc.Store(id="selection-page-store", data=1),
 
         dbc.Row([
-            dbc.Col(html.H2("Pokémon Analytics", className="text-white"), width=12, className="my-4"),
+            dbc.Col(html.H2("Pokémon Analytics", id="page-title-text", className="text-white"), width=12, className="my-4"),
         ]),
         html.Div(id="notification-area"),
 
         # Main Control Card
         dbc.Card([
-            dbc.CardHeader("⚙️ Analysis Settings", className="fw-bold"),
+            dbc.CardHeader("⚙️ Analysis Settings", id="settings-header-text", className="fw-bold"),
             dbc.CardBody([
                 dbc.Row([
                     dbc.Col([
-                        dbc.Label("Selected Area", className="fw-bold"),
+                        dbc.Label("Selected Area", id="label-selected-area", className="fw-bold"),
                         dbc.InputGroup([
                             dbc.InputGroupText("🗺️"),
                             dbc.Input(value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
@@ -262,11 +263,11 @@ def layout(area=None, **kwargs):
                         ], className="mb-3")
                     ], width=12, md=6),
                     dbc.Col([
-                        dbc.Label("Data Source", className="fw-bold"),
+                        dbc.Label("Data Source", id="label-data-source", className="fw-bold"),
                         html.Div([
-                            # Row 1: Stats (Live & Historical)
+                            # Row 1: Stats Live & Historical
                             html.Div([
-                                html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("Stats: ", id="label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="data-source-selector",
                                     options=[
@@ -278,9 +279,9 @@ def layout(area=None, **kwargs):
                                     labelCheckedClassName="active"
                                 ),
                             ], className="d-flex align-items-center mb-1"),
-                            # Row 2: TTH (Live & Historical)
+                            # Row 2: TTH Live & Historical
                             html.Div([
-                                html.Span("TTH: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("TTH: ", id="label-tth", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="data-source-tth-selector",
                                     options=[
@@ -292,9 +293,9 @@ def layout(area=None, **kwargs):
                                     labelCheckedClassName="active"
                                 ),
                             ], className="d-flex align-items-center mb-1"),
-                            # Row 3: SQL Sources (Heatmap & Shiny Odds)
+                            # Row 3: SQL Sources Heatmap & Shiny Odds
                             html.Div([
-                                html.Span("SQL: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("SQL: ", id="label-sql", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="data-source-sql-selector",
                                     options=[
@@ -315,34 +316,34 @@ def layout(area=None, **kwargs):
                 dbc.Row([
                     dbc.Col([
                         html.Div(id="live-controls", children=[
-                            dbc.Label(f"📅 Time Window (Hours)"),
+                            dbc.Label(f"📅 Time Window (Hours)", id="label-time-window"),
                             dbc.InputGroup([
                                 dbc.Input(id="live-time-input", type="number", min=1, max=MAX_RETENTION_HOURS, value=1),
                                 dbc.InputGroupText("hours")
                             ])
                         ]),
                         html.Div(id="historical-controls", style={"display": "none"}, children=[
-                            dbc.Label("📅 Date Range"),
+                            dbc.Label("📅 Date Range", id="label-date-range"),
                             dcc.DatePickerRange(id="historical-date-picker", start_date=date.today(), end_date=date.today(), className="d-block w-100", persistence=True, persistence_type="local")
                         ]),
                         html.Div(id="shiny-month-controls", style={"display": "none"}, children=[
-                            dbc.Label("📅 Month Range"),
+                            dbc.Label("📅 Month Range", id="label-month-range"),
                             dbc.Row([
                                 dbc.Col([
-                                    dbc.Label("Start", className="small text-muted"),
+                                    dbc.Label("Start", id="label-start", className="small text-muted"),
                                     dcc.Dropdown(
                                         id="shiny-start-month",
-                                        options=[],  # Populated by callback
+                                        options=[],
                                         placeholder="Start Month",
                                         clearable=False,
                                         className="text-dark"
                                     )
                                 ], width=6),
                                 dbc.Col([
-                                    dbc.Label("End", className="small text-muted"),
+                                    dbc.Label("End", id="label-end", className="small text-muted"),
                                     dcc.Dropdown(
                                         id="shiny-end-month",
-                                        options=[],  # Populated by callback
+                                        options=[],
                                         placeholder="End Month",
                                         clearable=False,
                                         className="text-dark"
@@ -353,12 +354,12 @@ def layout(area=None, **kwargs):
                     ], width=6, md=3),
                     dbc.Col([
                         html.Div(id="interval-control-container", style={"display": "none"}, children=[
-                            dbc.Label("⏱️ Interval"),
+                            dbc.Label("⏱️ Interval", id="label-interval"),
                             dcc.Dropdown(id="interval-selector", options=[{"label": "Hourly", "value": "hourly"}], value="hourly", clearable=False, className="text-dark")
                         ])
                     ], width=6, md=3),
                     dbc.Col([
-                        dbc.Label("📊 View Mode"),
+                        dbc.Label("📊 View Mode", id="label-view-mode"),
                         html.Div(
                             dbc.RadioItems(
                                 id="mode-selector",
@@ -372,16 +373,15 @@ def layout(area=None, **kwargs):
                         )
                     ], width=6, md=3),
                     dbc.Col([
-                        dbc.Label("Actions", style={"visibility": "hidden"}),
+                        dbc.Label("Actions", id="label-actions", style={"visibility": "hidden"}),
                         html.Div([
-                            # NEW: Selection Filter Button (Visibility toggled by callback)
                             dbc.Button("Selection Filter", id="open-selection-modal", color="info", className="w-100 mb-2", style={"display": "none"}),
                             dbc.Button("Run Analysis", id="submit-btn", color="success", className="w-100 fw-bold mb-2"),
                         ])
                     ], width=6, md=3)
                 ], className="align-items-end g-3"),
 
-                # HEATMAP FILTERS - Layout (IV/Level Sliders Only)
+                # HEATMAP FILTERS
                 html.Div(id="heatmap-filters-container", style={"display": "none"}, children=[
                     html.Hr(className="my-3"),
                     dbc.Card([
@@ -389,7 +389,7 @@ def layout(area=None, **kwargs):
                             dbc.Row([
                                 dbc.Col([
                                     html.Div([
-                                        dbc.Label("IV Filter", className="fw-bold text-white mb-2"),
+                                        dbc.Label("IV Filter", id="label-iv-filter", className="fw-bold text-white mb-2"),
                                         html.Div(id="iv-range-display", className="text-muted small mb-2", style={"minHeight": "20px"}),
                                         dcc.RangeSlider(
                                             0, 100, 1, value=[0, 100], id='iv-slider',
@@ -401,7 +401,7 @@ def layout(area=None, **kwargs):
                                 ], width=12, lg=6, className="mb-3"),
                                 dbc.Col([
                                     html.Div([
-                                        dbc.Label("Level Filter", className="fw-bold text-white mb-2"),
+                                        dbc.Label("Level Filter", id="label-level-filter", className="fw-bold text-white mb-2"),
                                         html.Div(id="level-range-display", className="text-muted small mb-2", style={"minHeight": "20px"}),
                                         dcc.RangeSlider(
                                             1, 50, 1, value=[1, 50], id='level-slider',
@@ -415,10 +415,10 @@ def layout(area=None, **kwargs):
                         ])
                     ], className="border-secondary mb-3", style={"backgroundColor": "rgba(0,0,0,0.3)"}),
 
-                    # Heatmap Display Mode (Below sliders)
+                    # Heatmap Display Mode
                     dbc.Row([
                         dbc.Col([
-                            dbc.Label("🗺️ Heatmap Display Mode", className="fw-bold"),
+                            dbc.Label("🗺️ Heatmap Display Mode", id="label-heatmap-display-mode", className="fw-bold"),
                             dbc.RadioItems(
                                 id="heatmap-display-mode",
                                 options=[
@@ -440,7 +440,7 @@ def layout(area=None, **kwargs):
 
         # AREA MODAL
         dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle("Select an Area")),
+            dbc.ModalHeader(dbc.ModalTitle("Select an Area", id="modal-title-area")),
             dbc.ModalBody([
                 html.Div(
                     dbc.Input(id="area-filter-input", placeholder="Filter areas...", className="mb-3", autoFocus=True),
@@ -451,9 +451,9 @@ def layout(area=None, **kwargs):
             dbc.ModalFooter(dbc.Button("Close", id="close-area-modal", className="ms-auto"))
         ], id="area-modal", size="xl", scrollable=True),
 
-        # NEW SELECTION MODAL
+        # SELECTION MODAL
         dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle("Select Pokémon")),
+            dbc.ModalHeader(dbc.ModalTitle("Select Pokémon", id="modal-title-selection")),
             dbc.ModalBody([
                 dbc.Row([
                     dbc.Col(dbc.Input(id="selection-search", placeholder="Search Pokémon...", className="mb-3"), width=8),
@@ -477,26 +477,22 @@ def layout(area=None, **kwargs):
         ], id="selection-modal", size="xl", scrollable=True),
 
         # Results Container
-        # Removed outer dcc.Loading to allow fluid search input without focus loss
         html.Div(id="stats-container", style={"display": "none"}, children=[
             dbc.Row([
                 # Sidebar
                 dbc.Col([
                     dbc.Card([
-                        dbc.CardHeader("📈 Total Counts"),
-                        dbc.CardBody(
-                            # Wrapped inner content in Loading
-                            dcc.Loading(html.Div(id="total-counts-display"))
-                        )
+                        dbc.CardHeader("📈 Total Counts", id="card-header-total-counts"),
+                        dbc.CardBody(dcc.Loading(html.Div(id="total-counts-display")))
                     ], className="shadow-sm border-0 mb-3"),
 
-                    # Quick Filter Card (Left Column)
+                    # Quick Filter Card Left Column
                     html.Div(id="quick-filter-container", style={"display": "none"}, children=[
                         dbc.Card([
                             dbc.CardHeader([
                                 dbc.Row([
                                     dbc.Col([
-                                        html.Span("🎯 Pokémon Filter", className="me-2"),
+                                        html.Span("🎯 Pokémon Filter", id="card-header-quick-filter", className="me-2"),
                                         html.Span(id="pokemon-quick-filter-count", className="text-muted small")
                                     ], width="auto", className="d-flex align-items-center"),
                                     dbc.Col([
@@ -508,7 +504,6 @@ def layout(area=None, **kwargs):
                                 ], className="align-items-center justify-content-between g-0")
                             ]),
                             dbc.CardBody([
-                                # Input moved outside Loading for Fluid Search
                                 dbc.Input(id="pokemon-quick-filter-search", placeholder="Search Pokémon...", size="sm", className="mb-2"),
                                 html.P("Click to hide/show Pokémon from map", className="text-muted small mb-2"),
                                 html.Div(id="pokemon-quick-filter-grid",
@@ -521,23 +516,20 @@ def layout(area=None, **kwargs):
                 # Main Data Column
                 dbc.Col(dbc.Card([
                     dbc.CardHeader([
-                        html.Div("📋 Activity Data", className="d-inline-block me-auto"),
+                        html.Div("📋 Activity Data", id="card-header-activity", className="d-inline-block me-auto"),
                         html.Div(
                             dbc.RadioItems(
                                 id="heatmap-display-mode-visual",
-                                options=[{"label": "Markers", "value": "markers"}, {"label": "Heatmap", "value": "density"},{"label": "Grid", "value": "grid"}],
                                 value="markers", inline=True, className="ms-2"
                             ), id="heatmap-toggle-container", style={"display": "none", "float": "right"}
                         )
                     ]),
                     dbc.CardBody([
-                        # Search Input OUTSIDE of Loading for fluid typing
-                        # FLUID: debounce=False
                         dcc.Input(
                             id="table-search-input",
                             type="text",
                             placeholder="🔍 Search Table...",
-                            debounce=False,  # Set to False for fluid search
+                            debounce=False,
                             className="form-control mb-3",
                             style={"display": "none"}
                         ),
@@ -548,12 +540,12 @@ def layout(area=None, **kwargs):
                 ], className="shadow-sm border-0 h-100"), width=12, lg=8, className="mb-4"),
             ]),
             dbc.Row([dbc.Col(dbc.Card([
-                dbc.CardHeader("🛠️ Raw Data Inspector"),
+                dbc.CardHeader("🛠️ Raw Data Inspector", id="card-header-raw"),
                 dbc.CardBody(html.Pre(id="raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
         ]),
 
-        # Heatmap Container (Map + Quick Filter) - OUTSIDE Loading
+        # Heatmap Container Map + Quick Filter - OUTSIDE Loading
         html.Div(id="heatmap-container", style={"display": "none"}, children=[
              dbc.Row([
                 # Left Column - Quick Filter
@@ -562,22 +554,21 @@ def layout(area=None, **kwargs):
                         dbc.CardHeader([
                             dbc.Row([
                                 dbc.Col([
-                                    html.Span("🎯 Pokémon Filter", className="me-2"),
-                                    html.Span(id="pokemon-quick-filter-count", className="text-muted small")
+                                    html.Span("🎯 Pokémon Filter", id="card-header-quick-filter-2", className="me-2"),
+                                    html.Span(id="pokemon-quick-filter-count-2", className="text-muted small")
                                 ], width="auto", className="d-flex align-items-center"),
                                 dbc.Col([
                                     dbc.ButtonGroup([
-                                        dbc.Button("All", id="pokemon-quick-filter-show-all", title="Show All", size="sm", color="success", outline=True),
-                                        dbc.Button("None", id="pokemon-quick-filter-hide-all", title="Hide All", size="sm", color="danger", outline=True),
+                                        dbc.Button("All", id="pokemon-quick-filter-show-all-2", title="Show All", size="sm", color="success", outline=True),
+                                        dbc.Button("None", id="pokemon-quick-filter-hide-all-2", title="Hide All", size="sm", color="danger", outline=True),
                                     ], size="sm")
                                 ], width="auto")
                             ], className="align-items-center justify-content-between g-0")
                         ]),
                         dbc.CardBody([
-                            # Input outside loading for focus retention
-                            dbc.Input(id="pokemon-quick-filter-search", placeholder="Search Pokémon...", size="sm", className="mb-2"),
+                            dbc.Input(id="pokemon-quick-filter-search-2", placeholder="Search Pokémon...", size="sm", className="mb-2"),
                             html.P("Click to hide/show Pokémon from map", className="text-muted small mb-2"),
-                            html.Div(id="pokemon-quick-filter-grid",
+                            html.Div(id="pokemon-quick-filter-grid-2",
                                      style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
                         ])
                     ], className="shadow-sm border-0 h-100")
@@ -587,11 +578,11 @@ def layout(area=None, **kwargs):
                 dbc.Col([
                     dbc.Card([
                         dbc.CardHeader([
-                            html.Span("🗺️ Heatmap", className="fw-bold"),
+                            html.Span("🗺️ Heatmap", id="card-header-heatmap", className="fw-bold"),
                             html.Span(id="heatmap-stats-header", className="ms-3 text-muted small")
                         ]),
                         dbc.CardBody([
-                            html.Div(id="heatmap-map-container", style={"height": "600px", "width": "100%", "backgroundColor": "#1a1a1a"})
+                            html.Div(id="heatmap-map-container-2", style={"height": "600px", "width": "100%", "backgroundColor": "#1a1a1a"})
                         ])
                     ], className="shadow-sm border-0 h-100")
                 ], width=12, lg=9, className="mb-4")
@@ -679,6 +670,45 @@ def parse_data_to_df(data, mode, source):
 
 # Callbacks
 
+# 0. Static Translation Callback
+@callback(
+    [Output("page-title-text", "children"),
+     Output("settings-header-text", "children"),
+     Output("label-selected-area", "children"), Output("open-area-modal", "children"),
+     Output("label-data-source", "children"), Output("label-stats", "children"),
+     Output("label-tth", "children"), Output("label-sql", "children"),
+     Output("label-time-window", "children"), Output("label-date-range", "children"),
+     Output("label-month-range", "children"), Output("label-start", "children"), Output("label-end", "children"),
+     Output("label-interval", "children"), Output("label-view-mode", "children"),
+     Output("label-actions", "children"), Output("open-selection-modal", "children"), Output("submit-btn", "children"),
+     Output("label-iv-filter", "children"), Output("label-level-filter", "children"),
+     Output("label-heatmap-display-mode", "children"),
+     Output("modal-title-area", "children"), Output("close-area-modal", "children"),
+     Output("modal-title-selection", "children"), Output("selection-select-all", "children"), Output("selection-clear", "children"), Output("close-selection-modal", "children"),
+     Output("card-header-total-counts", "children"), Output("card-header-activity", "children"),
+     Output("card-header-raw", "children"), Output("card-header-quick-filter", "children"), Output("card-header-heatmap", "children")],
+    Input("language-store", "data")
+)
+def update_static_translations(lang):
+    lang = lang or "en"
+    return (
+        translate("Pokémon Analytics", lang),
+        translate("Analysis Settings", lang),
+        translate("Selected Area", lang), translate("Change", lang),
+        translate("Data Source", lang), translate("Stats", lang),
+        translate("TTH", lang), translate("SQL", lang),
+        translate("Time Window", lang), translate("Date Range", lang),
+        translate("Month Range", lang), translate("Start", lang), translate("End", lang),
+        translate("Interval", lang), translate("View Mode", lang),
+        translate("Actions", lang), translate("Selection Filter", lang), translate("Run Analysis", lang),
+        translate("IV Filter", lang), translate("Level Filter", lang),
+        translate("Heatmap Display Mode", lang),
+        translate("Select an Area", lang), translate("Close", lang),
+        translate("Select Pokémon", lang), translate("Select All", lang), translate("Clear", lang), translate("Done", lang),
+        translate("Total Counts", lang), translate("Activity Data", lang),
+        translate("Raw Data Inspector", lang), translate("Pokémon Filter", lang), translate("Heatmap", lang)
+    )
+
 # Callback to combine all three data source selectors into one value
 @callback(
     [Output("combined-source-store", "data", allow_duplicate=True),
@@ -749,22 +779,34 @@ def toggle_source_controls(source):
         btn_s = {"display": "block"}
     elif source == "sql_shiny":
         shiny_s = {"display": "block"}
-    elif source:  # historical or historical_tth
+    elif source:
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         int_s = {"display": "block"}
 
     return live_s, hist_s, int_s, heat_s, btn_s, shiny_s
 
 @callback(
-    [Output("mode-selector", "options"), Output("mode-selector", "value")],
-    Input("combined-source-store", "data"),
+    [Output("mode-selector", "options"), Output("mode-selector", "value"),
+     Output("data-source-selector", "options"), Output("data-source-tth-selector", "options"), Output("data-source-sql-selector", "options"),
+     Output("heatmap-display-mode", "options")],
+    [Input("combined-source-store", "data"), Input("language-store", "data")],
     [State("mode-persistence-store", "data"), State("mode-selector", "value")]
 )
-def restrict_modes(source, stored_mode, current_ui_mode):
-    full_options = [{"label": "Surged (Hourly)", "value": "surged"}, {"label": "Grouped (Table)", "value": "grouped"}, {"label": "Sum (Totals)", "value": "sum"}]
-    tth_options = [{"label": "Surged (Hourly)", "value": "surged"}, {"label": "Sum (Totals)", "value": "sum"}]
-    heatmap_options = [{"label": "Map View", "value": "map"}]
-    shiny_options = [{"label": "Grouped (Table)", "value": "grouped"}]
+def restrict_modes(source, lang, stored_mode, current_ui_mode):
+    lang = lang or "en"
+
+    # Translate Radio Options
+    full_options = [
+        {"label": translate("Surged (Hourly)", lang), "value": "surged"},
+        {"label": translate("Grouped (Table)", lang), "value": "grouped"},
+        {"label": translate("Sum (Totals)", lang), "value": "sum"}
+    ]
+    tth_options = [
+        {"label": translate("Surged (Hourly)", lang), "value": "surged"},
+        {"label": translate("Sum (Totals)", lang), "value": "sum"}
+    ]
+    heatmap_options = [{"label": translate("Map View", lang), "value": "map"}]
+    shiny_options = [{"label": translate("Grouped (Table)", lang), "value": "grouped"}]
 
     if source and "tth" in source: allowed = tth_options
     elif source == "sql_heatmap": allowed = heatmap_options
@@ -772,7 +814,19 @@ def restrict_modes(source, stored_mode, current_ui_mode):
     else: allowed = full_options
     allowed_vals = [o['value'] for o in allowed]
     final_val = current_ui_mode if current_ui_mode in allowed_vals else (stored_mode if stored_mode in allowed_vals else allowed_vals[0])
-    return allowed, final_val
+
+    # Translate Source Selectors
+    source_opts = [{"label": translate("Live", lang), "value": "live"}, {"label": translate("Historical", lang), "value": "historical"}]
+    tth_opts = [{"label": translate("Live", lang), "value": "live_tth"}, {"label": translate("Historical", lang), "value": "historical_tth"}]
+    sql_opts = [{"label": translate("Heatmap", lang), "value": "sql_heatmap"}, {"label": translate("Shiny Odds", lang), "value": "sql_shiny"}]
+
+    heatmap_mode_opts = [
+        {"label": translate("Markers", lang), "value": "markers"},
+        {"label": translate("Density Heatmap", lang), "value": "density"},
+        {"label": translate("Grid Overlay", lang), "value": "grid"}
+    ]
+
+    return allowed, final_val, source_opts, tth_opts, sql_opts, heatmap_mode_opts
 
 @callback(Output("mode-persistence-store", "data"), Input("mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
@@ -812,27 +866,29 @@ def load_persisted_source(ts, stored_source):
 @callback(Output("heatmap-mode-store", "data"), Input("heatmap-display-mode", "value"))
 def update_heatmap_mode_store(val): return val
 
-@callback(Output("iv-range-display", "children"), Input("iv-slider", "value"))
-def update_iv_display(value):
+@callback(Output("iv-range-display", "children"), [Input("iv-slider", "value"), Input("language-store", "data")])
+def update_iv_display(value, lang):
+    lang = lang or "en"
     if not value or value == [0, 100]:
-        return "All IVs (0-100%)"
+        return translate("All IVs (0-100%)", lang)
     elif value[0] == value[1]:
-        return f"Exactly {value[0]}% IV"
+        return translate("Exactly {val}% IV", lang).format(val=value[0])
     elif value[1] == 100:
-        return f"IV ≥ {value[0]}%"
+        return translate("IV ≥ {val}%", lang).format(val=value[0])
     else:
-        return f"IV: {value[0]}% - {value[1]}%"
+        return translate("IV: {min}% - {max}%", lang).format(min=value[0], max=value[1])
 
-@callback(Output("level-range-display", "children"), Input("level-slider", "value"))
-def update_level_display(value):
+@callback(Output("level-range-display", "children"), [Input("level-slider", "value"), Input("language-store", "data")])
+def update_level_display(value, lang):
+    lang = lang or "en"
     if not value or value == [1, 50]:
-        return "All Levels (1-50)"
+        return translate("All Levels (1-50)", lang)
     elif value[0] == value[1]:
-        return f"Exactly Level {value[0]}"
+        return translate("Exactly Level {val}", lang).format(val=value[0])
     elif value[1] == 50:
-        return f"Level ≥ {value[0]}"
+        return translate("Level ≥ {val}", lang).format(val=value[0])
     else:
-        return f"Level: {value[0]} - {value[1]}"
+        return translate("Level: {min} - {max}", lang).format(min=value[0], max=value[1])
 
 @callback(
     [Output("area-modal", "is_open"), Output("selection-modal", "is_open"), Output("table-search-input", "style")],
@@ -853,18 +909,18 @@ def handle_modals_and_search(ao, ac, so, sc, mode, is_area, is_selection):
 
     return is_area, is_selection, search_style
 
-@callback(Output("area-cards-container", "children"), [Input("area-filter-input", "value")], [State("area-selector", "value")])
-def filter_area_cards(search, area):
+@callback(Output("area-cards-container", "children"), [Input("area-filter-input", "value"), Input("language-store", "data")], [State("area-selector", "value")])
+def filter_area_cards(search, lang, area):
     geos = get_cached_geofences() or []
     if search: geos = [g for g in geos if search.lower() in g['name'].lower()]
-    return generate_area_cards(geos, area)
+    return generate_area_cards(geos, area, lang or "en")
 
 dash.clientside_callback(
     ClientsideFunction(namespace='clientside', function_name='scrollToSelected'),
     Output("clientside-dummy-store", "data"), Input("area-modal", "is_open")
 )
 
-# --- Selection Filter Logic ---
+# Selection Filter Logic
 
 @callback(
     [Output("selection-grid", "children"),
@@ -892,7 +948,7 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
 
     # Calculate IV range span to determine if Select All should be enabled
     iv_span = (iv_range[1] - iv_range[0]) if iv_range else 100
-    select_all_enabled = iv_span <= 25  # Only enable if range is 25% or less
+    select_all_enabled = iv_span <= 25
 
     # If IV range moved outside of 25% and there was a selection, clear it
     if trigger == "iv-slider" and not select_all_enabled and len(selected_set) > 0:
@@ -909,7 +965,7 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
         selected_set = set()
         page = 1
     elif trigger == "selection-select-all" and select_all_enabled:
-        # Select all CURRENTLY VISIBLE/FILTERED options (only if IV range allows)
+        # Select all CURRENTLY VISIBLE/FILTERED options only if IV range allows
         for o in options:
             selected_set.add(o['key'])
     elif isinstance(trigger, dict) and trigger.get("type") == "selection-item":
@@ -942,8 +998,6 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
     for item in visible_items:
         key = item['key']
         is_sel = key in selected_set
-
-        # Use same styling class as quick filter for consistency
         cls = "pokemon-filter-item" + (" selected" if is_sel else "")
 
         grid_children.append(html.Div(
@@ -982,11 +1036,13 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
     [State("area-selector", "value"), State("live-time-input", "value"), State("historical-date-picker", "start_date"),
      State("historical-date-picker", "end_date"), State("interval-selector", "value"),
      State("mode-selector", "value"), State("iv-slider", "value"), State("level-slider", "value"),
-     State("selection-store", "data"), State("shiny-start-month", "value"), State("shiny-end-month", "value")]
+     State("selection-store", "data"), State("shiny-start-month", "value"), State("shiny-end-month", "value"),
+     State("language-store", "data")]
 )
-def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, level_range, selected_keys, shiny_start, shiny_end):
+def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, level_range, selected_keys, shiny_start, shiny_end, lang):
+    lang = lang or "en"
     if not n: return {}, {"display": "none"}, [], None
-    if not area: return {}, {"display": "none"}, [], dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
+    if not area: return {}, {"display": "none"}, [], dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), translate("Please select an Area first.", lang)], color="warning", dismissable=True, duration=4000)
 
     try:
         if source == "sql_shiny":
@@ -1047,12 +1103,12 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
             total_count = len(all_options)
             selected_count = len(selected_keys) if selected_keys else 0
 
-            # Rule 3: Show red warning if no Pokemon selected (don't query "all")
+            # Show red warning if no Pokemon selected
             if selected_count == 0:
                 return {}, {"display": "none"}, [], dbc.Alert([
                     html.I(className="bi bi-exclamation-triangle-fill me-2"),
-                    html.Strong("No Pokémon Selected! "),
-                    "Please open the Selection Filter and choose at least one Pokémon to query."
+                    html.Strong(translate("No Pokémon Selected!", lang)),
+                    translate("Please open the Selection Filter and choose at least one Pokémon to query.", lang)
                 ], color="danger", dismissable=True, duration=6000)
 
             # If > 75% selected, query ALL for efficiency
@@ -1151,7 +1207,7 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
             params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
             data = get_pokemon_stats("counter", params)
 
-        if not data: return {}, {"display": "block"}, [], dbc.Alert("No data found for this period.", color="warning", dismissable=True, duration=4000)
+        if not data: return {}, {"display": "block"}, [], dbc.Alert(translate("No data found for this period.", lang), color="warning", dismissable=True, duration=4000)
         return data, {"display": "block"}, [], None
     except Exception as e:
         logger.error(f"❌ FETCH ERROR: {e}", exc_info=True)
@@ -1186,7 +1242,7 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
     elif trigger == "rows-per-page-selector": return {"current_page": 1, "rows_per_page": rows}
     return {**state, "current_page": new_page, "rows_per_page": state.get('rows_per_page', 25)}
 
-# --- Quick Filter Callbacks (Replicated from Invasions) ---
+# Quick Filter Callbacks
 
 @callback(
     [Output("pokemon-quick-filter-grid", "children"), Output("pokemon-quick-filter-count", "children")],
@@ -1200,7 +1256,7 @@ def populate_pokemon_quick_filter(heatmap_data, search_term, source, hidden_poke
     if source != "sql_heatmap" or not heatmap_data:
         return [], ""
 
-    # 1. Process Data
+    # Process Data
     pokemon_set = {}
     for record in heatmap_data:
         pid = record.get('pokemon_id')
@@ -1215,10 +1271,10 @@ def populate_pokemon_quick_filter(heatmap_data, search_term, source, hidden_poke
         else:
             pokemon_set[key]['count'] += record.get('count', 0)
 
-    # 2. Sort (by count descending, then ID)
+    # Sort by count descending, then ID
     sorted_pokemon = sorted(pokemon_set.items(), key=lambda x: (-x[1]['count'], x[1]['pid']))
 
-    # 3. Filter (Search)
+    #  Filter Search
     search_lower = search_term.lower() if search_term else ""
     filtered_list = []
 
@@ -1284,7 +1340,7 @@ dash.clientside_callback(
         return window.dash_clientside.no_update;
     }
     """,
-    Output("pokemon-quick-filter-grid", "className"),  # Dummy output
+    Output("pokemon-quick-filter-grid", "className"),
     Input("heatmap-hidden-pokemon", "data"),
     prevent_initial_call=True
 )
@@ -1348,10 +1404,11 @@ def reset_hidden_pokemon_on_new_data(heatmap_data):
 @callback(
     [Output("total-counts-display", "children"), Output("main-visual-container", "children"), Output("raw-data-display", "children"), Output("total-pages-store", "data"),
      Output("heatmap-map-container", "style"), Output("main-visual-container", "style"), Output("heatmap-toggle-container", "style"), Output("quick-filter-container", "style")],
-    [Input("raw-data-store", "data"), Input("table-search-input", "value"), Input("table-sort-store", "data"), Input("table-page-store", "data"), Input("heatmap-data-store", "data")],
+    [Input("raw-data-store", "data"), Input("table-search-input", "value"), Input("table-sort-store", "data"), Input("table-page-store", "data"), Input("heatmap-data-store", "data"), Input("language-store", "data")],
     [State("mode-selector", "value"), State("combined-source-store", "data")]
 )
-def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
+def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, source):
+    lang = lang or "en"
     if source == "sql_heatmap":
         count = len(heatmap_data) if heatmap_data else 0
         raw_text = json.dumps(heatmap_data, indent=2)
@@ -1362,7 +1419,7 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
     if source == "sql_shiny" and data:
         raw_text = json.dumps(data, indent=2)
 
-        # Parse shiny data - it's a list directly
+        # Parse shiny data
         if isinstance(data, list):
             shiny_df = pd.DataFrame(data)
         else:
@@ -1390,11 +1447,11 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
             html.Div("Pokémon Species", className="text-muted mb-3"),
             html.Div([
                 html.Img(src=f"{icon_base_url}/misc/sparkles.webp", style={"width": "28px", "marginRight": "10px", "verticalAlign": "middle"}),
-                html.Span(f"{shiny_eligible:,} Shiny Eligible", style={"fontWeight": "bold"})
+                html.Span(f"{shiny_eligible:,} " + translate("Shiny Eligible", lang), style={"fontWeight": "bold"})
             ], className="d-flex align-items-center mb-2"),
             html.Div([
                 html.I(className="bi bi-eye-fill me-2", style={"fontSize": "1.2rem"}),
-                html.Span(f"{total_encounters:,} Encounters", style={"fontWeight": "bold"})
+                html.Span(f"{total_encounters:,} " + translate("Encounters", lang), style={"fontWeight": "bold"})
             ], className="d-flex align-items-center mb-2"),
         ]
 
@@ -1416,14 +1473,14 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         header_style = {"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}
 
         header_cells = [
-            html.Th("Image", style={**header_style, "width": "60px"}),
-            html.Th(html.Span(["Pokémon", html.Span(" ▲" if col == 'pokemon_id' and ascending else (" ▼" if col == 'pokemon_id' else ""), style={"color": "#aaa"})],
+            html.Th(translate("Image", lang), style={**header_style, "width": "60px"}),
+            html.Th(html.Span([translate("Pokémon", lang), html.Span(" ▲" if col == 'pokemon_id' and ascending else (" ▼" if col == 'pokemon_id' else ""), style={"color": "#aaa"})],
                     id={"type": "sort-header", "index": "pokemon_id"}, style={"cursor": "pointer"}), style=header_style),
-            html.Th(html.Span(["Shiny Rate", html.Span(" ▲" if col == 'shiny_pct_pooled' and ascending else (" ▼" if col == 'shiny_pct_pooled' else ""), style={"color": "#aaa"})],
+            html.Th(html.Span([translate("Shiny Rate", lang), html.Span(" ▲" if col == 'shiny_pct_pooled' and ascending else (" ▼" if col == 'shiny_pct_pooled' else ""), style={"color": "#aaa"})],
                     id={"type": "sort-header", "index": "shiny_pct_pooled"}, style={"cursor": "pointer"}), style=header_style),
-            html.Th(html.Span(["Encounters", html.Span(" ▲" if col == 'total_encounters' and ascending else (" ▼" if col == 'total_encounters' else ""), style={"color": "#aaa"})],
+            html.Th(html.Span([translate("Encounters", lang), html.Span(" ▲" if col == 'total_encounters' and ascending else (" ▼" if col == 'total_encounters' else ""), style={"color": "#aaa"})],
                     id={"type": "sort-header", "index": "total_encounters"}, style={"cursor": "pointer"}), style=header_style),
-            html.Th(html.Span(["Users", html.Span(" ▲" if col == 'users_contributing' and ascending else (" ▼" if col == 'users_contributing' else ""), style={"color": "#aaa"})],
+            html.Th(html.Span([translate("Users", lang), html.Span(" ▲" if col == 'users_contributing' and ascending else (" ▼" if col == 'users_contributing' else ""), style={"color": "#aaa"})],
                     id={"type": "sort-header", "index": "users_contributing"}, style={"cursor": "pointer"}), style=header_style),
         ]
 
@@ -1557,9 +1614,8 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         current_page = min(max(1, page['current_page']), total_pages_val)
         page_df = pivot.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
 
-        # Header with all columns centered
-        header_cells = [html.Th("Image", style={"backgroundColor": "#1a1a1a", "width": "60px", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"})]
-        header_cells.append(html.Th(html.Span(["Pokémon", html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}))
+        header_cells = [html.Th(translate("Image", lang), style={"backgroundColor": "#1a1a1a", "width": "60px", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"})]
+        header_cells.append(html.Th(html.Span([translate("Pokémon", lang), html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}))
 
         for c in [x for x in pivot.columns if x not in ['pid', 'form', 'key']]:
              label = html.Img(src=metric_icons[c.lower()], style={"width":"24px", "height":"24px", "verticalAlign":"middle"}) if c.lower() in metric_icons else c

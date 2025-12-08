@@ -13,6 +13,7 @@ import re
 import os
 from pathlib import Path
 from functools import lru_cache
+from dashboard.translations.manager import translate
 
 dash.register_page(__name__, path='/raids', title='Raid Analytics')
 
@@ -123,41 +124,41 @@ def get_pokemon_icon_url(pid, form=0):
         return f"{ICON_BASE_URL}/pokemon/{pid}.webp"
 
 # Raid Info Colors/Icons
-def get_raid_info(level_str):
+def get_raid_info(level_str, lang="en"):
     lvl = str(level_str)
     color = "#e0e0e0" # default
-    label = f"Level {lvl}"
+    label = f"{translate('Level', lang)} {lvl}"
     file_suffix = lvl
 
     # Standard levels
     if lvl == "1": color = "#e0e0e0" # Gray/White
     elif lvl == "3": color = "#f0ad4e" # Orange
     elif lvl == "5": color = "#dc3545" # Red (Legendary)
-    elif lvl == "6": label, color = "Mega", "#a020f0" # Purple
-    elif lvl == "7": label, color = "Mega 5", "#7fce83" # Greenish
-    elif lvl == "8": label, color = "Ultra Beast", "#e881f1" # Pinkish
-    elif lvl == "9": label, color = "Extended Egg", "#ce2c2c" # Dark Red
-    elif lvl == "10": label, color = "Primal", "#ad5b2c" # Brown/Orange
-    elif lvl == "11": label, color = "Shadow Level 1", "#0a0a0a"
-    elif lvl == "12": label, color = "Shadow Level 2", "#0a0a0a"
-    elif lvl == "13": label, color = "Shadow Level 3", "#0a0a0a"
-    elif lvl == "14": label, color = "Shadow Level 4", "#0a0a0a"
-    elif lvl == "15": label, color = "Shadow Level 5", "#0a0a0a"
+    elif lvl == "6": label, color = translate("Mega", lang), "#a020f0" # Purple
+    elif lvl == "7": label, color = translate("Mega 5", lang), "#7fce83" # Greenish
+    elif lvl == "8": label, color = translate("Ultra Beast", lang), "#e881f1" # Pinkish
+    elif lvl == "9": label, color = translate("Extended Egg", lang), "#ce2c2c" # Dark Red
+    elif lvl == "10": label, color = translate("Primal", lang), "#ad5b2c" # Brown/Orange
+    elif lvl == "11": label, color = translate("Shadow Level 1", lang), "#0a0a0a"
+    elif lvl == "12": label, color = translate("Shadow Level 2", lang), "#0a0a0a"
+    elif lvl == "13": label, color = translate("Shadow Level 3", lang), "#0a0a0a"
+    elif lvl == "14": label, color = translate("Shadow Level 4", lang), "#0a0a0a"
+    elif lvl == "15": label, color = translate("Shadow Level 5", lang), "#0a0a0a"
 
-    # Extra Attributes
+# Extra Attributes
     lvl_lower = lvl.lower()
     if "costume" in lvl_lower:
         icon_url = f"{ICON_BASE_URL}/reward/avatar_clothing/0.webp"
         color = "#f8f9fa"
-        label = "Costume"
+        label = translate("Costume", lang)
     elif "exclusive" in lvl_lower:
         icon_url = f"{ICON_BASE_URL}/misc/sponsor.webp"
         color = "#198754"
-        label = "Exclusive"
+        label = translate("Exclusive", lang)
     elif "ex eligible" in lvl_lower:
         icon_url = f"{ICON_BASE_URL}/misc/ex.webp"
         color = "#0d6efd"
-        label = "EX Eligible"
+        label = translate("EX Eligible", lang)
     else:
         # Fallback for standard levels - Egg Image
         icon_url = f"{ICON_BASE_URL}/raid/egg/{file_suffix}.webp"
@@ -166,29 +167,29 @@ def get_raid_info(level_str):
 
 # Layout
 
-def generate_area_cards(geofences, selected_area_name):
+def generate_area_cards(geofences, selected_area_name, lang="en"):
     cards = []
     for idx, geo in enumerate(geofences):
         safe_name = re.sub(r'[^a-zA-Z0-9]', '_', geo['name'])
         is_selected = (selected_area_name == geo['name'])
 
-        map_children = [html.Div("✓ Selected", style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
+        map_children = [html.Div("✓ " + translate("Selected", lang), style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
 
         card = dbc.Card([
             html.Div(map_children, id=f"raids-area-map-{safe_name}", **{'data-map-geofence': json.dumps(geo)}, style={'height': '150px', 'backgroundColor': '#1a1a1a', 'position': 'relative'}),
             dbc.CardBody([
                 html.H5(geo['name'], className="card-title text-truncate", style={'color': '#28a745' if is_selected else 'inherit'}),
-                dbc.Button("✓ Selected" if is_selected else "Select", href=f"/raids?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
+                dbc.Button("✓ " + translate("Selected", lang) if is_selected else translate("Select", lang), href=f"/raids?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
             ])
         ], style={"width": "14rem", "margin": "10px", "border": f"3px solid {'#28a745' if is_selected else 'transparent'}"}, className="shadow-sm")
 
         if is_selected: card.id = "selected-area-card"
         cards.append(card)
-    return cards if cards else html.Div("No areas match your search.", className="text-center text-muted my-4")
+    return cards if cards else html.Div(translate("No areas match your search.", lang), className="text-center text-muted my-4")
 
 def layout(area=None, **kwargs):
     geofences = get_cached_geofences() or []
-    initial_cards = generate_area_cards(geofences, area)
+    initial_cards = generate_area_cards(geofences, area, "en")
     area_options = [{"label": g["name"], "value": g["name"]} for g in geofences]
     area_label = area if area else "No Area Selected"
 
@@ -208,7 +209,7 @@ def layout(area=None, **kwargs):
 
         # Header
         dbc.Row([
-            dbc.Col(html.H2("Raid Analytics", className="text-white"), width=12, className="my-4"),
+            dbc.Col(html.H2("Raid Analytics", id="raids-page-title", className="text-white"), width=12, className="my-4"),
         ]),
 
         # Notification Area
@@ -216,12 +217,12 @@ def layout(area=None, **kwargs):
 
         # Main Control Card
         dbc.Card([
-            dbc.CardHeader("⚙️ Analysis Settings", className="fw-bold"),
+            dbc.CardHeader("⚙️ Analysis Settings", id="raids-settings-header", className="fw-bold"),
             dbc.CardBody([
                 dbc.Row([
                     # Area Selection
                     dbc.Col([
-                        dbc.Label("Selected Area", className="fw-bold"),
+                        dbc.Label("Selected Area", id="raids-label-selected-area", className="fw-bold"),
                         dbc.InputGroup([
                             dbc.InputGroupText("🗺️"),
                             dbc.Input(value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
@@ -231,11 +232,11 @@ def layout(area=None, **kwargs):
 
                     # Data Source
                     dbc.Col([
-                        dbc.Label("Data Source", className="fw-bold"),
+                        dbc.Label("Data Source", id="raids-label-data-source", className="fw-bold"),
                         html.Div([
                             # Row 1: Stats (Live & Historical)
                             html.Div([
-                                html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("Stats: ", id="raids-label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="raids-data-source-selector",
                                     options=[
@@ -249,7 +250,7 @@ def layout(area=None, **kwargs):
                             ], className="d-flex align-items-center mb-1"),
                             # Row 2: SQL Sources (Heatmap)
                             html.Div([
-                                html.Span("SQL: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("SQL: ", id="raids-label-sql", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="raids-data-source-sql-selector",
                                     options=[
@@ -271,14 +272,14 @@ def layout(area=None, **kwargs):
                     # Time Control
                     dbc.Col([
                         html.Div(id="raids-live-controls", children=[
-                            dbc.Label("📅 Time Window (Hours)"),
+                            dbc.Label("📅 Time Window (Hours)", id="raids-label-time-window"),
                             dbc.InputGroup([
                                 dbc.Input(id="raids-live-time-input", type="number", min=1, max=72, value=1),
                                 dbc.InputGroupText("hours")
                             ])
                         ]),
                         html.Div(id="raids-historical-controls", style={"display": "none"}, children=[
-                            dbc.Label("📅 Date Range"),
+                            dbc.Label("📅 Date Range", id="raids-label-date-range"),
                             dcc.DatePickerRange(id="raids-historical-date-picker", start_date=date.today(), end_date=date.today(), className="d-block w-100", persistence=True, persistence_type="local")
                         ])
                     ], width=6, md=3),
@@ -286,14 +287,14 @@ def layout(area=None, **kwargs):
                     # Interval
                     dbc.Col([
                         html.Div(id="raids-interval-control-container", style={"display": "none"}, children=[
-                            dbc.Label("⏱️ Interval"),
+                            dbc.Label("⏱️ Interval", id="raids-label-interval"),
                             dcc.Dropdown(id="raids-interval-selector", options=[{"label": "Hourly", "value": "hourly"}], value="hourly", clearable=False, className="text-dark")
                         ])
                     ], width=6, md=3),
 
                     # Mode
                     dbc.Col([
-                        dbc.Label("📊 View Mode"),
+                        dbc.Label("📊 View Mode", id="raids-label-view-mode"),
                         dcc.Dropdown(
                             id="raids-mode-selector",
                             options=[],
@@ -305,7 +306,7 @@ def layout(area=None, **kwargs):
 
                     # Actions
                     dbc.Col([
-                        dbc.Label("Actions", style={"visibility": "hidden"}),
+                        dbc.Label("Actions", id="raids-label-actions", style={"visibility": "hidden"}),
                         dbc.Button("Run Analysis", id="raids-submit-btn", color="success", className="w-100 fw-bold")
                     ], width=6, md=3)
                 ], className="align-items-end g-3"),
@@ -315,7 +316,7 @@ def layout(area=None, **kwargs):
                     html.Hr(className="my-3"),
                     dbc.Row([
                         dbc.Col([
-                            dbc.Label("🗺️ Heatmap Display Mode", className="fw-bold"),
+                            dbc.Label("🗺️ Heatmap Display Mode", id="raids-label-heatmap-display-mode", className="fw-bold"),
                             dbc.RadioItems(
                                 id="raids-heatmap-display-mode",
                                 options=[
@@ -337,7 +338,7 @@ def layout(area=None, **kwargs):
 
         # Area Selection Modal
         dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle("Select an Area")),
+            dbc.ModalHeader(dbc.ModalTitle("Select an Area", id="raids-modal-title-area")),
             dbc.ModalBody([
                 html.Div(
                     dbc.Input(id="raids-area-filter-input", placeholder="Filter areas by name...", className="mb-3", autoFocus=True),
@@ -349,12 +350,11 @@ def layout(area=None, **kwargs):
         ], id="raids-area-modal", size="xl", scrollable=True),
 
         # Results Container
-        # REMOVED global dcc.Loading, moved inside specific cards for fluid UI
         html.Div(id="raids-stats-container", style={"display": "none"}, children=[
             dbc.Row([
                 # Sidebar
                 dbc.Col(dbc.Card([
-                    dbc.CardHeader("📈 Total Counts"),
+                    dbc.CardHeader("📈 Total Counts", id="raids-card-header-total-counts"),
                     dbc.CardBody(
                         dcc.Loading(html.Div(id="raids-total-counts-display"))
                     )
@@ -362,7 +362,7 @@ def layout(area=None, **kwargs):
 
                 # Activity Data
                 dbc.Col(dbc.Card([
-                    dbc.CardHeader("📋 Activity Data"),
+                    dbc.CardHeader("📋 Activity Data", id="raids-card-header-activity"),
                     dbc.CardBody([
                         # Search Input: debounce=False for fluid search, outside Loading
                         dcc.Input(
@@ -379,7 +379,7 @@ def layout(area=None, **kwargs):
             ]),
 
             dbc.Row([dbc.Col(dbc.Card([
-                dbc.CardHeader("🛠️ Raw Data Inspector"),
+                dbc.CardHeader("🛠️ Raw Data Inspector", id="raids-card-header-raw"),
                 dbc.CardBody(html.Pre(id="raids-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
         ]),
@@ -393,7 +393,7 @@ def layout(area=None, **kwargs):
                         dbc.CardHeader([
                             dbc.Row([
                                 dbc.Col([
-                                    html.Span("🎯 Raid Boss Filter", className="me-2"),
+                                    html.Span("🎯 Raid Boss Filter", id="raids-card-header-quick-filter", className="me-2"),
                                     html.Span(id="raids-quick-filter-count", className="text-muted small")
                                 ], width="auto", className="d-flex align-items-center"),
                                 dbc.Col([
@@ -418,7 +418,7 @@ def layout(area=None, **kwargs):
                 dbc.Col([
                     dbc.Card([
                         dbc.CardHeader([
-                            html.Span("🗺️ Raid Heatmap", className="fw-bold"),
+                            html.Span("🗺️ Raid Heatmap", id="raids-card-header-heatmap", className="fw-bold"),
                             html.Span(id="raids-heatmap-stats", className="ms-3 text-muted small")
                         ]),
                         dbc.CardBody([
@@ -429,6 +429,39 @@ def layout(area=None, **kwargs):
             ])
         ])
     ])
+
+# 0. Static Translation Callback
+@callback(
+    [Output("raids-page-title", "children"),
+     Output("raids-settings-header", "children"),
+     Output("raids-label-selected-area", "children"), Output("raids-open-area-modal", "children"),
+     Output("raids-label-data-source", "children"), Output("raids-label-stats", "children"),
+     Output("raids-label-sql", "children"),
+     Output("raids-label-time-window", "children"), Output("raids-label-date-range", "children"),
+     Output("raids-label-interval", "children"), Output("raids-label-view-mode", "children"),
+     Output("raids-label-actions", "children"), Output("raids-submit-btn", "children"),
+     Output("raids-label-heatmap-display-mode", "children"),
+     Output("raids-modal-title-area", "children"), Output("raids-close-area-modal", "children"),
+     Output("raids-card-header-total-counts", "children"), Output("raids-card-header-activity", "children"),
+     Output("raids-card-header-raw", "children"), Output("raids-card-header-quick-filter", "children"), Output("raids-card-header-heatmap", "children")],
+    Input("language-store", "data")
+)
+def update_static_translations(lang):
+    lang = lang or "en"
+    return (
+        translate("Raid Analytics", lang),
+        translate("Analysis Settings", lang),
+        translate("Selected Area", lang), translate("Change", lang),
+        translate("Data Source", lang), translate("Stats", lang),
+        translate("SQL", lang),
+        translate("Time Window", lang), translate("Date Range", lang),
+        translate("Interval", lang), translate("View Mode", lang),
+        translate("Actions", lang), translate("Run Analysis", lang),
+        translate("Heatmap Display Mode", lang),
+        translate("Select an Area", lang), translate("Close", lang),
+        translate("Total Counts", lang), translate("Activity Data", lang),
+        translate("Raw Data Inspector", lang), translate("Raid Boss Filter", lang), translate("Raid Heatmap", lang)
+    )
 
 # Parsing Logic
 
@@ -543,28 +576,41 @@ def toggle_source_controls(source):
     return live_s, hist_s, int_s, heat_s
 
 @callback(
-    [Output("raids-mode-selector", "options"), Output("raids-mode-selector", "value")],
-    Input("raids-combined-source-store", "data"),
+    [Output("raids-mode-selector", "options"), Output("raids-mode-selector", "value"),
+     Output("raids-data-source-selector", "options"), Output("raids-data-source-sql-selector", "options"),
+     Output("raids-heatmap-display-mode", "options")],
+    [Input("raids-combined-source-store", "data"), Input("language-store", "data")],
     [State("raids-mode-persistence-store", "data"), State("raids-mode-selector", "value")]
 )
-def restrict_modes(source, stored_mode, current_ui_mode):
+def restrict_modes(source, lang, stored_mode, current_ui_mode):
+    lang = lang or "en"
     full_options = [
-        {"label": "Surged (Hourly)", "value": "surged"},
-        {"label": "Grouped (Table)", "value": "grouped"},
-        {"label": "Sum (Totals)", "value": "sum"},
+        {"label": translate("Surged (Hourly)", lang), "value": "surged"},
+        {"label": translate("Grouped (Table)", lang), "value": "grouped"},
+        {"label": translate("Sum (Totals)", lang), "value": "sum"},
     ]
-    heatmap_options = [{"label": "Map View", "value": "map"}]
+    heatmap_options = [{"label": translate("Map View", lang), "value": "map"}]
 
-    if source == "sql_heatmap":
-        allowed = heatmap_options
-    else:
-        allowed = full_options
+    if source == "sql_heatmap": allowed = heatmap_options
+    else: allowed = full_options
 
     allowed_values = [o['value'] for o in allowed]
     if current_ui_mode in allowed_values: final_value = current_ui_mode
     elif stored_mode in allowed_values: final_value = stored_mode
     else: final_value = allowed_values[0]
-    return allowed, final_value
+
+    # Translate Source Selectors
+    source_opts = [{"label": translate("Live", lang), "value": "live"}, {"label": translate("Historical", lang), "value": "historical"}]
+    sql_opts = [{"label": translate("Heatmap", lang), "value": "sql_heatmap"}]
+
+    # Translate Heatmap Mode Options
+    heatmap_mode_opts = [
+        {"label": translate("Markers (Gyms)", lang), "value": "markers"},
+        {"label": translate("Density Heatmap", lang), "value": "density"},
+        {"label": translate("Grid Overlay", lang), "value": "grid"}
+    ]
+
+    return allowed, final_value, source_opts, sql_opts, heatmap_mode_opts
 
 @callback(Output("raids-mode-persistence-store", "data"), Input("raids-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
@@ -771,11 +817,13 @@ def handle_modals_and_search(ao, ac, mode, isa):
     return isa, search_style
 
 # Area Cards Filter & Scroll
-@callback(Output("raids-area-cards-container", "children"), [Input("raids-area-filter-input", "value")], [State("raids-area-selector", "value")])
-def filter_area_cards(search_term, selected_area):
+@callback(Output("raids-area-cards-container", "children"),
+          [Input("raids-area-filter-input", "value"), Input("language-store", "data")],
+          [State("raids-area-selector", "value")])
+def filter_area_cards(search_term, lang, selected_area):
     geofences = get_cached_geofences() or []
     if search_term: geofences = [g for g in geofences if search_term.lower() in g['name'].lower()]
-    return generate_area_cards(geofences, selected_area)
+    return generate_area_cards(geofences, selected_area, lang or "en")
 
 dash.clientside_callback(
     ClientsideFunction(namespace='clientside', function_name='scrollToSelected'),
@@ -789,13 +837,15 @@ dash.clientside_callback(
     [Input("raids-submit-btn", "n_clicks"), Input("raids-combined-source-store", "data")],
     [State("raids-area-selector", "value"), State("raids-live-time-input", "value"),
      State("raids-historical-date-picker", "start_date"), State("raids-historical-date-picker", "end_date"),
-     State("raids-interval-selector", "value"), State("raids-mode-selector", "value")]
+     State("raids-interval-selector", "value"), State("raids-mode-selector", "value"),
+     State("language-store", "data")]
 )
-def fetch_data(n, source, area, live_h, start, end, interval, mode):
+def fetch_data(n, source, area, live_h, start, end, interval, mode, lang):
+    lang = lang or "en"
     if not n:
         return {}, {"display": "none"}, [], {"display": "none"}, "", None
     if not area:
-        return {}, {"display": "none"}, [], {"display": "none"}, "", dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
+        return {}, {"display": "none"}, [], {"display": "none"}, "", dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), translate("Please select an Area first.", lang)], color="warning", dismissable=True, duration=4000)
 
     try:
         if source == "sql_heatmap":
@@ -824,7 +874,9 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode):
 
             total_raids = sum(p.get("count", 0) for p in heatmap_list)
             unique_gyms = len(set(p.get("gym_name", "") for p in heatmap_list))
-            stats_text = f"{unique_gyms:,} gyms • {total_raids:,} total raids"
+            gyms_word = translate("gyms", lang)
+            raids_word = translate("total raids", lang)
+            stats_text = f"{unique_gyms:,} {gyms_word} • {total_raids:,} {raids_word}"
 
             logger.info(f"✅ Raid Heatmap: {len(heatmap_list)} data points, {unique_gyms} gyms, {total_raids} raids")
             return {}, {"display": "none"}, heatmap_list, {"display": "block"}, stats_text, None
@@ -876,10 +928,11 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 # Visuals Update
 @callback(
     [Output("raids-total-counts-display", "children"), Output("raids-main-visual-container", "children"), Output("raids-raw-data-display", "children"), Output("raids-total-pages-store", "data"), Output("raids-main-visual-container", "style")],
-    [Input("raids-raw-data-store", "data"), Input("raids-search-input", "value"), Input("raids-table-sort-store", "data"), Input("raids-table-page-store", "data")],
+    [Input("raids-raw-data-store", "data"), Input("raids-search-input", "value"), Input("raids-table-sort-store", "data"), Input("raids-table-page-store", "data"), Input("language-store", "data")],
     [State("raids-mode-selector", "value"), State("raids-combined-source-store", "data")]
 )
-def update_visuals(data, search_term, sort, page, mode, source):
+def update_visuals(data, search_term, sort, page, lang, mode, source):
+    lang = lang or "en"
     if not data: return [], html.Div(), "", 1, {"display": "block"}
 
     df = parse_data_to_df(data, mode, source)
@@ -939,7 +992,7 @@ def update_visuals(data, search_term, sort, page, mode, source):
         for item in sorted_metrics:
             m = str(item['metric'])
             if m != 'total':
-                label, color, icon_url = get_raid_info(m)
+                label, color, icon_url = get_raid_info(m, lang)
                 total_div.append(html.Div([
                     html.Img(src=icon_url, style={"width": "28px", "marginRight": "8px", "verticalAlign": "middle"}),
                     html.Span(f"{item['count']:,}", style={"fontSize": "1.1em", "fontWeight": "bold", "color": color}),
@@ -962,9 +1015,9 @@ def update_visuals(data, search_term, sort, page, mode, source):
         page_df = df.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
 
         header_row = html.Tr([
-            html.Th("Image", style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center", "width": "60px"}),
-            html.Th(html.Span(["Pokémon", html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "raids-sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"}),
-            html.Th(html.Span(["Count", html.Span(" ▲" if col == 'count' and ascending else (" ▼" if col == 'count' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "raids-sort-header", "index": "count"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"})
+            html.Th(translate("Image", lang), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center", "width": "60px"}),
+            html.Th(html.Span([translate("Pokémon", lang), html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "raids-sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"}),
+            html.Th(html.Span([translate("Count", lang), html.Span(" ▲" if col == 'count' and ascending else (" ▼" if col == 'count' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "raids-sort-header", "index": "count"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"})
         ])
 
         rows = []
