@@ -11,10 +11,16 @@ import config as AppConfig
 import json
 import re
 import os
+from pathlib import Path
+from functools import lru_cache
 
 dash.register_page(__name__, path='/invasions', title='Invasion Analytics')
 
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+
+# Define Cache Paths
+ASSETS_PATH = Path(__file__).parent / ".." / "assets"
+INVASION_ICONS_PATH = ASSETS_PATH / "invasion_icons"
 
 INCIDENT_DISPLAY_TYPES = {
     0: "None", 1: "Grunt", 2: "Leader", 3: "Giovanni", 4: "Grunt B",
@@ -39,8 +45,16 @@ def _get_grunt_map():
             _GRUNT_MAP = {}
     return _GRUNT_MAP
 
+# Cached wrapper for invasion icons with local fallback - we can uncomment the lru_cache later if we want to use it like this
+#@lru_cache(maxsize=None)
 def get_invasion_icon_url(character_id):
-    return f"{ICON_BASE_URL}/invasion/{character_id}.webp"
+    filename = f"{character_id}.webp"
+
+    # Check local cache
+    if (INVASION_ICONS_PATH / filename).exists():
+        return f"/assets/invasion_icons/{filename}"
+
+    return f"{ICON_BASE_URL}/invasion/{filename}"
 
 def parse_invasion_key(key_str):
     """
@@ -249,12 +263,16 @@ def layout(area=None, **kwargs):
         ], id="invasions-area-modal", size="xl", scrollable=True),
 
         # Results Container
-        dcc.Loading(html.Div(id="invasions-stats-container", style={"display": "none"}, children=[
+        # Removed global dcc.Loading wrapper to prevent search focus loss
+        html.Div(id="invasions-stats-container", style={"display": "none"}, children=[
             dbc.Row([
                 # Sidebar
                 dbc.Col(dbc.Card([
                     dbc.CardHeader("📈 Total Counts"),
-                    dbc.CardBody(html.Div(id="invasions-total-counts-display"))
+                    dbc.CardBody(
+                        # Wrapped inner content for loading spinner
+                        dcc.Loading(html.Div(id="invasions-total-counts-display"))
+                    )
                 ], className="shadow-sm border-0 h-100"), width=12, lg=4, className="mb-4"),
 
                 # Activity Data
@@ -262,15 +280,17 @@ def layout(area=None, **kwargs):
                     dbc.CardHeader("📋 Activity Data"),
                     dbc.CardBody([
                          # Embedded Search Input (Visible only in Grouped mode)
+                         # debounce=False for fluid search
                         dcc.Input(
                             id="invasions-search-input",
                             type="text",
                             placeholder="🔍 Search Invasions...",
-                            debounce=True,
+                            debounce=False,
                             className="form-control mb-3",
                             style={"display": "none"}
                         ),
-                        html.Div(id="invasions-main-visual-container")
+                        # Wrapped inner content for loading spinner
+                        dcc.Loading(html.Div(id="invasions-main-visual-container"))
                     ])
                 ], className="shadow-sm border-0 h-100"), width=12, lg=8, className="mb-4"),
             ]),
@@ -279,7 +299,7 @@ def layout(area=None, **kwargs):
                 dbc.CardHeader("🛠️ Raw Data Inspector"),
                 dbc.CardBody(html.Pre(id="invasions-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
-        ])),
+        ]),
 
         # Heatmap Container (separate from stats container)
         html.Div(id="invasions-heatmap-container", style={"display": "none"}, children=[
