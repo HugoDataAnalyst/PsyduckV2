@@ -101,15 +101,12 @@ class QuestTimeSeries:
           - mode: Aggregation mode: "sum", "grouped", or "surged".
           - quest_mode: Quest mode—either "ar" or "normal". If set to "all", a wildcard is used.
           - field_details: The quest type to filter for (i.e. the first field in field_details).
-                         If "all", no filtering on quest type is done.
+                           If "all", no filtering on quest type is done.
           - chunk_size: Keys per Lua chunk
           - chunk_sleep: Sleep between chunks (seconds)
 
-        The keys are stored in the new format:
+        The keys are stored in the format:
             ts:quests_total:{quest_mode}:{area}:{field_details}
-        For retrieval, if field_details is not "all", we build a pattern as:
-            {field_details}:*:*:*:*:*
-        so that only keys with that quest type (first field) are returned.
         """
         self.area = area
         self.start = start
@@ -261,29 +258,64 @@ class QuestTimeSeries:
                     await asyncio.sleep(self.chunk_sleep)
 
             chunk_elapsed = time.monotonic() - chunk_start
-            logger.info(f"🔎 Chunked Lua processing took {chunk_elapsed:.3f}s ({len(chunks)} chunks × ~{self.chunk_sleep}s sleep)")
+            logger.info(f"🔎 Chunked Lua processing took {chunk_elapsed:.3f}s")
 
             # Step 5: Final formatting
             format_start = time.monotonic()
+
             if self.mode == "sum":
+                # Prepare containers for split counts
+                quest_mode_counts = {"ar": 0, "normal": 0}
+
                 if self.area.lower() in ["all", "global"]:
                     area_totals: Dict[str, int] = {}
                     quest_grand_total = 0
+
                     for key, v in acc_sum.items():
                         parts = key.split(":")
-                        key_area = parts[3] if len(parts) > 3 else "unknown"
-                        val = int(v)
-                        area_totals[key_area] = area_totals.get(key_area, 0) + val
-                        quest_grand_total += val
+                        # Key format: ts:quests_total:{mode}:{area}:{field_details}
+                        if len(parts) > 3:
+                            q_mode = parts[2]
+                            key_area = parts[3]
+                            val = int(v)
+
+                            # Aggregate Area totals
+                            area_totals[key_area] = area_totals.get(key_area, 0) + val
+                            quest_grand_total += val
+
+                            # Aggregate Quest Mode totals
+                            if q_mode in quest_mode_counts:
+                                quest_mode_counts[q_mode] += val
+                            else:
+                                quest_mode_counts[q_mode] = quest_mode_counts.get(q_mode, 0) + val
+
                     pokestops_data = global_state.cached_pokestops or {"areas": {}, "pokestop_grand_total": 0}
                     formatted = {
                         "areas": area_totals,
                         "quest_grand_total": quest_grand_total,
                         "total pokestops": pokestops_data,
+                        "quest_mode": quest_mode_counts
                     }
                 else:
-                    total_sum = sum(int(v) for v in acc_sum.values())
-                    formatted = {"total": total_sum}
+                    # Specific Area Logic
+                    total_sum = 0
+                    for key, v in acc_sum.items():
+                        val = int(v)
+                        total_sum += val
+
+                        # Extract Mode from key
+                        parts = key.split(":")
+                        if len(parts) > 2:
+                            q_mode = parts[2]
+                            if q_mode in quest_mode_counts:
+                                quest_mode_counts[q_mode] += val
+                            else:
+                                quest_mode_counts[q_mode] = quest_mode_counts.get(q_mode, 0) + val
+
+                    formatted = {
+                        "total": total_sum,
+                        "quest_mode": quest_mode_counts
+                    }
 
             elif self.mode == "grouped":
                 formatted = {}
