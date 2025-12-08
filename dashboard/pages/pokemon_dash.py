@@ -11,6 +11,7 @@ import config as AppConfig
 import json
 import re
 import os
+from pathlib import Path
 
 dash.register_page(__name__, path='/pokemon', title='Pokémon Analytics')
 
@@ -26,6 +27,10 @@ except:
     SHINY_RETENTION_MONTHS = 3
 
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+
+# Define Cache Paths
+ASSETS_PATH = Path(__file__).parent / ".." / "assets"
+POKEMON_ICONS_PATH = ASSETS_PATH / "pokemon_icons"
 
 # --- Data Loading ---
 _SPECIES_MAP = None
@@ -159,6 +164,37 @@ def resolve_pokemon_name_parts(pid, form_id):
         form_name = f"Form {form_id}"
 
     return (species_name, form_name)
+
+# I'll revisit this later, we can probably remove this here and add caching at start up with lru_cache.
+def get_pokemon_icon_url(pid, form=0):
+    """
+    Returns local path if exists, else remote URL.
+    Cached to prevent repeat Disk I/O during fluid rendering.
+    """
+    try:
+        form_int = int(form)
+        # Determine filename
+        if form_int == 0:
+            filename = f"{pid}.webp"
+        else:
+            filename = f"{pid}_f{form_int}.webp"
+
+        # Check local cache
+        local_path = POKEMON_ICONS_PATH / filename
+        if local_path.exists():
+            return f"/assets/pokemon_icons/{filename}"
+
+        # Fallback to base image locally if form variant missing
+        if form_int > 0:
+            base_filename = f"{pid}.webp"
+            base_path = POKEMON_ICONS_PATH / base_filename
+            if base_path.exists():
+                return f"/assets/pokemon_icons/{base_filename}"
+
+        # Fallback to Remote
+        return f"{ICON_BASE_URL}/pokemon/{filename}"
+    except Exception:
+        return f"{ICON_BASE_URL}/pokemon/{pid}.webp"
 
 # Layout
 
@@ -440,23 +476,74 @@ def layout(area=None, **kwargs):
             dbc.ModalFooter(dbc.Button("Done", id="close-selection-modal", color="primary"))
         ], id="selection-modal", size="xl", scrollable=True),
 
-        # Results Container (Standard Stats) - Wrapped in Loading
-        dcc.Loading(html.Div(id="stats-container", style={"display": "none"}, children=[
+        # Results Container
+        # Removed outer dcc.Loading to allow fluid search input without focus loss
+        html.Div(id="stats-container", style={"display": "none"}, children=[
             dbc.Row([
+                # Sidebar
                 dbc.Col([
                     dbc.Card([
                         dbc.CardHeader("📈 Total Counts"),
-                        dbc.CardBody(html.Div(id="total-counts-display"))
+                        dbc.CardBody(
+                            # Wrapped inner content in Loading
+                            dcc.Loading(html.Div(id="total-counts-display"))
+                        )
                     ], className="shadow-sm border-0 mb-3"),
+
+                    # Quick Filter Card (Left Column)
+                    html.Div(id="quick-filter-container", style={"display": "none"}, children=[
+                        dbc.Card([
+                            dbc.CardHeader([
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Span("🎯 Pokémon Filter", className="me-2"),
+                                        html.Span(id="pokemon-quick-filter-count", className="text-muted small")
+                                    ], width="auto", className="d-flex align-items-center"),
+                                    dbc.Col([
+                                        dbc.ButtonGroup([
+                                            dbc.Button("All", id="pokemon-quick-filter-show-all", title="Show All", size="sm", color="success", outline=True),
+                                            dbc.Button("None", id="pokemon-quick-filter-hide-all", title="Hide All", size="sm", color="danger", outline=True),
+                                        ], size="sm")
+                                    ], width="auto")
+                                ], className="align-items-center justify-content-between g-0")
+                            ]),
+                            dbc.CardBody([
+                                # Input moved outside Loading for Fluid Search
+                                dbc.Input(id="pokemon-quick-filter-search", placeholder="Search Pokémon...", size="sm", className="mb-2"),
+                                html.P("Click to hide/show Pokémon from map", className="text-muted small mb-2"),
+                                html.Div(id="pokemon-quick-filter-grid",
+                                         style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
+                            ])
+                        ], className="shadow-sm border-0 h-100")
+                    ]),
                 ], width=12, lg=4, className="mb-4"),
 
+                # Main Data Column
                 dbc.Col(dbc.Card([
                     dbc.CardHeader([
-                        html.Div("📋 Activity Data", className="d-inline-block me-auto")
+                        html.Div("📋 Activity Data", className="d-inline-block me-auto"),
+                        html.Div(
+                            dbc.RadioItems(
+                                id="heatmap-display-mode-visual",
+                                options=[{"label": "Markers", "value": "markers"}, {"label": "Heatmap", "value": "density"},{"label": "Grid", "value": "grid"}],
+                                value="markers", inline=True, className="ms-2"
+                            ), id="heatmap-toggle-container", style={"display": "none", "float": "right"}
+                        )
                     ]),
                     dbc.CardBody([
-                        dcc.Input(id="table-search-input", type="text", placeholder="🔍 Search Table...", debounce=True, className="form-control mb-3", style={"display": "none"}),
-                        html.Div(id="main-visual-container"),
+                        # Search Input OUTSIDE of Loading for fluid typing
+                        # FLUID: debounce=False
+                        dcc.Input(
+                            id="table-search-input",
+                            type="text",
+                            placeholder="🔍 Search Table...",
+                            debounce=False,  # Set to False for fluid search
+                            className="form-control mb-3",
+                            style={"display": "none"}
+                        ),
+                        # Wrapped inner content in Loading
+                        dcc.Loading(html.Div(id="main-visual-container")),
+                        html.Div(id="heatmap-map-container", style={"height": "600px", "width": "100%", "display": "none"})
                     ])
                 ], className="shadow-sm border-0 h-100"), width=12, lg=8, className="mb-4"),
             ]),
@@ -464,7 +551,7 @@ def layout(area=None, **kwargs):
                 dbc.CardHeader("🛠️ Raw Data Inspector"),
                 dbc.CardBody(html.Pre(id="raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
-        ])),
+        ]),
 
         # Heatmap Container (Map + Quick Filter) - OUTSIDE Loading
         html.Div(id="heatmap-container", style={"display": "none"}, children=[
@@ -487,6 +574,7 @@ def layout(area=None, **kwargs):
                             ], className="align-items-center justify-content-between g-0")
                         ]),
                         dbc.CardBody([
+                            # Input outside loading for focus retention
                             dbc.Input(id="pokemon-quick-filter-search", placeholder="Search Pokémon...", size="sm", className="mb-2"),
                             html.P("Click to hide/show Pokémon from map", className="text-muted small mb-2"),
                             html.Div(id="pokemon-quick-filter-grid",
@@ -889,8 +977,7 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
 
 
 @callback(
-    [Output("raw-data-store", "data"), Output("stats-container", "style"), Output("notification-area", "children"),
-     Output("heatmap-data-store", "data"), Output("heatmap-container", "style"), Output("heatmap-stats-header", "children")],
+    [Output("raw-data-store", "data"), Output("stats-container", "style"), Output("heatmap-data-store", "data"), Output("notification-area", "children")],
     [Input("submit-btn", "n_clicks"), Input("combined-source-store", "data")],
     [State("area-selector", "value"), State("live-time-input", "value"), State("historical-date-picker", "start_date"),
      State("historical-date-picker", "end_date"), State("interval-selector", "value"),
@@ -898,16 +985,15 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
      State("selection-store", "data"), State("shiny-start-month", "value"), State("shiny-end-month", "value")]
 )
 def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, level_range, selected_keys, shiny_start, shiny_end):
-    # Default outputs: raw_data, stats_style, notification, heatmap_data, heatmap_style, heatmap_stats
-    if not n: return {}, {"display": "none"}, None, [], {"display": "none"}, ""
-    if not area: return {}, {"display": "none"}, dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000), [], {"display": "none"}, ""
+    if not n: return {}, {"display": "none"}, [], None
+    if not area: return {}, {"display": "none"}, [], dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
 
     try:
         if source == "sql_shiny":
             logger.info(f"🔍 Starting Shiny Odds Fetch for Area: {area}")
 
             if not shiny_start or not shiny_end:
-                return {}, {"display": "none"}, dbc.Alert("Please select start and end months.", color="warning", dismissable=True, duration=4000), [], {"display": "none"}, ""
+                return {}, {"display": "none"}, [], dbc.Alert("Please select start and end months.", color="warning", dismissable=True, duration=4000)
 
             params = {
                 "start_time": shiny_start,
@@ -929,9 +1015,9 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
             raw_data = get_pokemon_stats("sql_shiny_rate", params)
 
             if not raw_data:
-                return {}, {"display": "block"}, dbc.Alert("No Shiny data found for this period.", color="info", dismissable=True, duration=4000), [], {"display": "none"}, ""
+                return {}, {"display": "block"}, [], dbc.Alert("No Shiny data found for this period.", color="info", dismissable=True, duration=4000)
 
-            return raw_data, {"display": "block"}, None, [], {"display": "none"}, ""
+            return raw_data, {"display": "block"}, [], None
 
         elif source == "sql_heatmap":
             logger.info(f"🔍 Starting Heatmap Fetch for Area: {area}")
@@ -963,11 +1049,11 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
 
             # Rule 3: Show red warning if no Pokemon selected (don't query "all")
             if selected_count == 0:
-                return {}, {"display": "none"}, dbc.Alert([
+                return {}, {"display": "none"}, [], dbc.Alert([
                     html.I(className="bi bi-exclamation-triangle-fill me-2"),
                     html.Strong("No Pokémon Selected! "),
                     "Please open the Selection Filter and choose at least one Pokémon to query."
-                ], color="danger", dismissable=True, duration=6000), [], {"display": "none"}, ""
+                ], color="danger", dismissable=True, duration=6000)
 
             # If > 75% selected, query ALL for efficiency
             if (selected_count / total_count) > 0.75:
@@ -1045,13 +1131,9 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
 
             if not safe_data:
                 # Still show the map container even if empty, so the user knows the query ran
-                return {}, {"display": "none"}, dbc.Alert("No Heatmap data found for criteria.", color="info", dismissable=True, duration=4000), [], {"display": "block"}, "No Data"
+                return {}, {"display": "block"}, [], dbc.Alert("No Heatmap data found for criteria.", color="info", dismissable=True, duration=4000)
 
-            total_spawns = sum(p.get('count', 0) for p in safe_data)
-            unique_points = len(safe_data)
-            stats_text = f"{unique_points} map points • {total_spawns} total spawns"
-
-            return {}, {"display": "none"}, None, safe_data, {"display": "block"}, stats_text
+            return {}, {"display": "block"}, safe_data, None
 
         elif "tth" in source:
             if "live" in source:
@@ -1069,11 +1151,11 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
             params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
             data = get_pokemon_stats("counter", params)
 
-        if not data: return {}, {"display": "block"}, dbc.Alert("No data found for this period.", color="warning", dismissable=True, duration=4000), [], {"display": "none"}, ""
-        return data, {"display": "block"}, None, [], {"display": "none"}, ""
+        if not data: return {}, {"display": "block"}, [], dbc.Alert("No data found for this period.", color="warning", dismissable=True, duration=4000)
+        return data, {"display": "block"}, [], None
     except Exception as e:
         logger.error(f"❌ FETCH ERROR: {e}", exc_info=True)
-        return {}, {"display": "none"}, dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True), [], {"display": "none"}, ""
+        return {}, {"display": "none"}, [], dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
 
 @callback(
     Output("table-sort-store", "data"), Input({"type": "sort-header", "index": ALL}, "n_clicks"), State("table-sort-store", "data"), prevent_initial_call=True
@@ -1265,14 +1347,16 @@ def reset_hidden_pokemon_on_new_data(heatmap_data):
 
 @callback(
     [Output("total-counts-display", "children"), Output("main-visual-container", "children"), Output("raw-data-display", "children"), Output("total-pages-store", "data"),
-     Output("main-visual-container", "style")],
+     Output("heatmap-map-container", "style"), Output("main-visual-container", "style"), Output("heatmap-toggle-container", "style"), Output("quick-filter-container", "style")],
     [Input("raw-data-store", "data"), Input("table-search-input", "value"), Input("table-sort-store", "data"), Input("table-page-store", "data"), Input("heatmap-data-store", "data")],
     [State("mode-selector", "value"), State("combined-source-store", "data")]
 )
 def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
     if source == "sql_heatmap":
-        # Heatmap Mode: Visuals handled by dedicated heatmap container, just clear stats container logic
-        return [], html.Div("View heatmap below"), "", 1, {"display": "none"}
+        count = len(heatmap_data) if heatmap_data else 0
+        raw_text = json.dumps(heatmap_data, indent=2)
+        total_div = [html.H1(f"{count:,} Spawns", className="text-primary")]
+        return total_div, html.Div(), raw_text, 1, {"height": "600px", "width": "100%", "display": "block"}, {"display": "none"}, {"display": "block", "float": "right"}, {"display": "block"}
 
     # Handle Shiny Odds data
     if source == "sql_shiny" and data:
@@ -1282,10 +1366,10 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         if isinstance(data, list):
             shiny_df = pd.DataFrame(data)
         else:
-            return [], html.Div("Invalid data format"), raw_text, 1, {"display": "block"}
+            return [], html.Div("Invalid data format"), raw_text, 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
         if shiny_df.empty:
-            return [], html.Div("No shiny data"), raw_text, 1, {"display": "block"}
+            return [], html.Div("No shiny data"), raw_text, 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
         # Search filter
         if search_term:
@@ -1418,11 +1502,11 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
             )
         ])
 
-        return total_div, visual_content, raw_text, total_pages_val, {"display": "block"}
+        return total_div, visual_content, raw_text, total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
-    if not data: return [], html.Div(), "", 1, {"display": "block"}
+    if not data: return [], html.Div(), "", 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
     df = parse_data_to_df(data, mode, source)
-    if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "block"}
+    if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
     if mode == "grouped" and search_term:
         # Build searchable name column using species + form names
@@ -1446,6 +1530,10 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         display_df = totals.sort_values('count', ascending=False).head(20) if "tth" in source and len(totals) > 20 else totals
         for _, r in display_df.iterrows():
             if r['metric'] == 'total': continue
+
+            # Updated: Check if count > 0 before displaying
+            if r['count'] <= 0: continue
+
             m_key = str(r['metric']).lower()
             cnt = f"{r['count']:,}"
             if m_key in metric_icons:
@@ -1581,7 +1669,7 @@ def update_visuals(data, search_term, sort, page, heatmap_data, mode, source):
         fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{mode.title()} Data")
         visual_content = dcc.Graph(figure=fig, id="main-graph")
 
-    return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "block"}
+    return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
 # Update to use the correctly namespaced JS function
 dash.clientside_callback(
