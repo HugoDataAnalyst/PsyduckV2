@@ -39,7 +39,7 @@ def build_title_with_icon():
 
 dash.register_page(__name__, path='/', title=page_title)
 
-# --- CONFIG & PATHS ---
+# CONFIG & PATHS
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 POKE_FILE = os.path.join(DATA_DIR, 'global_pokes.json')
 RAID_FILE = os.path.join(DATA_DIR, 'global_raids.json')
@@ -60,10 +60,14 @@ ICONS = {
     "pvp_great": f"{icon_base_url}/misc/1500.webp",
     "pvp_ultra": f"{icon_base_url}/misc/2500.webp",
     "shiny": f"{icon_base_url}/misc/sparkles.webp",
-    "ar_quest": f"{icon_base_url}/misc/ar.webp"
+    "ar_quest": f"{icon_base_url}/misc/ar.webp",
+    "pokemon": f"{icon_base_url}/misc/pokemon.webp",
+    "raid": f"{icon_base_url}/misc/raid2.webp",
+    "invasion": f"{icon_base_url}/misc/invasion.webp",
+    "quest": f"{icon_base_url}/misc/quest.webp"
 }
 
-# --- HELPERS (Global Scope) ---
+# HELPERS
 
 def create_time_toggle(id_name):
     return dbc.RadioItems(
@@ -105,7 +109,7 @@ def wrap_anim(content):
     The key=time.time() forces React to rebuild the element, triggering the CSS animation."""
     return html.Div(content, className="animate-flip d-flex flex-wrap justify-content-around gap-3 w-100", key=f"{time.time()}")
 
-# --- LAYOUT ---
+# LAYOUT
 
 def layout():
     return dbc.Container([
@@ -125,9 +129,14 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
-                        html.Div([html.I(className="bi bi-vinyl-fill me-2"), html.Span("Pokémon Stats", className="fw-bold fs-5")], className="d-flex align-items-center me-3"),
+                        html.Div(
+                            [
+                                html.Img(src=ICONS["pokemon"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                                html.Span("Pokémon Stats", className="fw-bold fs-5")
+                            ],
+                        className="d-flex align-items-center me-3"),
                         create_time_toggle("poke-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100")
+                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
                 ], className="bg-primary text-white"),
                 dbc.CardBody([
                     html.P(id="poke-desc", children="Global activity over the last 24 hours.", className="card-text text-muted mb-4 small"),
@@ -140,9 +149,14 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
-                        html.Div([html.I(className="bi bi-lightning-fill me-2"), html.Span("Raid Stats", className="fw-bold fs-5")], className="d-flex align-items-center me-3"),
+                        html.Div(
+                            [
+                                html.Img(src=ICONS["raid"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                                html.Span("Raid Stats", className="fw-bold fs-5"),
+                            ],
+                        className="d-flex align-items-center me-3"),
                         create_time_toggle("raid-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100")
+                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
                 ], className="bg-danger text-white"),
                 dbc.CardBody([
                     html.P(id="raid-desc", children="Global Raid Battles (24h).", className="card-text text-muted mb-4 small"),
@@ -155,9 +169,14 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
-                        html.Div([html.I(className="bi bi-robot me-2"), html.Span("Invasion Stats", className="fw-bold fs-5")], className="d-flex align-items-center me-3"),
+                        html.Div(
+                            [
+                                html.Img(src=ICONS["invasion"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                                html.Span("Invasion Stats", className="fw-bold fs-5")
+                            ],
+                        className="d-flex align-items-center me-3"),
                         create_time_toggle("invasion-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100")
+                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
                 ], className="bg-dark text-white", style={"borderBottom": "2px solid #555"}),
                 dbc.CardBody([
                     html.P(id="inv-desc", children="Global Team Rocket Activity (24h).", className="card-text text-muted mb-4 small"),
@@ -170,9 +189,14 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
-                        html.Div([html.I(className="bi bi-signpost-2-fill me-2"), html.Span("Quest Stats", className="fw-bold fs-5")], className="d-flex align-items-center me-3"),
+                        html.Div(
+                            [
+                                html.Img(src=ICONS["quest"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                                html.Span("Quest Stats", className="fw-bold fs-5")
+                            ],
+                            className="d-flex align-items-center me-3"),
                         create_time_toggle("quest-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100")
+                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
                 ], className="bg-info text-white"),
                 dbc.CardBody([
                     html.P(id="quest-desc", children="Global Field Research & Stops (24h).", className="card-text text-muted mb-4 small"),
@@ -184,7 +208,7 @@ def layout():
         ], className="g-4")
     ], fluid=True)
 
-# --- CALLBACKS ---
+# CALLBACKS
 
 # 1. Pokemon Callback
 @callback(

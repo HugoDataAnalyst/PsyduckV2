@@ -6,6 +6,15 @@ import os
 
 GITHUB_URL = "https://github.com/HugoDataAnalyst/PsyduckV2"
 
+icon_base_url = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+
+ICONS = {
+    "pokemon": f"{icon_base_url}/misc/pokemon.webp",
+    "raid": f"{icon_base_url}/misc/raid2.webp",
+    "invasion": f"{icon_base_url}/misc/invasion.webp",
+    "quest": f"{icon_base_url}/misc/quest.webp"
+}
+
 # Load Dashboard Configuration
 def load_dashboard_config():
     """Load dashboard configuration from dashboard_config.json"""
@@ -83,10 +92,10 @@ app = dash.Dash(
 # Build navbar items
 navbar_items = [
     dbc.NavItem(dbc.NavLink([html.I(className="bi bi-house-fill me-2"), "Home"], href="/", active="exact")),
-    dbc.NavItem(dbc.NavLink([html.I(className="bi bi-vinyl-fill me-2"), "Pokémon"], href="/pokemon", active="exact")),
-    dbc.NavItem(dbc.NavLink([html.I(className="bi bi-lightning-fill me-2"), "Raids"], href="/raids", active="exact")),
-    dbc.NavItem(dbc.NavLink([html.I(className="bi bi-robot me-2"), "Invasions"], href="/invasions", active="exact")),
-    dbc.NavItem(dbc.NavLink([html.I(className="bi bi-signpost-2-fill me-2"), "Quests"], href="/quests", active="exact")),
+    dbc.NavItem(dbc.NavLink([html.Img(src=ICONS["pokemon"], style={"height": "1.5em"}, className="me-2"), "Pokémon"], href="/pokemon", active="exact")),
+    dbc.NavItem(dbc.NavLink([html.Img(src=ICONS["raid"], style={"height": "1.5em"}, className="me-2"), "Raids"], href="/raids", active="exact")),
+    dbc.NavItem(dbc.NavLink([html.Img(src=ICONS["invasion"], style={"height": "1.5em"}, className="me-2"), "Invasions"], href="/invasions", active="exact")),
+    dbc.NavItem(dbc.NavLink([html.Img(src=ICONS["quest"], style={"height": "1.5em"}, className="me-2"), "Quests"], href="/quests", active="exact")),
 ]
 
 # Add custom navbar links from config
