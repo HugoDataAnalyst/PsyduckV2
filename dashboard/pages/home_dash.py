@@ -5,6 +5,12 @@ import json
 import os
 import time
 
+# --- IMPORT TRANSLATION MANAGER ---
+try:
+    from dashboard.translations.manager import translate
+except ImportError:
+    from translations.manager import translate
+
 def load_dashboard_config():
     """Load dashboard configuration from dashboard_config.json"""
     config_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard_config.json')
@@ -119,7 +125,7 @@ def layout():
         dbc.Row([
             dbc.Col(html.Div([
                 html.H1(build_title_with_icon(), className="display-4 text-center mb-4 text-primary"),
-                html.P("Real-time Pokémon Go Analytics & Monitoring", className="text-center lead text-muted"),
+                html.P("Real-time Pokémon Go Analytics & Monitoring", id="home-subtitle", className="text-center lead text-muted"),
             ]), width=12)
         ], className="my-4"),
 
@@ -132,7 +138,7 @@ def layout():
                         html.Div(
                             [
                                 html.Img(src=ICONS["pokemon"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Pokémon Stats", className="fw-bold fs-5")
+                                html.Span("Pokémon Stats", id="poke-header-text", className="fw-bold fs-5")
                             ],
                         className="d-flex align-items-center me-3"),
                         create_time_toggle("poke-time-toggle")
@@ -141,7 +147,7 @@ def layout():
                 dbc.CardBody([
                     html.P(id="poke-desc", children="Global activity over the last 24 hours.", className="card-text text-muted mb-4 small"),
                     html.Div(id="global-pokemon-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
-                    html.Div(dbc.Button("View Pokémons", href="/pokemon", color="outline-primary", size="sm", className="w-100"), className="mt-auto")
+                    html.Div(dbc.Button("View Pokémons", id="btn-view-poke", href="/pokemon", color="outline-primary", size="sm", className="w-100"), className="mt-auto")
                 ]),
             ], className="h-100 shadow-sm border-0", style={"backgroundColor": "#222"}), width=12, md=6, xl=3, className="mb-4"),
 
@@ -152,7 +158,7 @@ def layout():
                         html.Div(
                             [
                                 html.Img(src=ICONS["raid"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Raid Stats", className="fw-bold fs-5"),
+                                html.Span("Raid Stats", id="raid-header-text", className="fw-bold fs-5"),
                             ],
                         className="d-flex align-items-center me-3"),
                         create_time_toggle("raid-time-toggle")
@@ -161,7 +167,7 @@ def layout():
                 dbc.CardBody([
                     html.P(id="raid-desc", children="Global Raid Battles (24h).", className="card-text text-muted mb-4 small"),
                     html.Div(id="global-raid-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
-                    html.Div(dbc.Button("View Raids", href="/raids", color="outline-danger", size="sm", className="w-100"), className="mt-auto")
+                    html.Div(dbc.Button("View Raids", id="btn-view-raid", href="/raids", color="outline-danger", size="sm", className="w-100"), className="mt-auto")
                 ]),
             ], className="h-100 shadow-sm border-0", style={"backgroundColor": "#222"}), width=12, md=6, xl=3, className="mb-4"),
 
@@ -172,7 +178,7 @@ def layout():
                         html.Div(
                             [
                                 html.Img(src=ICONS["invasion"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Invasion Stats", className="fw-bold fs-5")
+                                html.Span("Invasion Stats", id="inv-header-text", className="fw-bold fs-5")
                             ],
                         className="d-flex align-items-center me-3"),
                         create_time_toggle("invasion-time-toggle")
@@ -181,7 +187,7 @@ def layout():
                 dbc.CardBody([
                     html.P(id="inv-desc", children="Global Team Rocket Activity (24h).", className="card-text text-muted mb-4 small"),
                     html.Div(id="global-invasion-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
-                    html.Div(dbc.Button("View Invasions", href="/invasions", color="outline-secondary", size="sm", className="w-100"), className="mt-auto")
+                    html.Div(dbc.Button("View Invasions", id="btn-view-inv", href="/invasions", color="outline-secondary", size="sm", className="w-100"), className="mt-auto")
                 ]),
             ], className="h-100 shadow-sm border-0", style={"backgroundColor": "#222"}), width=12, md=6, xl=3, className="mb-4"),
 
@@ -192,7 +198,7 @@ def layout():
                         html.Div(
                             [
                                 html.Img(src=ICONS["quest"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Quest Stats", className="fw-bold fs-5")
+                                html.Span("Quest Stats", id="quest-header-text", className="fw-bold fs-5")
                             ],
                             className="d-flex align-items-center me-3"),
                         create_time_toggle("quest-time-toggle")
@@ -201,7 +207,7 @@ def layout():
                 dbc.CardBody([
                     html.P(id="quest-desc", children="Global Field Research & Stops (24h).", className="card-text text-muted mb-4 small"),
                     html.Div(id="global-quest-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
-                    html.Div(dbc.Button("View Quests", href="/quests", color="outline-info", size="sm", className="w-100"), className="mt-auto")
+                    html.Div(dbc.Button("View Quests", id="btn-view-quest", href="/quests", color="outline-info", size="sm", className="w-100"), className="mt-auto")
                 ]),
             ], className="h-100 shadow-sm border-0", style={"backgroundColor": "#222"}), width=12, md=6, xl=3, className="mb-4"),
 
@@ -210,14 +216,39 @@ def layout():
 
 # CALLBACKS
 
+# 0. Static Translation Callback
+@callback(
+    [Output("home-subtitle", "children"),
+     Output("poke-header-text", "children"), Output("btn-view-poke", "children"),
+     Output("raid-header-text", "children"), Output("btn-view-raid", "children"),
+     Output("inv-header-text", "children"), Output("btn-view-inv", "children"),
+     Output("quest-header-text", "children"), Output("btn-view-quest", "children")],
+    Input("language-store", "data")
+)
+def update_static_translations(lang):
+    lang = lang or "en"
+    return (
+        translate("Real-time Pokémon Go Analytics & Monitoring", lang),
+        translate("Pokémon Stats", lang), translate("View Pokémons", lang),
+        translate("Raid Stats", lang), translate("View Raids", lang),
+        translate("Invasion Stats", lang), translate("View Invasions", lang),
+        translate("Quest Stats", lang), translate("View Quests", lang)
+    )
+
 # 1. Pokemon Callback
 @callback(
     [Output("global-pokemon-stats-container", "children"), Output("poke-desc", "children")],
-    [Input("home-interval", "n_intervals"), Input("poke-time-toggle", "value")]
+    [Input("home-interval", "n_intervals"), Input("poke-time-toggle", "value"), Input("language-store", "data")]
 )
-def update_pokemon(n, toggle_val):
+def update_pokemon(n, toggle_val, lang):
+    lang = lang or "en"
     file_path = POKE_FILE if toggle_val == "24h" else POKE_FILE_ALL
-    label = "Global activity over the last 24 hours." if toggle_val == "24h" else "Global activity (All Time)."
+
+    # Translate label based on toggle
+    if toggle_val == "24h":
+        label = translate("Global activity over the last 24 hours.", lang)
+    else:
+        label = translate("Global activity (All Time).", lang)
 
     content = [html.Div("Loading...", className="text-muted small")]
     if os.path.exists(file_path):
@@ -225,13 +256,13 @@ def update_pokemon(n, toggle_val):
             with open(file_path, 'r') as f:
                 data = json.load(f)
             content = [
-                get_total_header(data.get('total', 0), "Total Spawns"),
-                create_mini_stat(data.get('shiny', 0), "Shiny", "#FFD700", icon_url=ICONS['shiny']),
-                create_mini_stat(data.get('iv100', 0), "100 IV", "#dc3545", icon_url=ICONS['iv100']),
-                create_mini_stat(data.get('iv0', 0), "0 IV", "#28a745", icon_url=ICONS['iv0']),
-                create_mini_stat(data.get('pvp_little', 0), "PvP Lit", "#e0e0e0", icon_url=ICONS['pvp_little']),
-                create_mini_stat(data.get('pvp_great', 0), "PvP Grt", "#007bff", icon_url=ICONS['pvp_great']),
-                create_mini_stat(data.get('pvp_ultra', 0), "PvP Ult", "#FFD700", icon_url=ICONS['pvp_ultra']),
+                get_total_header(data.get('total', 0), translate("Total Spawns", lang)),
+                create_mini_stat(data.get('shiny', 0), translate("Shiny", lang), "#FFD700", icon_url=ICONS['shiny']),
+                create_mini_stat(data.get('iv100', 0), translate("100 IV", lang), "#dc3545", icon_url=ICONS['iv100']),
+                create_mini_stat(data.get('iv0', 0), translate("0 IV", lang), "#28a745", icon_url=ICONS['iv0']),
+                create_mini_stat(data.get('pvp_little', 0), translate("PvP Lit", lang), "#e0e0e0", icon_url=ICONS['pvp_little']),
+                create_mini_stat(data.get('pvp_great', 0), translate("PvP Grt", lang), "#007bff", icon_url=ICONS['pvp_great']),
+                create_mini_stat(data.get('pvp_ultra', 0), translate("PvP Ult", lang), "#FFD700", icon_url=ICONS['pvp_ultra']),
             ]
         except Exception as e:
             print(f"Error pokemon: {e}")
@@ -241,11 +272,16 @@ def update_pokemon(n, toggle_val):
 # 2. Raid Callback
 @callback(
     [Output("global-raid-stats-container", "children"), Output("raid-desc", "children")],
-    [Input("home-interval", "n_intervals"), Input("raid-time-toggle", "value")]
+    [Input("home-interval", "n_intervals"), Input("raid-time-toggle", "value"), Input("language-store", "data")]
 )
-def update_raids(n, toggle_val):
+def update_raids(n, toggle_val, lang):
+    lang = lang or "en"
     file_path = RAID_FILE if toggle_val == "24h" else RAID_FILE_ALL
-    label = "Global Raid Battles (24h)." if toggle_val == "24h" else "Global Raid Battles (All Time)."
+
+    if toggle_val == "24h":
+        label = translate("Global Raid Battles (24h).", lang)
+    else:
+        label = translate("Global Raid Battles (All Time).", lang)
 
     content = [html.Div("Loading...", className="text-muted small")]
     if os.path.exists(file_path):
@@ -254,21 +290,21 @@ def update_raids(n, toggle_val):
                 data = json.load(f)
             total = data.get('total', 0)
             levels = data.get('raid_level', {})
-            content = [get_total_header(total, "Total Raids")]
+            content = [get_total_header(total, translate("Total Raids", lang))]
 
             priority_levels = ["1", "3", "5", "6", "11", "13", "15"]
             for lvl in priority_levels:
                 count = levels.get(lvl, 0)
                 if count > 0:
                     l_color = "#e0e0e0"
-                    l_label = f"Level {lvl}"
+                    l_label = f"{translate('Level', lang)} {lvl}"
                     if lvl == "3": l_color = "#f0ad4e"
                     elif lvl == "5": l_color = "#dc3545"
-                    elif lvl == "6": l_label = "Mega"; l_color = "#a020f0"
-                    elif lvl == "7": l_label = "Mega 5"; l_color = "#7fce83"
-                    elif lvl == "8": l_label = "Ultra Beast"; l_color = "#e881f1"
-                    elif lvl == "10": l_label = "Primal"; l_color = "#ad5b2c"
-                    elif lvl in ["11","12","13","14","15"]: l_label = f"Shadow L{int(lvl)-10}"; l_color = "#0a0a0a"
+                    elif lvl == "6": l_label = translate("Mega", lang); l_color = "#a020f0"
+                    elif lvl == "7": l_label = translate("Mega 5", lang); l_color = "#7fce83"
+                    elif lvl == "8": l_label = translate("Ultra Beast", lang); l_color = "#e881f1"
+                    elif lvl == "10": l_label = translate("Primal", lang); l_color = "#ad5b2c"
+                    elif lvl in ["11","12","13","14","15"]: l_label = f"{translate('Shadow', lang)} L{int(lvl)-10}"; l_color = "#0a0a0a"
 
                     content.append(create_mini_stat(count, l_label, l_color, icon_url=f"{icon_base_url}/raid/egg/{lvl}.webp"))
         except Exception as e:
@@ -279,11 +315,16 @@ def update_raids(n, toggle_val):
 # 3. Invasion Callback
 @callback(
     [Output("global-invasion-stats-container", "children"), Output("inv-desc", "children")],
-    [Input("home-interval", "n_intervals"), Input("invasion-time-toggle", "value")]
+    [Input("home-interval", "n_intervals"), Input("invasion-time-toggle", "value"), Input("language-store", "data")]
 )
-def update_invasions(n, toggle_val):
+def update_invasions(n, toggle_val, lang):
+    lang = lang or "en"
     file_path = INVASION_FILE if toggle_val == "24h" else INVASION_FILE_ALL
-    label = "Global Team Rocket Activity (24h)." if toggle_val == "24h" else "Global Team Rocket Activity (All Time)."
+
+    if toggle_val == "24h":
+        label = translate("Global Team Rocket Activity (24h).", lang)
+    else:
+        label = translate("Global Team Rocket Activity (All Time).", lang)
 
     content = [html.Div("Loading...", className="text-muted small")]
     if os.path.exists(file_path):
@@ -292,9 +333,9 @@ def update_invasions(n, toggle_val):
                 data = json.load(f)
             stats = data.get('stats', {})
             content = [
-                get_total_header(data.get('total', 0), "Total Invasions"),
-                create_mini_stat(stats.get('confirmed', 0), "Confirmed", "#28a745", icon_class="bi bi-check-circle-fill"),
-                create_mini_stat(stats.get('unconfirmed', 0), "Unconfirmed", "#dc3545", icon_class="bi bi-x-circle-fill"),
+                get_total_header(data.get('total', 0), translate("Total Invasions", lang)),
+                create_mini_stat(stats.get('confirmed', 0), translate("Confirmed", lang), "#28a745", icon_class="bi bi-check-circle-fill"),
+                create_mini_stat(stats.get('unconfirmed', 0), translate("Unconfirmed", lang), "#dc3545", icon_class="bi bi-x-circle-fill"),
             ]
         except Exception as e:
             print(f"Error invasions: {e}")
@@ -304,11 +345,16 @@ def update_invasions(n, toggle_val):
 # 4. Quest Callback
 @callback(
     [Output("global-quest-stats-container", "children"), Output("quest-desc", "children")],
-    [Input("home-interval", "n_intervals"), Input("quest-time-toggle", "value")]
+    [Input("home-interval", "n_intervals"), Input("quest-time-toggle", "value"), Input("language-store", "data")]
 )
-def update_quests(n, toggle_val):
+def update_quests(n, toggle_val, lang):
+    lang = lang or "en"
     file_path = QUEST_FILE if toggle_val == "24h" else QUEST_FILE_ALL
-    label = "Global Field Research & Stops (24h)." if toggle_val == "24h" else "Global Field Research & Stops (All Time)."
+
+    if toggle_val == "24h":
+        label = translate("Global Field Research & Stops (24h).", lang)
+    else:
+        label = translate("Global Field Research & Stops (All Time).", lang)
 
     content = [html.Div("Loading...", className="text-muted small")]
     if os.path.exists(file_path):
@@ -317,9 +363,9 @@ def update_quests(n, toggle_val):
                 data = json.load(f)
             quests = data.get('quests', {})
             content = [
-                get_total_header(data.get('total_pokestops', 0), "Total PokéStops"),
-                create_mini_stat(quests.get('ar', 0), "AR Quests", "#17a2b8", icon_url=ICONS['ar_quest']),
-                create_mini_stat(quests.get('normal', 0), "Normal", "#e0e0e0", icon_class="bi bi-vinyl"),
+                get_total_header(data.get('total_pokestops', 0), translate("Total PokéStops", lang)),
+                create_mini_stat(quests.get('ar', 0), translate("AR Quests", lang), "#17a2b8", icon_url=ICONS['ar_quest']),
+                create_mini_stat(quests.get('normal', 0), translate("Normal", lang), "#e0e0e0", icon_class="bi bi-vinyl"),
             ]
         except Exception as e:
             print(f"Error quests: {e}")
