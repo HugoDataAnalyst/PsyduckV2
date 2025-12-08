@@ -11,10 +11,17 @@ import config as AppConfig
 import json
 import re
 import os
+from pathlib import Path
+from functools import lru_cache
 
 dash.register_page(__name__, path='/quests', title='Quest Analytics')
 
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+
+# Define Cache Paths
+ASSETS_PATH = Path(__file__).parent / ".." / "assets"
+REWARD_ICONS_PATH = ASSETS_PATH / "reward_icons"
+POKEMON_ICONS_PATH = ASSETS_PATH / "pokemon_icons"
 
 REWARD_TYPES = {
     0: "Unset", 1: "XP", 2: "Item", 3: "Stardust", 4: "Candy", 5: "Avatar",
@@ -101,19 +108,15 @@ def get_area_pokestops_count(area_name):
         return 0
 
     try:
-        # Try relative to file first
-        path = os.path.join(os.path.dirname(__file__), '..', 'data', 'global_pokestops.json')
-        if not os.path.exists(path):
-            # Fallback to CWD
-            path = os.path.join(os.getcwd(), 'dashboard', 'data', 'global_pokestops.json')
-
+        # Define path relative to this file or cwd
+        path = os.path.join('dashboard', 'data', 'global_pokestops.json')
         if not os.path.exists(path):
             return 0
 
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        # Handle Global case
+        # Handle 'Global' case
         if area_name.lower() == "global":
             return data.get("total", 0)
 
@@ -137,30 +140,57 @@ def resolve_pokemon_name(pid, form_id):
         return form_name_full
     return base_name
 
+# Cached wrapper for icon path resolution
+#@lru_cache(maxsize=None)
+def get_cached_icon_url_internal(relative_path):
+    """Helper to check if an icon exists in the reward_icons assets folder (Cached)."""
+    if (REWARD_ICONS_PATH / relative_path).exists():
+        return f"/assets/reward_icons/{relative_path}"
+    return f"{ICON_BASE_URL}/{relative_path}"
+
+# Updated: Uses lru_cache and checks local storage
+#@lru_cache(maxsize=None)
 def get_quest_icon_url(reward_type, item_id=None, poke_id=None, form=0):
     rt = safe_int(reward_type)
     item_id, poke_id, form = safe_int(item_id), safe_int(poke_id), safe_int(form)
 
-    # Specific Lookups
+    # Specific Lookups Pokemon
     if rt == 7 and poke_id > 0:
-        return f"{ICON_BASE_URL}/pokemon/{poke_id}_f{form}.webp" if form > 0 else f"{ICON_BASE_URL}/pokemon/{poke_id}.webp"
-    if rt == 2 and item_id > 0: return f"{ICON_BASE_URL}/reward/item/{item_id}.webp"
-    if rt == 4 and item_id > 0: return f"{ICON_BASE_URL}/reward/candy/{item_id}.webp"
-    if rt == 12 and item_id > 0: return f"{ICON_BASE_URL}/reward/mega_resource/{item_id}.webp"
-    if rt == 9 and item_id > 0: return f"{ICON_BASE_URL}/reward/xl_candy/{item_id}.webp"
+        filename = f"{poke_id}_f{form}.webp" if form > 0 else f"{poke_id}.webp"
 
-    # Defaults
-    defaults = {
-        0: "reward/unset/0.webp", 1: "reward/experience/0.webp", 2: "reward/item/0.webp",
-        3: "reward/stardust/0.webp", 4: "reward/candy/0.webp", 5: "reward/avatar_clothing/0.webp",
-        6: "reward/quest/0.webp", 7: "misc/pokemon.webp", 8: "reward/pokecoin/0.webp",
-        9: "reward/xl_candy/0.webp", 10: "reward/level_cap/0.webp", 11: "reward/sticker/0.webp",
-        12: "reward/mega_resource/0.webp", 13: "reward/incident/0.webp", 14: "reward/player_attribute/0.webp",
-        15: "misc/badge_3.webp", 16: "misc/egg.webp", 17: "station/0.webp", 18: "reward/unset/0.webp",
-        19: "misc/bestbuddy.webp"
-    }
-    path = defaults.get(rt, "misc/0.webp")
-    return f"{ICON_BASE_URL}/{path}"
+        # 1. Try Specific Form locally
+        if (POKEMON_ICONS_PATH / filename).exists():
+            return f"/assets/pokemon_icons/{filename}"
+
+        # 2. Fallback to Base Form locally
+        if form > 0:
+            base_filename = f"{poke_id}.webp"
+            if (POKEMON_ICONS_PATH / base_filename).exists():
+                return f"/assets/pokemon_icons/{base_filename}"
+
+        # 3. Remote
+        return f"{ICON_BASE_URL}/pokemon/{filename}"
+
+    # Determine relative path for Rewards
+    relative_path = "misc/0.webp" # Default
+
+    if rt == 2 and item_id > 0: relative_path = f"reward/item/{item_id}.webp"
+    elif rt == 4 and item_id > 0: relative_path = f"reward/candy/{item_id}.webp"
+    elif rt == 12 and item_id > 0: relative_path = f"reward/mega_resource/{item_id}.webp"
+    elif rt == 9 and item_id > 0: relative_path = f"reward/xl_candy/{item_id}.webp"
+    else:
+        defaults = {
+            0: "reward/unset/0.webp", 1: "reward/experience/0.webp", 2: "reward/item/0.webp",
+            3: "reward/stardust/0.webp", 4: "reward/candy/0.webp", 5: "reward/avatar_clothing/0.webp",
+            6: "reward/quest/0.webp", 7: "misc/pokemon.webp", 8: "reward/pokecoin/0.webp",
+            9: "reward/xl_candy/0.webp", 10: "reward/level_cap/0.webp", 11: "reward/sticker/0.webp",
+            12: "reward/mega_resource/0.webp", 13: "reward/incident/0.webp", 14: "reward/player_attribute/0.webp",
+            15: "misc/badge_3.webp", 16: "misc/egg.webp", 17: "station/0.webp", 18: "reward/unset/0.webp",
+            19: "misc/bestbuddy.webp"
+        }
+        relative_path = defaults.get(rt, "misc/0.webp")
+
+    return get_cached_icon_url_internal(relative_path)
 
 # Layout
 
@@ -181,10 +211,7 @@ def generate_area_cards(geofences, selected_area_name):
             ])
         ], style={"width": "14rem", "margin": "10px", "border": f"3px solid {'#28a745' if is_selected else 'transparent'}"}, className="shadow-sm")
 
-        # IMPORTANT: Assign this ID so custom_callbacks.js can scroll to it
-        if is_selected:
-            card.id = "selected-area-card"
-
+        if is_selected: card.id = "selected-area-card"
         cards.append(card)
     return cards if cards else html.Div("No areas match your search.", className="text-center text-muted my-4")
 
@@ -325,6 +352,8 @@ def layout(area=None, **kwargs):
             dbc.ModalFooter(dbc.Button("Close", id="quests-close-area-modal", className="ms-auto"))
         ], id="quests-area-modal", size="xl", scrollable=True),
 
+        # Results Container
+        # Removed global dcc.Loading, applied to specific inner divs for fluid UI
         html.Div(id="quests-stats-container", style={"display": "none"}, children=[
             dbc.Row([
                 # Sidebar
@@ -340,12 +369,12 @@ def layout(area=None, **kwargs):
                 dbc.Col(dbc.Card([
                     dbc.CardHeader("📋 Activity Data"),
                     dbc.CardBody([
-                        # Search Input OUTSIDE of Loading for fluid typing
+                        # Embedded Search Input debounce=False for fluid
                         dcc.Input(
                             id="quests-search-input",
                             type="text",
                             placeholder="🔍 Search Quest, Reward or Item...",
-                            debounce=False,  # Set to False for fluid search
+                            debounce=False,
                             className="form-control mb-3",
                             style={"display": "none"}
                         ),
@@ -377,7 +406,7 @@ def parse_data_to_df(data, mode, source, area=None):
         if "total" in working_data:
             records.append({"type": "Total", "name": "Total Quests", "count": working_data["total"], "key": "total", "category": "General", "time_bucket": "Total"})
 
-        # 1. Inject Total Pokestops
+        # 1. Inject Total Pokestops so it appears in the graph
         total_stops = get_area_pokestops_count(area)
         if total_stops > 0:
             records.append({
@@ -387,17 +416,18 @@ def parse_data_to_df(data, mode, source, area=None):
                 "key": "mode_stops",
                 "category": "Quest Mode",
                 "time_bucket": "Total",
-                "icon": f"{ICON_BASE_URL}/misc/pokestop.webp"
+                "icon": get_cached_icon_url_internal("misc/pokestop.webp")
             })
 
-        # 2. Add Quest Mode (AR/Normal) if > 0
+        # 2. Add Quest Mode AR/Normal if > 0
         if "quest_mode" in working_data:
             for k, v in working_data["quest_mode"].items():
                 if safe_int(v) <= 0: continue
 
                 k_str = str(k).lower()
                 name = "AR Quests" if k_str in ["1", "ar"] else "Normal Quests"
-                icon = f"{ICON_BASE_URL}/pokestop/0_ar.webp" if k_str in ["1", "ar"] else f"{ICON_BASE_URL}/pokestop/0.webp"
+                icon_path = "pokestop/0_ar.webp" if k_str in ["1", "ar"] else "pokestop/0.webp"
+                icon = get_cached_icon_url_internal(icon_path)
                 records.append({
                     "type": "Mode",
                     "name": name,
@@ -410,18 +440,78 @@ def parse_data_to_df(data, mode, source, area=None):
 
     ts_keys = [k for k in working_data.keys() if str(k).startswith("ts:")]
 
-    if ts_keys:
+    # Pre-aggregate Live data.
+    if ts_keys and mode == "grouped":
+        # Group aggregation map to prevent duplicate rows for the same item/mon
+        agg_map = {}
+
+        for key_str, val in working_data.items():
+            if not str(key_str).startswith("ts:"): continue
+
+            parts = key_str.split(':')
+            if len(parts) < 10: continue
+
+            # Determine count based on value type scalar vs dict
+            total_count = val
+            if isinstance(val, dict):
+                total_count = sum(int(v) for v in val.values())
+
+            total_count = safe_int(total_count)
+            if total_count <= 0: continue
+
+            # Extract fields
+            q_mode, q_type_id, r_type_id = parts[2], safe_int(parts[4]), safe_int(parts[5])
+            item_id, amount, pid, form = safe_int(parts[6]), safe_int(parts[7]), safe_int(parts[8]), safe_int(parts[9])
+
+            # Unique key for aggregation in this loop
+            agg_key = f"{q_type_id}_{r_type_id}_{item_id}_{amount}_{pid}_{form}"
+
+            if agg_key not in agg_map:
+                q_name = QUEST_TYPES.get(q_type_id, f"Type {q_type_id}")
+                r_name, category, filter_key, icon_url = "Unknown", "Other", "other", None
+                amt_display = f" x{amount}" if amount > 1 else ""
+
+                if r_type_id == 2:
+                    category, i_name = "Item", items_map.get(item_id, f"Item {item_id}")
+                    r_name, filter_key, icon_url = f"{i_name}{amt_display}", f"item_{item_id}", get_quest_icon_url(r_type_id, item_id=item_id)
+                elif r_type_id == 7:
+                    category, p_name = "Pokemon", resolve_pokemon_name(pid, form)
+                    r_name, filter_key, icon_url = f"{p_name}", f"poke_{pid}_{form}", get_quest_icon_url(r_type_id, poke_id=pid, form=form)
+                elif r_type_id == 3:
+                    category, r_name, filter_key, icon_url = "Stardust", f"Stardust{amt_display}", "stardust", get_quest_icon_url(3)
+                elif r_type_id == 12:
+                    category = "Mega Energy"
+                    target_id = pid if pid > 0 else item_id
+                    p_name = resolve_pokemon_name(target_id, 0)
+                    r_name, filter_key, icon_url = f"{p_name} Mega Energy{amt_display}", f"mega_{target_id}", get_quest_icon_url(7, poke_id=target_id) if target_id > 0 else get_quest_icon_url(12)
+                elif r_type_id == 9:
+                    category, p_name = "XL Candy", resolve_pokemon_name(item_id, 0)
+                    r_name, filter_key, icon_url = f"{p_name} XL Candy{amt_display}", f"xl_{item_id}", get_quest_icon_url(9, item_id=item_id)
+                elif r_type_id == 4:
+                    category, p_name = "Candy", resolve_pokemon_name(item_id, 0)
+                    r_name, filter_key, icon_url = f"{p_name} Candy{amt_display}", f"candy_{item_id}", get_quest_icon_url(4, item_id=item_id)
+                elif r_type_id == 1:
+                    category, r_name, filter_key, icon_url = "XP", f"XP{amt_display}", "xp", get_quest_icon_url(1)
+                else:
+                    category = REWARD_TYPES.get(r_type_id, "Unknown")
+                    r_name, filter_key, icon_url = f"{category}{amt_display}", f"other_{r_type_id}", get_quest_icon_url(r_type_id)
+
+                agg_map[agg_key] = {
+                    "type": q_name, "name": r_name, "count": 0, "key": filter_key,
+                    "category": category, "time_bucket": "Total", "icon": icon_url, "q_mode": q_mode
+                }
+
+            agg_map[agg_key]["count"] += total_count
+
+        records = list(agg_map.values())
+
+    elif ts_keys:
         for key_str in ts_keys:
             parts = key_str.split(':')
             if len(parts) < 10: continue
 
-            q_mode = parts[2]
-            q_type_id = safe_int(parts[4])
-            r_type_id = safe_int(parts[5])
-            item_id = safe_int(parts[6])
-            amount = safe_int(parts[7])
-            pid = safe_int(parts[8])
-            form = safe_int(parts[9])
+            q_mode, q_type_id, r_type_id = parts[2], safe_int(parts[4]), safe_int(parts[5])
+            item_id, amount, pid, form = safe_int(parts[6]), safe_int(parts[7]), safe_int(parts[8]), safe_int(parts[9])
 
             time_data = working_data[key_str]
 
@@ -430,51 +520,29 @@ def parse_data_to_df(data, mode, source, area=None):
             amt_display = f" x{amount}" if amount > 1 else ""
 
             if r_type_id == 2:
-                category = "Item"
-                i_name = items_map.get(item_id, f"Item {item_id}")
-                r_name = f"{i_name}{amt_display}"
-                filter_key = f"item_{item_id}"
-                icon_url = get_quest_icon_url(r_type_id, item_id=item_id)
+                category, i_name = "Item", items_map.get(item_id, f"Item {item_id}")
+                r_name, filter_key, icon_url = f"{i_name}{amt_display}", f"item_{item_id}", get_quest_icon_url(r_type_id, item_id=item_id)
             elif r_type_id == 7:
-                category = "Pokemon"
-                p_name = resolve_pokemon_name(pid, form)
-                r_name = f"{p_name}"
-                filter_key = f"poke_{pid}_{form}"
-                icon_url = get_quest_icon_url(r_type_id, poke_id=pid, form=form)
+                category, p_name = "Pokemon", resolve_pokemon_name(pid, form)
+                r_name, filter_key, icon_url = f"{p_name}", f"poke_{pid}_{form}", get_quest_icon_url(r_type_id, poke_id=pid, form=form)
             elif r_type_id == 3:
-                category = "Stardust"
-                r_name = f"Stardust{amt_display}"
-                filter_key = "stardust"
-                icon_url = get_quest_icon_url(3)
+                category, r_name, filter_key, icon_url = "Stardust", f"Stardust{amt_display}", "stardust", get_quest_icon_url(3)
             elif r_type_id == 12:
                 category = "Mega Energy"
                 target_id = pid if pid > 0 else item_id
                 p_name = resolve_pokemon_name(target_id, 0)
-                r_name = f"{p_name} Mega Energy{amt_display}"
-                filter_key = f"mega_{target_id}"
-                icon_url = get_quest_icon_url(7, poke_id=target_id) if target_id > 0 else get_quest_icon_url(12)
+                r_name, filter_key, icon_url = f"{p_name} Mega Energy{amt_display}", f"mega_{target_id}", get_quest_icon_url(7, poke_id=target_id) if target_id > 0 else get_quest_icon_url(12)
             elif r_type_id == 9:
-                category = "XL Candy"
-                p_name = resolve_pokemon_name(item_id, 0)
-                r_name = f"{p_name} XL Candy{amt_display}"
-                filter_key = f"xl_{item_id}"
-                icon_url = get_quest_icon_url(9, item_id=item_id)
+                category, p_name = "XL Candy", resolve_pokemon_name(item_id, 0)
+                r_name, filter_key, icon_url = f"{p_name} XL Candy{amt_display}", f"xl_{item_id}", get_quest_icon_url(9, item_id=item_id)
             elif r_type_id == 4:
-                category = "Candy"
-                p_name = resolve_pokemon_name(item_id, 0)
-                r_name = f"{p_name} Candy{amt_display}"
-                filter_key = f"candy_{item_id}"
-                icon_url = get_quest_icon_url(4, item_id=item_id)
+                category, p_name = "Candy", resolve_pokemon_name(item_id, 0)
+                r_name, filter_key, icon_url = f"{p_name} Candy{amt_display}", f"candy_{item_id}", get_quest_icon_url(4, item_id=item_id)
             elif r_type_id == 1:
-                category = "XP"
-                r_name = f"XP{amt_display}"
-                filter_key = "xp"
-                icon_url = get_quest_icon_url(1)
+                category, r_name, filter_key, icon_url = "XP", f"XP{amt_display}", "xp", get_quest_icon_url(1)
             else:
                 category = REWARD_TYPES.get(r_type_id, "Unknown")
-                r_name = f"{category}{amt_display}"
-                filter_key = f"other_{r_type_id}"
-                icon_url = get_quest_icon_url(r_type_id)
+                r_name, filter_key, icon_url = f"{category}{amt_display}", f"other_{r_type_id}", get_quest_icon_url(r_type_id)
 
             if isinstance(time_data, dict):
                 for time_k, count in time_data.items():
@@ -482,19 +550,10 @@ def parse_data_to_df(data, mode, source, area=None):
                     if "hour" in str(time_k):
                         try: h_val = int(str(time_k).replace("hour ", ""))
                         except: pass
-
-                    records.append({
-                        "type": q_name,
-                        "name": r_name,
-                        "count": count,
-                        "key": filter_key,
-                        "category": category,
-                        "time_bucket": h_val,
-                        "icon": icon_url,
-                        "q_mode": q_mode
-                    })
+                    records.append({"type": q_name, "name": r_name, "count": count, "key": filter_key, "category": category, "time_bucket": h_val, "icon": icon_url, "q_mode": q_mode})
 
     elif mode == "grouped":
+        # Historical Counterserie Logic
         for ts_bucket, details in working_data.items():
             if not isinstance(details, dict): continue
 
@@ -723,22 +782,25 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
     # 1. Total Pokestops from file
     total_stops = get_area_pokestops_count(selected_area)
     if total_stops > 0:
+        icon_path = get_cached_icon_url_internal("misc/pokestop.webp")
         sidebar.append(html.Div([
-            html.Img(src=f"{ICON_BASE_URL}/misc/pokestop.webp", style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
+            html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
             html.Strong(f"{total_stops:,} Pokéstops", style={'fontSize': '1.1em'})
         ], className="d-flex align-items-center mb-2"))
 
     # 2. Total AR Quests if any
     if ar_quests_count > 0:
+        icon_path = get_cached_icon_url_internal("pokestop/0_ar.webp")
         sidebar.append(html.Div([
-            html.Img(src=f"{ICON_BASE_URL}/pokestop/0_ar.webp", style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
+            html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
             html.Strong(f"{ar_quests_count:,} AR Quests", style={'fontSize': '1.1em'})
         ], className="d-flex align-items-center mb-2"))
 
     # 3. Total Normal Quests if any
     if normal_quests_count > 0:
+        icon_path = get_cached_icon_url_internal("pokestop/0.webp")
         sidebar.append(html.Div([
-            html.Img(src=f"{ICON_BASE_URL}/pokestop/0.webp", style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
+            html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
             html.Strong(f"{normal_quests_count:,} Normal Quests", style={'fontSize': '1.1em'})
         ], className="d-flex align-items-center mb-2"))
 
@@ -766,7 +828,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
                 elif "Pokemon" in cat_name: path = "misc/pokemon.webp"
                 else: path = "misc/0.webp"
 
-            icon_src = f"{ICON_BASE_URL}/{path}"
+            icon_src = get_cached_icon_url_internal(path)
             row_content = [html.Strong(f"{r['count']:,}", style={'fontSize': '1.1em'})]
             row_content.insert(0, html.Img(src=icon_src, style={"width": "24px", "marginRight": "10px", "verticalAlign": "middle"}))
             sidebar.append(html.Div(row_content, className="d-flex align-items-center mb-1 small"))
@@ -776,6 +838,8 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
 
     if mode == "sum":
         fig = go.Figure()
+        # For the Chart, we exclude General Total count but KEEP Quest Mode
+        # so bars for AR/Normal Quests will appear.
         chart_df = df[df['category'] != 'General']
         top = chart_df.sort_values('count', ascending=False).head(20)
 
@@ -817,19 +881,21 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
         current_page = min(max(1, page['current_page']), total_pages_val)
         page_df = table_df.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
 
+        # Equal column sizing with specific width for Image
         header_cells = [html.Th("Image", style={"backgroundColor": "#1a1a1a", "width": "60px"})]
         for c in ["type", "name", "count"]:
             label = c.title()
             arrow = " ▲" if col == c and ascending else (" ▼" if col == c else "")
+            # Set equal width for data columns
             header_cells.append(html.Th(
                 html.Span([label, html.Span(arrow, style={"color": "#aaa"})], id={"type": "quests-sort-header", "index": c}, style={"cursor": "pointer"}),
-                style={"backgroundColor": "#1a1a1a"}
+                style={"backgroundColor": "#1a1a1a", "width": "25%"}
             ))
 
         rows = []
         for _, r in page_df.iterrows():
             rows.append(html.Tr([
-                html.Td(html.Img(src=r['icon'], style={"width": "40px"})),
+                html.Td(html.Img(src=r['icon'], style={"width": "40px", "height": "40px", "display": "block", "margin": "auto"})),
                 html.Td(r['type']),
                 html.Td(r['name']),
                 html.Td(f"{r['count']:,}", className="text-end")
@@ -848,7 +914,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
 
         visual_content = html.Div([
             controls,
-            dbc.Table([html.Thead(html.Tr(header_cells)), html.Tbody(rows)], striped=True, hover=True, class_name="table-dark")
+            dbc.Table([html.Thead(html.Tr(header_cells)), html.Tbody(rows)], striped=True, hover=True, class_name="table-dark", style={"tableLayout": "fixed"})
         ])
 
     return sidebar, visual_content, json.dumps(data, indent=2), total_pages_val

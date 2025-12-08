@@ -5,16 +5,22 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_raids_stats, get_pokemon_icon_url
+from dashboard.utils import get_cached_geofences, get_raids_stats
 from utils.logger import logger
 import config as AppConfig
 import json
 import re
 import os
+from pathlib import Path
+from functools import lru_cache
 
 dash.register_page(__name__, path='/raids', title='Raid Analytics')
 
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+
+# Define Cache Paths
+ASSETS_PATH = Path(__file__).parent / ".." / "assets"
+POKEMON_ICONS_PATH = ASSETS_PATH / "pokemon_icons"
 
 _SPECIES_MAP = None
 _FORM_MAP = None
@@ -83,6 +89,38 @@ def resolve_pokemon_name(pid, form_id):
         return form_name_full
 
     return base_name
+
+# Local Cached Icon Function
+#@lru_cache(maxsize=None)
+def get_pokemon_icon_url(pid, form=0):
+    """
+    Returns local path if exists, else remote URL.
+    Cached to prevent repeat Disk I/O during fluid rendering.
+    """
+    try:
+        form_int = int(form)
+        # Determine filename
+        if form_int == 0:
+            filename = f"{pid}.webp"
+        else:
+            filename = f"{pid}_f{form_int}.webp"
+
+        # Check local cache
+        local_path = POKEMON_ICONS_PATH / filename
+        if local_path.exists():
+            return f"/assets/pokemon_icons/{filename}"
+
+        # Fallback to base image locally if form variant missing
+        if form_int > 0:
+            base_filename = f"{pid}.webp"
+            base_path = POKEMON_ICONS_PATH / base_filename
+            if base_path.exists():
+                return f"/assets/pokemon_icons/{base_filename}"
+
+        # Fallback to Remote
+        return f"{ICON_BASE_URL}/pokemon/{filename}"
+    except Exception:
+        return f"{ICON_BASE_URL}/pokemon/{pid}.webp"
 
 # Raid Info Colors/Icons
 def get_raid_info(level_str):
@@ -272,7 +310,7 @@ def layout(area=None, **kwargs):
                     ], width=6, md=3)
                 ], className="align-items-end g-3"),
 
-                # Heatmap Display Mode (only visible for heatmap)
+                # Heatmap Display Mode only visible for heatmap
                 html.Div(id="raids-heatmap-filters-container", style={"display": "none"}, children=[
                     html.Hr(className="my-3"),
                     dbc.Row([
@@ -311,28 +349,31 @@ def layout(area=None, **kwargs):
         ], id="raids-area-modal", size="xl", scrollable=True),
 
         # Results Container
-        dcc.Loading(html.Div(id="raids-stats-container", style={"display": "none"}, children=[
+        # REMOVED global dcc.Loading, moved inside specific cards for fluid UI
+        html.Div(id="raids-stats-container", style={"display": "none"}, children=[
             dbc.Row([
                 # Sidebar
                 dbc.Col(dbc.Card([
                     dbc.CardHeader("📈 Total Counts"),
-                    dbc.CardBody(html.Div(id="raids-total-counts-display"))
+                    dbc.CardBody(
+                        dcc.Loading(html.Div(id="raids-total-counts-display"))
+                    )
                 ], className="shadow-sm border-0 h-100"), width=12, lg=4, className="mb-4"),
 
                 # Activity Data
                 dbc.Col(dbc.Card([
                     dbc.CardHeader("📋 Activity Data"),
                     dbc.CardBody([
-                         # Embedded Search Input - Visible only in Grouped mode
+                        # Search Input: debounce=False for fluid search, outside Loading
                         dcc.Input(
                             id="raids-search-input",
                             type="text",
                             placeholder="🔍 Search Bosses...",
-                            debounce=True,
+                            debounce=False,  # Fluid search
                             className="form-control mb-3",
                             style={"display": "none"}
                         ),
-                        html.Div(id="raids-main-visual-container")
+                        dcc.Loading(html.Div(id="raids-main-visual-container"))
                     ])
                 ], className="shadow-sm border-0 h-100"), width=12, lg=8, className="mb-4"),
             ]),
@@ -341,9 +382,9 @@ def layout(area=None, **kwargs):
                 dbc.CardHeader("🛠️ Raw Data Inspector"),
                 dbc.CardBody(html.Pre(id="raids-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
-        ])),
+        ]),
 
-        # Heatmap Container (separate from stats container)
+        # Heatmap Container separate from stats container
         html.Div(id="raids-heatmap-container", style={"display": "none"}, children=[
             dbc.Row([
                 # Left Column - Quick Filter
@@ -364,6 +405,7 @@ def layout(area=None, **kwargs):
                             ], className="align-items-center justify-content-between g-0")
                         ]),
                         dbc.CardBody([
+                            # Fluid Search for Quick Filter already outside loading
                             dbc.Input(id="raids-quick-filter-search", placeholder="Search Pokemon...", size="sm", className="mb-2"),
                             html.P("Click to hide/show Pokemon from map", className="text-muted small mb-2"),
                             html.Div(id="raids-quick-filter-grid",
@@ -930,7 +972,7 @@ def update_visuals(data, search_term, sort, page, mode, source):
             _, r = r
             bg = "#1a1a1a" if i % 2 == 0 else "#242424"
             rows.append(html.Tr([
-                html.Td(html.Img(src=get_pokemon_icon_url(r['pid'], r['form']), style={"width":"40px", "display":"block", "margin":"auto"}), style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
+                html.Td(html.Img(src=get_pokemon_icon_url(r['pid'], r['form']), style={"width":"40px", "height":"40px", "display":"block", "margin":"auto"}), style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
                 html.Td(f"{r['key']}", style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
                 html.Td(f"{int(r['count']):,}", style={"textAlign":"center", "backgroundColor":bg, "verticalAlign": "middle"})
             ]))

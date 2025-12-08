@@ -870,7 +870,7 @@ def update_visuals(data, search_term, sort, page, mode, source):
             _, r = r
             bg = "#1a1a1a" if i % 2 == 0 else "#242424"
             rows.append(html.Tr([
-                html.Td(html.Img(src=get_invasion_icon_url(r['char_id']), style={"width":"40px", "display":"block", "margin":"auto"}), style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
+                html.Td(html.Img(src=get_invasion_icon_url(r['char_id']), style={"width":"40px", "height":"40px", "display":"block", "margin":"auto"}), style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
                 html.Td(f"{r['metric']}", style={"backgroundColor":bg, "verticalAlign": "middle", "textAlign": "center"}),
                 html.Td(f"{int(r['count']):,}", style={"textAlign":"center", "backgroundColor":bg, "verticalAlign": "middle"})
             ]))
