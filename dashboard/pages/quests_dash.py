@@ -95,6 +95,35 @@ def _get_items_map():
         except: _ITEMS_MAP = {}
     return _ITEMS_MAP
 
+def get_area_pokestops_count(area_name):
+    """Reads the cached global_pokestops.json to find the stop count for the selected area."""
+    if not area_name:
+        return 0
+
+    try:
+        # Try relative to file first
+        path = os.path.join(os.path.dirname(__file__), '..', 'data', 'global_pokestops.json')
+        if not os.path.exists(path):
+            # Fallback to CWD
+            path = os.path.join(os.getcwd(), 'dashboard', 'data', 'global_pokestops.json')
+
+        if not os.path.exists(path):
+            return 0
+
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Handle Global case
+        if area_name.lower() == "global":
+            return data.get("total", 0)
+
+        # Handle specific area lookups
+        areas = data.get("areas", {})
+        return areas.get(area_name, 0)
+    except Exception as e:
+        logger.error(f"Error reading pokestops count: {e}")
+        return 0
+
 def resolve_pokemon_name(pid, form_id):
     species_map = _get_species_map()
     form_map = _get_form_map()
@@ -333,7 +362,7 @@ def layout(area=None, **kwargs):
 
 # Parsing Logic
 
-def parse_data_to_df(data, mode, source):
+def parse_data_to_df(data, mode, source, area=None):
     records = []
     working_data = data.get('data', data) if isinstance(data, dict) else data
     if not isinstance(working_data, dict): return pd.DataFrame()
@@ -344,9 +373,37 @@ def parse_data_to_df(data, mode, source):
     if mode == "sum":
         if "total" in working_data:
             records.append({"type": "Total", "name": "Total Quests", "count": working_data["total"], "key": "total", "category": "General", "time_bucket": "Total"})
+
+        # 1. Inject Total Pokestops so it appears in the graph
+        total_stops = get_area_pokestops_count(area)
+        if total_stops > 0:
+            records.append({
+                "type": "Mode",
+                "name": "Total Pokéstops",
+                "count": total_stops,
+                "key": "mode_stops",
+                "category": "Quest Mode",
+                "time_bucket": "Total",
+                "icon": f"{ICON_BASE_URL}/misc/pokestop.webp"
+            })
+
+        # 2. Add Quest Mode AR/Normal with explicit category and icons
         if "quest_mode" in working_data:
             for k, v in working_data["quest_mode"].items():
-                records.append({"type": "Mode", "name": f"{k.upper()} Mode", "count": v, "key": f"mode_{k}", "category": "General", "time_bucket": "Total"})
+                if safe_int(v) <= 0: continue  # Skip if count is 0 or less
+
+                k_str = str(k).lower()
+                name = "AR Quests" if k_str in ["1", "ar"] else "Normal Quests"
+                icon = f"{ICON_BASE_URL}/pokestop/0_ar.webp" if k_str in ["1", "ar"] else f"{ICON_BASE_URL}/pokestop/0.webp"
+                records.append({
+                    "type": "Mode",
+                    "name": name,
+                    "count": v,
+                    "key": f"mode_{k}",
+                    "category": "Quest Mode", # Special category to identify them
+                    "time_bucket": "Total",
+                    "icon": icon
+                })
 
     ts_keys = [k for k in working_data.keys() if str(k).startswith("ts:")]
 
@@ -626,13 +683,25 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
      Output("quests-total-pages-store", "data")],
     [Input("quests-raw-data-store", "data"), Input("quests-search-input", "value"),
      Input("quests-table-sort-store", "data"), Input("quests-table-page-store", "data")],
-    [State("quests-mode-selector", "value"), State("quests-data-source-selector", "value")]
+    [State("quests-mode-selector", "value"), State("quests-data-source-selector", "value"),
+     State("quests-area-selector", "value")]
 )
-def update_visuals(data, search_term, sort, page, mode, source):
+def update_visuals(data, search_term, sort, page, mode, source, selected_area):
     if not data: return "No Data", html.Div(), "", 1
 
-    df = parse_data_to_df(data, mode, source)
+    df = parse_data_to_df(data, mode, source, area=selected_area)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1
+
+    # Extract raw data for quest_mode totals AR vs Normal for TOP SIDEBAR
+    working_data = data.get('data', data) if isinstance(data, dict) else data
+    quest_modes = working_data.get("quest_mode", {}) if isinstance(working_data, dict) else {}
+
+    # Handle both string integers and names
+    ar_val = quest_modes.get("1", quest_modes.get("ar", 0))
+    normal_val = quest_modes.get("0", quest_modes.get("normal", 0))
+
+    ar_quests_count = safe_int(ar_val)
+    normal_quests_count = safe_int(normal_val)
 
     if mode == "grouped" and search_term:
         s = search_term.lower()
@@ -642,41 +711,73 @@ def update_visuals(data, search_term, sort, page, mode, source):
             df['category'].str.lower().str.contains(s, na=False)
         ]
 
-    # Sidebar
+    # Calculate Total Count for Sidebar filtered sum or absolute total
     total_count = df[df['time_bucket'] == 'Total']['count'].sum() if mode == 'sum' else df['count'].sum()
-    cat_gb = df.groupby('category')['count'].sum().reset_index().sort_values('count', ascending=False)
 
+    # SIDEBAR CONSTRUCTION
     sidebar = [html.H1(f"{total_count:,}", className="text-primary")]
 
-    cat_to_icon_path = {
-        "Pokemon": "misc/pokemon.webp", "Item": "reward/item/0.webp", "Stardust": "reward/stardust/0.webp",
-        "Candy": "reward/candy/0.webp", "XP": "reward/experience/0.webp", "Mega Energy": "reward/mega_resource/0.webp",
-        "XL Candy": "reward/xl_candy/0.webp", "Pokecoin": "reward/pokecoin/0.webp", "Sticker": "reward/sticker/0.webp",
-        "Incident": "reward/incident/0.webp", "Badge": "misc/badge_3.webp", "Egg": "misc/egg.webp",
-        "Friendship": "misc/bestbuddy.webp"
-    }
+    # 1. Total Pokestops from file
+    total_stops = get_area_pokestops_count(selected_area)
+    if total_stops > 0:
+        sidebar.append(html.Div([
+            html.Img(src=f"{ICON_BASE_URL}/misc/pokestop.webp", style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
+            html.Strong(f"{total_stops:,} Pokéstops", style={'fontSize': '1.1em'})
+        ], className="d-flex align-items-center mb-2"))
 
-    for _, r in cat_gb.iterrows():
-        cat_name = r['category']
-        path = cat_to_icon_path.get(cat_name)
-        if not path:
-            if "Item" in cat_name: path = "reward/item/0.webp"
-            elif "Pokemon" in cat_name: path = "misc/pokemon.webp"
-            else: path = "misc/0.webp"
+    # 2. Total AR Quests if any
+    if ar_quests_count > 0:
+        sidebar.append(html.Div([
+            html.Img(src=f"{ICON_BASE_URL}/pokestop/0_ar.webp", style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
+            html.Strong(f"{ar_quests_count:,} AR Quests", style={'fontSize': '1.1em'})
+        ], className="d-flex align-items-center mb-2"))
 
-        icon_src = f"{ICON_BASE_URL}/{path}"
-        row_content = [html.Strong(f"{r['count']:,}", style={'fontSize': '1.2em'})]
-        row_content.insert(0, html.Img(src=icon_src, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}))
-        sidebar.append(html.Div(row_content, className="d-flex align-items-center mb-2"))
+    # 3. Total Normal Quests if any
+    if normal_quests_count > 0:
+        sidebar.append(html.Div([
+            html.Img(src=f"{ICON_BASE_URL}/pokestop/0.webp", style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
+            html.Strong(f"{normal_quests_count:,} Normal Quests", style={'fontSize': '1.1em'})
+        ], className="d-flex align-items-center mb-2"))
+
+    sidebar.append(html.Hr(className="my-3"))
+
+    # 4. Existing Categories Breakdown - Explicitly Filter out General and Quest Mode
+    # This prevents them from appearing in the generic bottom list with broken icons or duplication
+    if 'category' in df.columns:
+        filtered_df = df[~df['category'].isin(['General', 'Quest Mode'])]
+        cat_gb = filtered_df.groupby('category')['count'].sum().reset_index().sort_values('count', ascending=False)
+
+        cat_to_icon_path = {
+            "Pokemon": "misc/pokemon.webp", "Item": "reward/item/0.webp", "Stardust": "reward/stardust/0.webp",
+            "Candy": "reward/candy/0.webp", "XP": "reward/experience/0.webp", "Mega Energy": "reward/mega_resource/0.webp",
+            "XL Candy": "reward/xl_candy/0.webp", "Pokecoin": "reward/pokecoin/0.webp", "Sticker": "reward/sticker/0.webp",
+            "Incident": "reward/incident/0.webp", "Badge": "misc/badge_3.webp", "Egg": "misc/egg.webp",
+            "Friendship": "misc/bestbuddy.webp"
+        }
+
+        for _, r in cat_gb.iterrows():
+            cat_name = r['category']
+            path = cat_to_icon_path.get(cat_name)
+            if not path:
+                if "Item" in cat_name: path = "reward/item/0.webp"
+                elif "Pokemon" in cat_name: path = "misc/pokemon.webp"
+                else: path = "misc/0.webp"
+
+            icon_src = f"{ICON_BASE_URL}/{path}"
+            row_content = [html.Strong(f"{r['count']:,}", style={'fontSize': '1.1em'})]
+            row_content.insert(0, html.Img(src=icon_src, style={"width": "24px", "marginRight": "10px", "verticalAlign": "middle"}))
+            sidebar.append(html.Div(row_content, className="d-flex align-items-center mb-1 small"))
 
     visual_content = html.Div()
     total_pages_val = 1
 
     if mode == "sum":
         fig = go.Figure()
-        top = df.sort_values('count', ascending=False).head(20)
+        chart_df = df[df['category'] != 'General']
+        top = chart_df.sort_values('count', ascending=False).head(20)
+
         fig.add_trace(go.Bar(x=top['name'], y=top['count'], marker_color='#17a2b8'))
-        max_y = top['count'].max()
+        max_y = top['count'].max() if not top.empty else 10
         for i, (idx, row) in enumerate(top.iterrows()):
             if row.get('icon'):
                 fig.add_layout_image(dict(source=row['icon'], x=row['name'], y=row['count'], xref="x", yref="y", sizex=0.5, sizey=max_y*0.1, xanchor="center", yanchor="bottom"))
