@@ -641,8 +641,12 @@ def handle_modals_and_search(ao, ac, mode, isa):
 # Area Cards Filter Callback
 @callback(
     Output("quests-area-cards-container", "children"),
-    [Input("quests-area-filter-input", "value"), Input("language-store", "data")],
-    [State("quests-area-selector", "value")]
+    [
+        Input("quests-area-filter-input", "value"),
+        Input("language-store", "data"),
+        Input("quests-area-selector", "value")
+    ]
+
 )
 def filter_area_cards(search_term, lang, selected_area):
     geofences = get_cached_geofences() or []
@@ -985,3 +989,15 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
         ])
 
     return sidebar, visual_content, json.dumps(data, indent=2), total_pages_val
+
+# Global Area Store Sync - persist area selection across pages
+@callback(
+    Output("quests-area-selector", "value"),
+    Input("global-area-store", "data"),
+    State("quests-area-selector", "value"),
+    prevent_initial_call=False
+)
+def init_quests_area_from_global_store(global_area, current_area):
+    if not current_area and global_area:
+        return global_area
+    return dash.no_update

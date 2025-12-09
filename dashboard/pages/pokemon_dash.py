@@ -924,7 +924,13 @@ def handle_modals_and_search(ao, ac, so, sc, mode, is_area, is_selection):
 
     return is_area, is_selection, search_style
 
-@callback(Output("area-cards-container", "children"), [Input("area-filter-input", "value"), Input("language-store", "data")], [State("area-selector", "value")])
+@callback(Output("area-cards-container", "children"),
+            [
+                Input("area-filter-input", "value"),
+                Input("language-store", "data"),
+                Input("area-selector", "value")
+            ]
+        )
 def filter_area_cards(search, lang, area):
     geos = get_cached_geofences() or []
     if search: geos = [g for g in geos if search.lower() in g['name'].lower()]
@@ -1760,7 +1766,7 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
 
     return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
-# Update to use the correctly namespaced JS function
+# Clientside callback for pokemon heatmap rendering
 dash.clientside_callback(
     ClientsideFunction(namespace='clientside', function_name='triggerHeatmapRenderer'),
     Output("heatmap-map-container", "children"),
@@ -1768,3 +1774,16 @@ dash.clientside_callback(
     Input("heatmap-hidden-pokemon", "data"),
     Input("heatmap-mode-store", "data"),
 )
+
+# Global Area Store Sync - persist area selection across pages
+@callback(
+    Output("area-selector", "value"),
+    Input("global-area-store", "data"),
+    State("area-selector", "value"),
+    prevent_initial_call=False
+)
+def init_area_from_global_store(global_area, current_area):
+    """Initialize area from global store if no URL parameter was provided."""
+    if not current_area and global_area:
+        return global_area
+    return dash.no_update

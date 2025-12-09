@@ -1,14 +1,10 @@
 import dash
 import dash_bootstrap_components as dbc
-from dash import html, dcc, Input, Output, State, ctx
+from dash import html, dcc, Input, Output, State, ctx, callback
+from urllib.parse import parse_qs
 import json
 import os
-
-# --- IMPORT TRANSLATION MANAGER ---
-try:
-    from dashboard.translations.manager import translate
-except ImportError:
-    from translations.manager import translate
+from dashboard.translations.manager import translate
 
 GITHUB_URL = "https://github.com/HugoDataAnalyst/PsyduckV2"
 icon_base_url = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
@@ -180,7 +176,9 @@ footer = dbc.Container([
 
 # App Layout
 app.layout = dbc.Container([
+    dcc.Location(id="url", refresh=False),
     dcc.Store(id="language-store", storage_type="local", data="en"),
+    dcc.Store(id="global-area-store", storage_type="local", data=None),
     navbar,
     dash.page_container,
     footer
@@ -216,6 +214,34 @@ def update_language(n_en, n_pt, n_de, n_fr, current_lang):
 def update_dynamic_content(lang):
     lang = lang or "en"
     return generate_navbar_items(lang), generate_footer_content(lang)
+
+
+# --- CENTRALIZED AREA SYNC CALLBACK ---
+@app.callback(
+    Output("global-area-store", "data"),
+    Input("url", "search"),
+    State("global-area-store", "data")
+)
+def sync_url_to_global_store(search, current_store):
+    """
+    If URL contains ?area=X, update the Global Store.
+    If URL has NO area, keep the current store (persistence).
+    """
+    if not search:
+        return dash.no_update
+
+    # Parse query string: ?area=London -> {'area': ['London']}
+    # Remove leading '?'
+    qs = parse_qs(search.lstrip('?'))
+    area_list = qs.get('area')
+
+    if area_list and area_list[0]:
+        new_area = area_list[0]
+        # Only update if different to avoid loop/overhead
+        if new_area != current_store:
+            return new_area
+
+    return dash.no_update
 
 if __name__ == "__main__":
     app.run_server(debug=True)

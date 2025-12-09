@@ -563,8 +563,12 @@ def handle_modals_and_search(ao, ac, mode, isa):
 
 # Area Cards Filter & Scroll
 @callback(Output("invasions-area-cards-container", "children"),
-          [Input("invasions-area-filter-input", "value"), Input("language-store", "data")],
-          [State("invasions-area-selector", "value")])
+            [
+                Input("invasions-area-filter-input", "value"),
+                Input("language-store", "data"),
+                Input("invasions-area-selector", "value")
+            ]
+        )
 def filter_area_cards(search_term, lang, selected_area):
     geofences = get_cached_geofences() or []
     if search_term: geofences = [g for g in geofences if search_term.lower() in g['name'].lower()]
@@ -985,3 +989,15 @@ dash.clientside_callback(
      Input("invasions-heatmap-mode-store", "data")],
     prevent_initial_call=True
 )
+
+# Global Area Store Sync - persist area selection across pages
+@callback(
+    Output("invasions-area-selector", "value"),
+    Input("global-area-store", "data"),
+    State("invasions-area-selector", "value"),
+    prevent_initial_call=False
+)
+def init_invasions_area_from_global_store(global_area, current_area):
+    if not current_area and global_area:
+        return global_area
+    return dash.no_update
