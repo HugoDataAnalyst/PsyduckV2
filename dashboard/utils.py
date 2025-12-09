@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from utils.logger import logger
 
 API_BASE_URL = AppConfig.api_base_url
@@ -17,11 +18,13 @@ REMOTE_ROOT_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/m
 
 ICON_CACHE_DIR = Path(__file__).parent / "assets" / "pokemon_icons"
 REWARD_CACHE_DIR = Path(__file__).parent / "assets" / "reward_icons"
+INVASION_ICONS_DIR = Path(__file__).parent / "assets" / "invasion_icons"
 GLOBAL_AREAS_FILE = Path(__file__).parent / "data" / "global_areas.json"
 
 # Ensure cache directories exist
 ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 REWARD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+INVASION_ICONS_DIR.mkdir(parents=True, exist_ok=True)
 
 _POKEDEX_FORMS = None
 def _load_pokedex_forms():
@@ -518,6 +521,7 @@ def precache_pokemon_icons(pokemon_list=None, max_workers=10):
     logger.info(f"Icon pre-cache complete: {successful}/{total} succeeded, {failed} failed")
     return successful, failed
 
+@lru_cache(maxsize=4096)
 def get_pokemon_icon_url(pid, form=0):
     """
     Generates the URL for the Pokemon icon, preferring local cache.
@@ -569,6 +573,103 @@ def get_pokemon_icon_url(pid, form=0):
     except Exception as e:
         # Fallback to base image on any error
         return f"{ICON_BASE_URL}/{pid}.webp"
+
+def _safe_int(value):
+    """Safely converts a value to int, handling 'None' strings and NoneType."""
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        if value.lower() == "none" or value == "":
+            return 0
+        try:
+            return int(float(value))
+        except:
+            return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
+
+@lru_cache(maxsize=1024)
+def get_invasion_icon_url(character_id):
+    """
+    Generates the URL for an invasion/rocket character icon.
+    Checks local cache first, falls back to remote URL.
+    """
+    filename = f"{character_id}.webp"
+    if (INVASION_ICONS_DIR / filename).exists():
+        return f"/assets/invasion_icons/{filename}"
+    return f"{REMOTE_ROOT_URL}/invasion/{filename}"
+
+@lru_cache(maxsize=2048)
+def get_reward_icon_url(relative_path):
+    """
+    Helper to check if a reward icon exists in the reward_icons assets folder.
+    Returns local path if cached, otherwise remote URL.
+    """
+    if (REWARD_CACHE_DIR / relative_path).exists():
+        return f"/assets/reward_icons/{relative_path}"
+    return f"{REMOTE_ROOT_URL}/{relative_path}"
+
+@lru_cache(maxsize=2048)
+def get_quest_icon_url(reward_type, item_id=None, poke_id=None, form=0):
+    """
+    Generates the URL for a quest reward icon based on reward type.
+    Checks local cache first, falls back to remote URL.
+    """
+    rt = _safe_int(reward_type)
+    item_id = _safe_int(item_id)
+    poke_id = _safe_int(poke_id)
+    form = _safe_int(form)
+
+    # Pokemon reward - use pokemon icon
+    if rt == 7 and poke_id > 0:
+        filename = f"{poke_id}_f{form}.webp" if form > 0 else f"{poke_id}.webp"
+        if (ICON_CACHE_DIR / filename).exists():
+            return f"/assets/pokemon_icons/{filename}"
+        if form > 0:
+            base_filename = f"{poke_id}.webp"
+            if (ICON_CACHE_DIR / base_filename).exists():
+                return f"/assets/pokemon_icons/{base_filename}"
+        return f"{ICON_BASE_URL}/{filename}"
+
+    # Determine relative path for other rewards
+    relative_path = "misc/0.webp"
+
+    if rt == 2 and item_id > 0:
+        relative_path = f"reward/item/{item_id}.webp"
+    elif rt == 4 and item_id > 0:
+        relative_path = f"reward/candy/{item_id}.webp"
+    elif rt == 12 and item_id > 0:
+        relative_path = f"reward/mega_resource/{item_id}.webp"
+    elif rt == 9 and item_id > 0:
+        relative_path = f"reward/xl_candy/{item_id}.webp"
+    else:
+        # Default mapping for reward types
+        defaults = {
+            0: "reward/unset/0.webp",
+            1: "reward/experience/0.webp",
+            2: "reward/item/0.webp",
+            3: "reward/stardust/0.webp",
+            4: "reward/candy/0.webp",
+            5: "reward/avatar_clothing/0.webp",
+            6: "reward/quest/0.webp",
+            7: "misc/pokemon.webp",
+            8: "reward/pokecoin/0.webp",
+            9: "reward/xl_candy/0.webp",
+            10: "reward/level_cap/0.webp",
+            11: "reward/sticker/0.webp",
+            12: "reward/mega_resource/0.webp",
+            13: "reward/incident/0.webp",
+            14: "reward/player_attribute/0.webp",
+            15: "misc/badge_3.webp",
+            16: "misc/egg.webp",
+            17: "station/0.webp",
+            18: "reward/unset/0.webp",
+            19: "misc/bestbuddy.webp"
+        }
+        relative_path = defaults.get(rt, "misc/0.webp")
+
+    return get_reward_icon_url(relative_path)
 
 def create_geofence_figure(geofence_data):
     """

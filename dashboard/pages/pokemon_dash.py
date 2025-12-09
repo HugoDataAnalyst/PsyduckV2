@@ -11,7 +11,6 @@ import config as AppConfig
 import json
 import re
 import os
-from pathlib import Path
 from dashboard.translations.manager import translate, translate_pokemon
 
 dash.register_page(__name__, path='/pokemon', title='Pokémon Analytics')
@@ -26,12 +25,6 @@ try:
     SHINY_RETENTION_MONTHS = AppConfig.clean_pokemon_shiny_older_than_x_months
 except:
     SHINY_RETENTION_MONTHS = 3
-
-ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
-
-# Define Cache Paths
-ASSETS_PATH = Path(__file__).parent / ".." / "assets"
-POKEMON_ICONS_PATH = ASSETS_PATH / "pokemon_icons"
 
 #  Data Loading
 _SPECIES_MAP = None
@@ -183,37 +176,6 @@ def resolve_pokemon_name_parts(pid, form_id, lang="en"):
         form_name = f"Form {form_id}"
 
     return (species_name, form_name)
-
-# I'll revisit this later, we can probably remove this here and add caching at start up with lru_cache.
-def get_pokemon_icon_url(pid, form=0):
-    """
-    Returns local path if exists, else remote URL.
-    Cached to prevent repeat Disk I/O during fluid rendering.
-    """
-    try:
-        form_int = int(form)
-        # Determine filename
-        if form_int == 0:
-            filename = f"{pid}.webp"
-        else:
-            filename = f"{pid}_f{form_int}.webp"
-
-        # Check local cache
-        local_path = POKEMON_ICONS_PATH / filename
-        if local_path.exists():
-            return f"/assets/pokemon_icons/{filename}"
-
-        # Fallback to base image locally if form variant missing
-        if form_int > 0:
-            base_filename = f"{pid}.webp"
-            base_path = POKEMON_ICONS_PATH / base_filename
-            if base_path.exists():
-                return f"/assets/pokemon_icons/{base_filename}"
-
-        # Fallback to Remote
-        return f"{ICON_BASE_URL}/pokemon/{filename}"
-    except Exception:
-        return f"{ICON_BASE_URL}/pokemon/{pid}.webp"
 
 # Layout
 

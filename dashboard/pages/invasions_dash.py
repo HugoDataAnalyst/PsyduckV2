@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_invasions_stats
+from dashboard.utils import get_cached_geofences, get_invasions_stats, get_invasion_icon_url
 from utils.logger import logger
 import config as AppConfig
 import json
@@ -15,24 +15,6 @@ from pathlib import Path
 from dashboard.translations.manager import translate, translate_invader, translate_incident_display
 
 dash.register_page(__name__, path='/invasions', title='Invasion Analytics')
-
-ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
-
-# Define Cache Paths
-ASSETS_PATH = Path(__file__).parent / ".." / "assets"
-INVASION_ICONS_PATH = ASSETS_PATH / "invasion_icons"
-
-
-# Cached wrapper for invasion icons with local fallback - we can uncomment the lru_cache later if we want to use it like this
-#@lru_cache(maxsize=None)
-def get_invasion_icon_url(character_id):
-    filename = f"{character_id}.webp"
-
-    # Check local cache
-    if (INVASION_ICONS_PATH / filename).exists():
-        return f"/assets/invasion_icons/{filename}"
-
-    return f"{ICON_BASE_URL}/invasion/{filename}"
 
 def parse_invasion_key(key_str, lang="en"):
     """

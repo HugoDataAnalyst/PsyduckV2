@@ -5,24 +5,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_quests_stats
+from dashboard.utils import get_cached_geofences, get_quests_stats, get_quest_icon_url, get_reward_icon_url
 from utils.logger import logger
 import config as AppConfig
 import json
 import re
 import os
 from pathlib import Path
-from functools import lru_cache
 from dashboard.translations.manager import translate, translate_pokemon, translate_quest_type, translate_quest_reward, translate_quest_item
 
 dash.register_page(__name__, path='/quests', title='Quest Analytics')
 
-ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
-
-# Define Cache Paths
+# Define paths for translation assets
 ASSETS_PATH = Path(__file__).parent / ".." / "assets"
-REWARD_ICONS_PATH = ASSETS_PATH / "reward_icons"
-POKEMON_ICONS_PATH = ASSETS_PATH / "pokemon_icons"
 QUESTS_ASSETS_PATH = ASSETS_PATH / "pogo_mapping" / "quests"
 
 _SPECIES_MAP = None
@@ -112,55 +107,6 @@ def resolve_pokemon_name(pid, form_id, lang="en"):
                 return f"{base_name} ({form_suffix})" if form_suffix else base_name
         return form_name_full
     return base_name
-
-# Cached wrapper for icon path resolution
-#@lru_cache(maxsize=None)
-def get_cached_icon_url_internal(relative_path):
-    """Helper to check if an icon exists in the reward_icons assets folder (Cached)."""
-    if (REWARD_ICONS_PATH / relative_path).exists():
-        return f"/assets/reward_icons/{relative_path}"
-    return f"{ICON_BASE_URL}/{relative_path}"
-
-# Updated: Uses lru_cache and checks local storage
-#@lru_cache(maxsize=None)
-def get_quest_icon_url(reward_type, item_id=None, poke_id=None, form=0):
-    rt = safe_int(reward_type)
-    item_id, poke_id, form = safe_int(item_id), safe_int(poke_id), safe_int(form)
-
-    # Specific Lookups Pokemon
-    if rt == 7 and poke_id > 0:
-        # ... (Pokemon icon logic remains same) ...
-        filename = f"{poke_id}_f{form}.webp" if form > 0 else f"{poke_id}.webp"
-        if (POKEMON_ICONS_PATH / filename).exists(): return f"/assets/pokemon_icons/{filename}"
-        if form > 0:
-            base_filename = f"{poke_id}.webp"
-            if (POKEMON_ICONS_PATH / base_filename).exists(): return f"/assets/pokemon_icons/{base_filename}"
-        return f"{ICON_BASE_URL}/pokemon/{filename}"
-
-    # Determine relative path for Rewards
-    relative_path = "misc/0.webp"
-
-    if rt == 2 and item_id > 0: relative_path = f"reward/item/{item_id}.webp"
-    elif rt == 4 and item_id > 0: relative_path = f"reward/candy/{item_id}.webp"
-    elif rt == 12 and item_id > 0: relative_path = f"reward/mega_resource/{item_id}.webp"
-    elif rt == 9 and item_id > 0: relative_path = f"reward/xl_candy/{item_id}.webp"
-    else:
-        # Default mapping using loaded types if needed, or keeping the manual map for icons
-        # Since icons map to IDs, we can keep the manual ID map or load it.
-        # For safety/speed, the ID->Icon map is often static structure.
-        # But let's use the logic provided:
-        defaults = {
-            0: "reward/unset/0.webp", 1: "reward/experience/0.webp", 2: "reward/item/0.webp",
-            3: "reward/stardust/0.webp", 4: "reward/candy/0.webp", 5: "reward/avatar_clothing/0.webp",
-            6: "reward/quest/0.webp", 7: "misc/pokemon.webp", 8: "reward/pokecoin/0.webp",
-            9: "reward/xl_candy/0.webp", 10: "reward/level_cap/0.webp", 11: "reward/sticker/0.webp",
-            12: "reward/mega_resource/0.webp", 13: "reward/incident/0.webp", 14: "reward/player_attribute/0.webp",
-            15: "misc/badge_3.webp", 16: "misc/egg.webp", 17: "station/0.webp", 18: "reward/unset/0.webp",
-            19: "misc/bestbuddy.webp"
-        }
-        relative_path = defaults.get(rt, "misc/0.webp")
-
-    return get_cached_icon_url_internal(relative_path)
 
 # Layout
 
@@ -422,7 +368,7 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
                 "key": "mode_stops",
                 "category": translate("Quest Mode", lang),
                 "time_bucket": translate("Total", lang),
-                "icon": get_cached_icon_url_internal("misc/pokestop.webp")
+                "icon": get_reward_icon_url("misc/pokestop.webp")
             })
 
         # 2. Add Quest Mode AR/Normal if > 0
@@ -433,7 +379,7 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
                 k_str = str(k).lower()
                 name = translate("AR Quests", lang) if k_str in ["1", "ar"] else translate("Normal Quests", lang)
                 icon_path = "pokestop/0_ar.webp" if k_str in ["1", "ar"] else "pokestop/0.webp"
-                icon = get_cached_icon_url_internal(icon_path)
+                icon = get_reward_icon_url(icon_path)
                 records.append({
                     "type": translate("Mode", lang),
                     "name": name,
@@ -845,7 +791,7 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
     # 1. Total Pokestops from file
     total_stops = get_area_pokestops_count(selected_area)
     if total_stops > 0:
-        icon_path = get_cached_icon_url_internal("misc/pokestop.webp")
+        icon_path = get_reward_icon_url("misc/pokestop.webp")
         sidebar.append(html.Div([
             html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
             html.Strong(f"{total_stops:,} {translate('Pokéstops', lang)}", style={'fontSize': '1.1em'})
@@ -853,7 +799,7 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
 
     # 2. Total AR Quests if any
     if ar_quests_count > 0:
-        icon_path = get_cached_icon_url_internal("pokestop/0_ar.webp")
+        icon_path = get_reward_icon_url("pokestop/0_ar.webp")
         sidebar.append(html.Div([
             html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
             html.Strong(f"{ar_quests_count:,} {translate('AR Quests', lang)}", style={'fontSize': '1.1em'})
@@ -861,7 +807,7 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
 
     # 3. Total Normal Quests if any
     if normal_quests_count > 0:
-        icon_path = get_cached_icon_url_internal("pokestop/0.webp")
+        icon_path = get_reward_icon_url("pokestop/0.webp")
         sidebar.append(html.Div([
             html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
             html.Strong(f"{normal_quests_count:,} {translate('Normal Quests', lang)}", style={'fontSize': '1.1em'})
@@ -929,7 +875,7 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
                 elif "friend" in cat_lower or "amizade" in cat_lower or "freundschaft" in cat_lower or "amitié" in cat_lower: path = "misc/bestbuddy.webp"
                 else: path = "misc/0.webp"
 
-            icon_src = get_cached_icon_url_internal(path)
+            icon_src = get_reward_icon_url(path)
             row_content = [html.Strong(f"{r['count']:,}", style={'fontSize': '1.1em'})]
             row_content.insert(0, html.Img(src=icon_src, style={"width": "24px", "marginRight": "10px", "verticalAlign": "middle"}))
             sidebar.append(html.Div(row_content, className="d-flex align-items-center mb-1 small"))
