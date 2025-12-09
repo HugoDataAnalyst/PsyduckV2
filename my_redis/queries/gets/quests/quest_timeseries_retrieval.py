@@ -29,12 +29,8 @@ for _, key in ipairs(KEYS) do
             -- Sum mode: aggregate by key
             sum_results[key] = (sum_results[key] or 0) + count
 
-            -- Grouped mode: aggregate by key and timestamp
-            if not grouped_results[key] then
-                grouped_results[key] = {}
-            end
-            local ts_bucket = tostring(ts)
-            grouped_results[key][ts_bucket] = (grouped_results[key][ts_bucket] or 0) + count
+            -- Grouped mode: aggregate by key ONLY (remove timestamp granularity)
+            grouped_results[key] = (grouped_results[key] or 0) + count
 
             -- Surged mode: aggregate by key and hour
             if not surged_results[key] then
@@ -55,14 +51,9 @@ if mode == 'sum' then
     return arr
 elseif mode == 'grouped' then
     local arr = {}
-    for key, groups in pairs(grouped_results) do
-        local inner = {}
-        for ts_bucket, count in pairs(groups) do
-            table.insert(inner, ts_bucket)
-            table.insert(inner, count)
-        end
-        table.insert(arr, key)
-        table.insert(arr, inner)
+    for k, v in pairs(grouped_results) do
+        table.insert(arr, k)
+        table.insert(arr, v)
     end
     return arr
 elseif mode == 'surged' then
@@ -173,11 +164,11 @@ class QuestTimeSeries:
         if self.mode == "sum":
             for key, cnt in chunk_data.items():
                 acc_sum[key] = acc_sum.get(key, 0) + int(cnt)
+
         elif self.mode == "grouped":
-            for key, groups in chunk_data.items():
-                bucket = acc_grouped.setdefault(key, {})
-                for ts_bucket, count in groups.items():
-                    bucket[ts_bucket] = bucket.get(ts_bucket, 0) + int(count)
+            for key, cnt in chunk_data.items():
+                acc_grouped[key] = acc_grouped.get(key, 0) + int(cnt)
+
         elif self.mode == "surged":
             for key, hours in chunk_data.items():
                 bucket = acc_surged.setdefault(key, {})
@@ -226,7 +217,7 @@ class QuestTimeSeries:
 
             # Accumulators
             acc_sum: Dict[str, int] = {}
-            acc_grouped: Dict[str, Dict[str, int]] = {}
+            acc_grouped: Dict[str, int] = {}
             acc_surged: Dict[str, Dict[str, int]] = {}
 
             start_ts = int(self.start.timestamp())
@@ -262,6 +253,7 @@ class QuestTimeSeries:
 
             # Step 5: Final formatting
             format_start = time.monotonic()
+            formatted = {}
 
             if self.mode == "sum":
                 # Prepare containers for split counts
@@ -318,21 +310,13 @@ class QuestTimeSeries:
                     }
 
             elif self.mode == "grouped":
-                formatted = {}
-                for k, groups in acc_grouped.items():
-                    ordered = dict(sorted(groups.items(), key=lambda x: int(x[0])))
-                    formatted[k] = ordered
-                formatted = dict(sorted(formatted.items(), key=lambda item: item[0]))
+                formatted = dict(sorted(acc_grouped.items(), key=lambda item: item[0]))
 
             elif self.mode == "surged":
-                formatted = {}
                 for k, hours in acc_surged.items():
                     labeled = {f"hour {int(h)}": v for h, v in hours.items()}
                     formatted[k] = dict(sorted(labeled.items(), key=lambda x: int(x[0].split()[1])))
                 formatted = dict(sorted(formatted.items(), key=lambda item: item[0]))
-
-            else:
-                formatted = {}
 
             format_elapsed = time.monotonic() - format_start
             total_elapsed = time.monotonic() - total_start
