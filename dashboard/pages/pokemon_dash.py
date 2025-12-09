@@ -43,16 +43,16 @@ def _load_pokedex_data():
 
     if _SPECIES_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex_id.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex_id.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'pokemons', 'pokedex_id.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'pokemons', 'pokedex_id.json')
             with open(path, 'r') as f:
                 _SPECIES_MAP = json.load(f)
         except: _SPECIES_MAP = {}
 
     if _FORM_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
             with open(path, 'r') as f:
                 _FORM_MAP = json.load(f)
         except: _FORM_MAP = {}

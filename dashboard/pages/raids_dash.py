@@ -41,8 +41,8 @@ def _get_species_map():
     global _SPECIES_MAP
     if _SPECIES_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex_id.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex_id.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'pokemons', 'pokedex_id.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'pokemons', 'pokedex_id.json')
             with open(path, 'r') as f:
                 data = json.load(f)
                 _SPECIES_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
@@ -56,8 +56,8 @@ def _get_form_map():
     global _FORM_MAP
     if _FORM_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
             with open(path, 'r') as f:
                 data = json.load(f)
                 _FORM_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}

@@ -35,8 +35,8 @@ def _get_grunt_map():
     global _GRUNT_MAP
     if _GRUNT_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'grunts.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'grunts.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'invasions', 'grunts.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'invasions', 'grunts.json')
             with open(path, 'r') as f:
                 data = json.load(f)
                 _GRUNT_MAP = {v: k.replace("_", " ").title().replace("Npc", "NPC") for k, v in data.items()}

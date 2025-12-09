@@ -71,8 +71,8 @@ def _get_species_map():
     global _SPECIES_MAP
     if _SPECIES_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex_id.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex_id.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'pokemons', 'pokedex_id.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'pokemons', 'pokedex_id.json')
             with open(path, 'r') as f:
                 data = json.load(f)
                 _SPECIES_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
@@ -83,8 +83,8 @@ def _get_form_map():
     global _FORM_MAP
     if _FORM_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pokedex.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pokedex.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
             with open(path, 'r') as f:
                 data = json.load(f)
                 _FORM_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
@@ -95,8 +95,8 @@ def _get_items_map():
     global _ITEMS_MAP
     if _ITEMS_MAP is None:
         try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'items.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'items.json')
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'quests', 'items.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'quests', 'items.json')
             with open(path, 'r') as f:
                 data = json.load(f)
                 _ITEMS_MAP = {v: k.replace("_", " ").title() for k, v in data.items()}
@@ -406,7 +406,7 @@ def layout(area=None, **kwargs):
      Output("quests-card-header-total-counts", "children"), Output("quests-card-header-activity", "children"),
      Output("quests-card-header-raw", "children"), Output("quests-search-input", "placeholder"),
      Output("quests-selected-area-display", "value"), Output("quests-area-filter-input", "placeholder")],
-    Input("language-store", "data"), Input("quests-area-selector", "value")
+    [Input("language-store", "data"), Input("quests-area-selector", "value")],
 )
 def update_static_translations(lang, current_area):
     lang = lang or "en"
