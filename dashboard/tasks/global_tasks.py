@@ -19,106 +19,13 @@ from dashboard.utils import (
 # Relative path to data/ folder
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 
-# Map
-"""
-TASK_CONFIG = {
-    "pokestops": {
-        "func": get_global_pokestops_task,
-        "file": os.path.join(DATA_DIR, 'global_pokestops.json')
-    },
-    "pokemons_daily": {
-        "func": get_global_pokemon_task,
-        "file": os.path.join(DATA_DIR, 'global_pokes.json')
-    },
-    "pokemon_alltime": {
-        "func": get_global_pokemon_task,
-        "file": os.path.join(DATA_DIR, 'global_pokes_alltime.json'),
-        "params": {
-            "counter_type": "totals",
-            "area": "global",
-            "start_time": "26280 hours", # This will now be honored
-            "end_time": "now",
-            "mode": "sum",
-            "interval": "hourly",
-            "metric": "all",
-            "pokemon_id": "all",
-            "form_id": "all",
-            "response_format": "json"
-        }
-    },
-    "raids_daily": {
-        "func": get_global_raids_task,
-        "file": os.path.join(DATA_DIR, 'global_raids.json')
-    },
-    "raids_alltime": {
-        "func": get_global_raids_task,
-        "file": os.path.join(DATA_DIR, 'global_raids_alltime.json'),
-        "params": {
-            "counter_type": "totals",
-            "area": "global",
-            "start_time": "26280 hours",
-            "end_time": "now",
-            "mode": "sum",
-            "interval": "hourly",
-            "raid_pokemon": "all",
-            "raid_form": "all",
-            "raid_level": "all",
-            "response_format": "json"
-        }
-    },
-    "invasions_daily": {
-        "func": get_global_invasions_task,
-        "file": os.path.join(DATA_DIR, 'global_invasions.json')
-    },
-    "invasions_alltime": {
-        "func": get_global_invasions_task,
-        "file": os.path.join(DATA_DIR, 'global_invasions_alltime.json'),
-        "params": {
-            "counter_type": "totals",
-            "interval": "hourly",
-            "start_time": "26280 hours",
-            "end_time": "now",
-            "mode": "sum",
-            "response_format": "json",
-            "area": "global",
-            "display_type": "all",
-            "character": "all",
-            "grunt": "all",
-            "confirmed": "all"
-        }
-    },
-    "quests_daily": {
-        "func": get_global_quests_task,
-        "file": os.path.join(DATA_DIR, 'global_quests.json')
-    },
-    "quests_alltime": {
-        "func": get_global_quests_task,
-        "file": os.path.join(DATA_DIR, 'global_quests_alltime.json'),
-        "params": {
-            "counter_type": "totals",
-            "interval": "hourly",
-            "start_time": "26280 hours",
-            "end_time": "now",
-            "mode": "sum",
-            "response_format": "json",
-            "area": "global",
-            "with_ar": "all", "ar_type": "all", "reward_ar_type": "all",
-            "reward_ar_item_id": "all", "reward_ar_item_amount": "all",
-            "reward_ar_poke_id": "all", "reward_ar_poke_form": "all",
-            "normal_type": "all", "reward_normal_type": "all",
-            "reward_normal_item_id": "all", "reward_normal_item_amount": "all",
-            "reward_normal_poke_id": "all", "reward_normal_poke_form": "all"
-        }
-    }
-}
-"""
-
 # Default intervals (in seconds)
 DEFAULT_INTERVAL = 3600        # 1 hour for most tasks
 DAILY_INTERVAL = 86400         # 24 hours for alltime/historical tasks
 
+# Map
 TASK_CONFIG = {
-    # --- Fast refresh tasks (every hour) ---
+    # Fast refresh tasks
     "areas": {
         "func": get_global_areas_task,
         "file": os.path.join(DATA_DIR, 'global_areas.json'),
@@ -149,13 +56,14 @@ TASK_CONFIG = {
         "file": os.path.join(DATA_DIR, 'global_quests.json'),
         "task_interval": DEFAULT_INTERVAL
     },
+    # Slow refresh tasks
     "pokemon_alltime": {
         "func": get_global_pokemon_task,
         "file": os.path.join(DATA_DIR, 'global_pokes_alltime.json'),
         "params": {
             "counter_type": "totals",
             "area": "global",
-            "start_time": "26280 hours", # This will now be honored
+            "start_time": "26280 hours",
             "end_time": "now",
             "mode": "sum",
             "interval": "hourly",
@@ -166,6 +74,61 @@ TASK_CONFIG = {
         },
         "task_interval": DAILY_INTERVAL
     },
+    "raids_alltime": {
+        "func": get_global_raids_task,
+        "file": os.path.join(DATA_DIR, 'global_raids_alltime.json'),
+        "params": {
+            "counter_type": "totals",
+            "area": "global",
+            "start_time": "26280 hours",
+            "end_time": "now",
+            "mode": "sum",
+            "interval": "hourly",
+            "raid_pokemon": "all",
+            "raid_form": "all",
+            "raid_level": "all",
+            "response_format": "json"
+        },
+        "task_interval": DAILY_INTERVAL
+    },
+    "invasions_alltime": {
+        "func": get_global_invasions_task,
+        "file": os.path.join(DATA_DIR, 'global_invasions_alltime.json'),
+        "params": {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": "26280 hours",
+            "end_time": "now",
+            "mode": "sum",
+            "response_format": "json",
+            "area": "global",
+            "display_type": "all",
+            "character": "all",
+            "grunt": "all",
+            "confirmed": "all"
+        },
+        "task_interval": DAILY_INTERVAL
+    },
+    "quests_alltime": {
+        "func": get_global_quests_task,
+        "file": os.path.join(DATA_DIR, 'global_quests_alltime.json'),
+        "params": {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": "26280 hours",
+            "end_time": "now",
+            "mode": "sum",
+            "response_format": "json",
+            "area": "global",
+            "with_ar": "all", "ar_type": "all", "reward_ar_type": "all",
+            "reward_ar_item_id": "all", "reward_ar_item_amount": "all",
+            "reward_ar_poke_id": "all", "reward_ar_poke_form": "all",
+            "normal_type": "all", "reward_normal_type": "all",
+            "reward_normal_item_id": "all", "reward_normal_item_amount": "all",
+            "reward_normal_poke_id": "all", "reward_normal_poke_form": "all"
+        },
+        "task_interval": DAILY_INTERVAL
+    }
 }
 
 class BackgroundRunner:
