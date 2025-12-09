@@ -13,6 +13,7 @@ import re
 import os
 from pathlib import Path
 from functools import lru_cache
+from dashboard.translations.manager import translate
 
 dash.register_page(__name__, path='/quests', title='Quest Analytics')
 
@@ -194,30 +195,30 @@ def get_quest_icon_url(reward_type, item_id=None, poke_id=None, form=0):
 
 # Layout
 
-def generate_area_cards(geofences, selected_area_name):
+def generate_area_cards(geofences, selected_area_name, lang="en"):
     cards = []
     for idx, geo in enumerate(geofences):
         safe_name = re.sub(r'[^a-zA-Z0-9]', '_', geo['name'])
         is_selected = (selected_area_name == geo['name'])
 
         # Visual indicator for selected card
-        map_children = [html.Div("✓ Selected", style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
+        map_children = [html.Div("✓ " + translate("Selected", lang), style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
 
         card = dbc.Card([
             html.Div(map_children, id=f"quests-map-{safe_name}", **{'data-map-geofence': json.dumps(geo)}, style={'height': '150px', 'backgroundColor': '#1a1a1a', 'position': 'relative'}),
             dbc.CardBody([
                 html.H5(geo['name'], className="card-title text-truncate", style={'color': '#28a745' if is_selected else 'inherit'}),
-                dbc.Button("✓ Selected" if is_selected else "Select", href=f"/quests?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
+                dbc.Button("✓ " + translate("Selected", lang) if is_selected else translate("Select", lang), href=f"/quests?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
             ])
         ], style={"width": "14rem", "margin": "10px", "border": f"3px solid {'#28a745' if is_selected else 'transparent'}"}, className="shadow-sm")
 
         if is_selected: card.id = "selected-area-card"
         cards.append(card)
-    return cards if cards else html.Div("No areas match your search.", className="text-center text-muted my-4")
+    return cards if cards else html.Div(translate("No areas match your search.", lang), className="text-center text-muted my-4")
 
 def layout(area=None, **kwargs):
     geofences = get_cached_geofences() or []
-    initial_cards = generate_area_cards(geofences, area)
+    initial_cards = generate_area_cards(geofences, area, "en")
     area_options = [{"label": g["name"], "value": g["name"]} for g in geofences]
     area_label = area if area else "No Area Selected"
 
@@ -233,7 +234,7 @@ def layout(area=None, **kwargs):
 
         # Header
         dbc.Row([
-            dbc.Col(html.H2("Quest Analytics", className="text-white"), width=12, className="my-4"),
+            dbc.Col(html.H2("Quest Analytics", id="quests-page-title", className="text-white"), width=12, className="my-4"),
         ]),
 
         # Notification Area
@@ -241,26 +242,26 @@ def layout(area=None, **kwargs):
 
         # Main Control Card
         dbc.Card([
-            dbc.CardHeader("⚙️ Analysis Settings", className="fw-bold"),
+            dbc.CardHeader("⚙️ Analysis Settings", id="quests-settings-header", className="fw-bold"),
             dbc.CardBody([
                 dbc.Row([
                     # Area Selection
                     dbc.Col([
-                        dbc.Label("Selected Area", className="fw-bold"),
+                        dbc.Label("Selected Area", id="quests-label-selected-area", className="fw-bold"),
                         dbc.InputGroup([
                             dbc.InputGroupText("🗺️"),
-                            dbc.Input(value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
+                            dbc.Input(id="quests-selected-area-display", value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
                             dbc.Button("Change", id="quests-open-area-modal", color="primary")
                         ], className="mb-3")
                     ], width=12, md=6),
 
                     # Data Source
                     dbc.Col([
-                        dbc.Label("Data Source", className="fw-bold"),
+                        dbc.Label("Data Source", id="quests-label-data-source", className="fw-bold"),
                         html.Div([
                             # Stats Live & Historical
                             html.Div([
-                                html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("Stats: ", id="quests-label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="quests-data-source-selector",
                                     options=[
@@ -283,14 +284,14 @@ def layout(area=None, **kwargs):
                     # Time Control
                     dbc.Col([
                         html.Div(id="quests-live-controls", children=[
-                            dbc.Label("📅 Time Window (Hours)"),
+                            dbc.Label("📅 Time Window (Hours)", id="quests-label-time-window"),
                             dbc.InputGroup([
                                 dbc.Input(id="quests-live-time-input", type="number", min=1, max=72, value=24),
                                 dbc.InputGroupText("hours")
                             ])
                         ]),
                         html.Div(id="quests-historical-controls", style={"display": "none"}, children=[
-                            dbc.Label("📅 Date Range"),
+                            dbc.Label("📅 Date Range", id="quests-label-date-range"),
                             dcc.DatePickerRange(
                                 id="quests-historical-date-picker",
                                 start_date=date.today(), end_date=date.today(),
@@ -303,14 +304,14 @@ def layout(area=None, **kwargs):
                     # Interval
                     dbc.Col([
                         html.Div(id="quests-interval-control-container", style={"display": "none"}, children=[
-                            dbc.Label("⏱️ Interval"),
+                            dbc.Label("⏱️ Interval", id="quests-label-interval"),
                             dcc.Dropdown(id="quests-interval-selector", options=[{"label": "Hourly", "value": "hourly"}], value="hourly", clearable=False, className="text-dark")
                         ])
                     ], width=6, md=3),
 
                     # Mode
                     dbc.Col([
-                        dbc.Label("📊 View Mode"),
+                        dbc.Label("📊 View Mode", id="quests-label-view-mode"),
                         dcc.Dropdown(
                             id="quests-mode-selector",
                             options=[],
@@ -322,7 +323,7 @@ def layout(area=None, **kwargs):
 
                     # Actions
                     dbc.Col([
-                        dbc.Label("Actions", style={"visibility": "hidden"}),
+                        dbc.Label("Actions", id="quests-label-actions", style={"visibility": "hidden"}),
                         dbc.Button("Run Analysis", id="quests-submit-btn", color="success", className="w-100 fw-bold")
                     ], width=6, md=3)
                 ], className="align-items-end g-3")
@@ -331,7 +332,7 @@ def layout(area=None, **kwargs):
 
         # Area Selection Modal
         dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle("Select an Area")),
+            dbc.ModalHeader(dbc.ModalTitle("Select an Area", id="quests-modal-title-area")),
             dbc.ModalBody([
                 # STICKY SEARCH BAR
                 html.Div(
@@ -358,7 +359,7 @@ def layout(area=None, **kwargs):
             dbc.Row([
                 # Sidebar
                 dbc.Col(dbc.Card([
-                    dbc.CardHeader("📈 Total Counts"),
+                    dbc.CardHeader("📈 Total Counts", id="quests-card-header-total-counts"),
                     dbc.CardBody(
                         # Wrapped inner content in Loading
                         dcc.Loading(html.Div(id="quests-total-counts-display"))
@@ -367,7 +368,7 @@ def layout(area=None, **kwargs):
 
                 # Activity Data
                 dbc.Col(dbc.Card([
-                    dbc.CardHeader("📋 Activity Data"),
+                    dbc.CardHeader("📋 Activity Data", id="quests-card-header-activity"),
                     dbc.CardBody([
                         # Embedded Search Input debounce=False for fluid
                         dcc.Input(
@@ -386,15 +387,54 @@ def layout(area=None, **kwargs):
 
             # Debugger
             dbc.Row([dbc.Col(dbc.Card([
-                dbc.CardHeader("🛠️ Raw Data Inspector"),
+                dbc.CardHeader("🛠️ Raw Data Inspector", id="quests-card-header-raw"),
                 dbc.CardBody(html.Pre(id="quests-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
         ])
     ])
 
+# 0. Static Translation Callback
+@callback(
+    [Output("quests-page-title", "children"),
+     Output("quests-settings-header", "children"),
+     Output("quests-label-selected-area", "children"), Output("quests-open-area-modal", "children"),
+     Output("quests-label-data-source", "children"), Output("quests-label-stats", "children"),
+     Output("quests-label-time-window", "children"), Output("quests-label-date-range", "children"),
+     Output("quests-label-interval", "children"), Output("quests-label-view-mode", "children"),
+     Output("quests-label-actions", "children"), Output("quests-submit-btn", "children"),
+     Output("quests-modal-title-area", "children"), Output("quests-close-area-modal", "children"),
+     Output("quests-card-header-total-counts", "children"), Output("quests-card-header-activity", "children"),
+     Output("quests-card-header-raw", "children"), Output("quests-search-input", "placeholder"),
+     Output("quests-selected-area-display", "value"), Output("quests-area-filter-input", "placeholder")],
+    Input("language-store", "data"), Input("quests-area-selector", "value")
+)
+def update_static_translations(lang, current_area):
+    lang = lang or "en"
+    # Logic for Area Label
+    if current_area:
+        area_text = current_area # Don't translate the actual area name (e.g., "New York")
+    else:
+        area_text = translate("No Area Selected", lang)
+
+    return (
+        translate("Quest Analytics", lang),
+        translate("Analysis Settings", lang),
+        translate("Selected Area", lang), translate("Change", lang),
+        translate("Data Source", lang), translate("Stats", lang),
+        translate("Time Window", lang), translate("Date Range", lang),
+        translate("Interval", lang), translate("View Mode", lang),
+        translate("Actions", lang), translate("Run Analysis", lang),
+        translate("Select an Area", lang), translate("Close", lang),
+        translate("Total Counts", lang), translate("Activity Data", lang),
+        translate("Raw Data Inspector", lang),
+        f"🔍 {translate('Search Quest, Reward or Item...', lang)}",
+        area_text,
+        translate("Filter areas by name...", lang)
+    )
+
 # Parsing Logic
 
-def parse_data_to_df(data, mode, source, area=None):
+def parse_data_to_df(data, mode, source, lang="en", area=None):
     records = []
     working_data = data.get('data', data) if isinstance(data, dict) else data
     if not isinstance(working_data, dict): return pd.DataFrame()
@@ -404,18 +444,18 @@ def parse_data_to_df(data, mode, source, area=None):
 
     if mode == "sum":
         if "total" in working_data:
-            records.append({"type": "Total", "name": "Total Quests", "count": working_data["total"], "key": "total", "category": "General", "time_bucket": "Total"})
+            records.append({"type": "Total", "name": translate("Total Quests", lang), "count": working_data["total"], "key": "total", "category": "General", "time_bucket": "Total"})
 
         # 1. Inject Total Pokestops so it appears in the graph
         total_stops = get_area_pokestops_count(area)
         if total_stops > 0:
             records.append({
-                "type": "Mode",
-                "name": "Total Pokéstops",
+                "type": translate("Mode", lang),
+                "name": translate("Total Pokéstops", lang),
                 "count": total_stops,
                 "key": "mode_stops",
-                "category": "Quest Mode",
-                "time_bucket": "Total",
+                "category": translate("Quest Mode", lang),
+                "time_bucket": translate("Total", lang),
                 "icon": get_cached_icon_url_internal("misc/pokestop.webp")
             })
 
@@ -425,16 +465,16 @@ def parse_data_to_df(data, mode, source, area=None):
                 if safe_int(v) <= 0: continue
 
                 k_str = str(k).lower()
-                name = "AR Quests" if k_str in ["1", "ar"] else "Normal Quests"
+                name = translate("AR Quests", lang) if k_str in ["1", "ar"] else translate("Normal Quests", lang)
                 icon_path = "pokestop/0_ar.webp" if k_str in ["1", "ar"] else "pokestop/0.webp"
                 icon = get_cached_icon_url_internal(icon_path)
                 records.append({
-                    "type": "Mode",
+                    "type": translate("Mode", lang),
                     "name": name,
                     "count": v,
                     "key": f"mode_{k}",
-                    "category": "Quest Mode",
-                    "time_bucket": "Total",
+                    "category": translate("Quest Mode", lang),
+                    "time_bucket": translate("Total", lang),
                     "icon": icon
                 })
 
@@ -563,7 +603,7 @@ def parse_data_to_df(data, mode, source, area=None):
                     if i_id == 0: continue
                     i_name = items_map.get(i_id, f"Item {i_id}")
                     records.append({
-                        "type": "Item Reward", "name": i_name, "count": count,
+                        "type": translate("Item Reward", lang), "name": i_name, "count": count,
                         "key": f"item_{i_id}", "category": "Item", "time_bucket": "Total",
                         "icon": get_quest_icon_url(2, item_id=i_id)
                     })
@@ -574,7 +614,7 @@ def parse_data_to_df(data, mode, source, area=None):
                     if p_id == 0: continue
                     p_name = resolve_pokemon_name(p_id, 0)
                     records.append({
-                        "type": "Pokemon Encounter", "name": p_name, "count": count,
+                        "type": translate("Pokemon Encounter", lang), "name": p_name, "count": count,
                         "key": f"poke_{p_id}_0", "category": "Pokemon", "time_bucket": "Total",
                         "icon": get_quest_icon_url(7, poke_id=p_id)
                     })
@@ -582,13 +622,13 @@ def parse_data_to_df(data, mode, source, area=None):
             if "reward_type" in details:
                 if "3" in details["reward_type"]:
                     records.append({
-                        "type": "Stardust", "name": "Stardust", "count": details["reward_type"]["3"],
+                        "type": translate("Stardust", lang), "name": "Stardust", "count": details["reward_type"]["3"],
                         "key": "stardust", "category": "Stardust", "time_bucket": "Total",
                         "icon": get_quest_icon_url(3)
                     })
                 if "12" in details["reward_type"]:
                      records.append({
-                        "type": "Mega Energy", "name": "Mega Energy (Total)", "count": details["reward_type"]["12"],
+                        "type": translate("Mega Energy", lang), "name": translate("Mega Energy (Total)", lang), "count": details["reward_type"]["12"],
                         "key": "mega_total", "category": "Mega Energy", "time_bucket": "Total",
                         "icon": get_quest_icon_url(12, item_id=0)
                     })
@@ -611,21 +651,40 @@ def toggle_source(source):
     return {"display": "none"}, {"display": "block", "zIndex": 1002, "position": "relative"}, {"display": "block"}
 
 @callback(
-    [Output("quests-mode-selector", "options"), Output("quests-mode-selector", "value")],
-    Input("quests-data-source-selector", "value"),
+    [Output("quests-mode-selector", "options"), Output("quests-mode-selector", "value"),
+     Output("quests-data-source-selector", "options"), Output("quests-interval-selector", "options")],
+    [Input("quests-data-source-selector", "value"), Input("language-store", "data")],
     [State("quests-mode-persistence-store", "data"), State("quests-mode-selector", "value")]
 )
-def restrict_modes(source, stored_mode, current_ui_mode):
-    opts = [
-        # {"label": "Surged (Hourly)", "value": "surged"}, # Disabled per user request
-        {"label": "Grouped (Table)", "value": "grouped"},
-        {"label": "Sum (Totals)", "value": "sum"}
+def restrict_modes(source, lang, stored_mode, current_ui_mode):
+    lang = lang or "en"
+    # Define View Mode Options (Translated)
+    mode_opts = [
+        {"label": translate("Grouped (Table)", lang), "value": "grouped"},
+        {"label": translate("Sum (Totals)", lang), "value": "sum"}
     ]
-    allowed_values = [o['value'] for o in opts]
 
-    if current_ui_mode in allowed_values: return opts, current_ui_mode
-    if stored_mode in allowed_values: return opts, stored_mode
-    return opts, "grouped" # Default to grouped
+    # Logic to preserve selected mode
+    allowed_values = [o['value'] for o in mode_opts]
+    if current_ui_mode in allowed_values:
+        final_mode = current_ui_mode
+    elif stored_mode in allowed_values:
+        final_mode = stored_mode
+    else:
+        final_mode = "grouped"
+
+    # Define Data Source Options (Translated) <--- New Logic
+    source_opts = [
+        {"label": translate("Live", lang), "value": "live"},
+        {"label": translate("Historical", lang), "value": "historical"}
+    ]
+
+    # Interval Options
+    interval_opts = [
+        {"label": translate("Hourly", lang), "value": "hourly"}
+    ]
+
+    return mode_opts, final_mode, source_opts, interval_opts
 
 @callback(Output("quests-mode-persistence-store", "data"), Input("quests-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
@@ -662,14 +721,14 @@ def handle_modals_and_search(ao, ac, mode, isa):
 # Area Cards Filter Callback
 @callback(
     Output("quests-area-cards-container", "children"),
-    [Input("quests-area-filter-input", "value")],
+    [Input("quests-area-filter-input", "value"), Input("language-store", "data")],
     [State("quests-area-selector", "value")]
 )
-def filter_area_cards(search_term, selected_area):
+def filter_area_cards(search_term, lang, selected_area):
     geofences = get_cached_geofences() or []
     if search_term:
         geofences = [g for g in geofences if search_term.lower() in g['name'].lower()]
-    return generate_area_cards(geofences, selected_area)
+    return generate_area_cards(geofences, selected_area, lang or "en")
 
 # Clientside Scroll Callback
 dash.clientside_callback(
@@ -683,13 +742,20 @@ dash.clientside_callback(
      Output("quests-stats-container", "style"),
      Output("quests-notification-area", "children")],
     [Input("quests-submit-btn", "n_clicks"), Input("quests-data-source-selector", "value")],
-    [State("quests-area-selector", "value"), State("quests-live-time-input", "value"), State("quests-historical-date-picker", "start_date"), State("quests-historical-date-picker", "end_date"), State("quests-interval-selector", "value"), State("quests-mode-selector", "value")]
+    [State("quests-area-selector", "value"),
+    State("quests-live-time-input", "value"),
+    State("quests-historical-date-picker","start_date"),
+    State("quests-historical-date-picker", "end_date"),
+    State("quests-interval-selector", "value"),
+    State("quests-mode-selector", "value"),
+    State("language-store", "data")]
 )
-def fetch_data(n, source, area, live_h, start, end, interval, mode):
+def fetch_data(n, source, area, live_h, start, end, interval, mode, lang):
+    lang = lang or "en"
     if not n: return {}, {"display": "none"}, None
 
     if not area:
-        alert = dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000)
+        alert = dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), translate("Please select an Area first.", lang)], color="warning", dismissable=True, duration=4000)
         return {}, {"display": "none"}, alert
 
     try:
@@ -744,14 +810,16 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
      Output("quests-raw-data-display", "children"),
      Output("quests-total-pages-store", "data")],
     [Input("quests-raw-data-store", "data"), Input("quests-search-input", "value"),
-     Input("quests-table-sort-store", "data"), Input("quests-table-page-store", "data")],
+     Input("quests-table-sort-store", "data"), Input("quests-table-page-store", "data"),
+     Input("language-store", "data")],
     [State("quests-mode-selector", "value"), State("quests-data-source-selector", "value"),
      State("quests-area-selector", "value")]
 )
-def update_visuals(data, search_term, sort, page, mode, source, selected_area):
+def update_visuals(data, search_term, sort, page, lang, mode, source, selected_area):
+    lang = lang or "en"
     if not data: return "No Data", html.Div(), "", 1
 
-    df = parse_data_to_df(data, mode, source, area=selected_area)
+    df = parse_data_to_df(data, mode, source, lang=lang, area=selected_area)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1
 
     # Extract raw data for quest_mode totals AR vs Normal for TOP SIDEBAR
@@ -785,7 +853,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
         icon_path = get_cached_icon_url_internal("misc/pokestop.webp")
         sidebar.append(html.Div([
             html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
-            html.Strong(f"{total_stops:,} Pokéstops", style={'fontSize': '1.1em'})
+            html.Strong(f"{total_stops:,} {translate('Pokéstops', lang)}", style={'fontSize': '1.1em'})
         ], className="d-flex align-items-center mb-2"))
 
     # 2. Total AR Quests if any
@@ -793,7 +861,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
         icon_path = get_cached_icon_url_internal("pokestop/0_ar.webp")
         sidebar.append(html.Div([
             html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
-            html.Strong(f"{ar_quests_count:,} AR Quests", style={'fontSize': '1.1em'})
+            html.Strong(f"{ar_quests_count:,} {translate('AR Quests', lang)}", style={'fontSize': '1.1em'})
         ], className="d-flex align-items-center mb-2"))
 
     # 3. Total Normal Quests if any
@@ -801,7 +869,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
         icon_path = get_cached_icon_url_internal("pokestop/0.webp")
         sidebar.append(html.Div([
             html.Img(src=icon_path, style={"width": "32px", "marginRight": "10px", "verticalAlign": "middle"}),
-            html.Strong(f"{normal_quests_count:,} Normal Quests", style={'fontSize': '1.1em'})
+            html.Strong(f"{normal_quests_count:,} {translate('Normal Quests', lang)}", style={'fontSize': '1.1em'})
         ], className="d-flex align-items-center mb-2"))
 
     sidebar.append(html.Hr(className="my-3"))
@@ -848,7 +916,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
         for i, (idx, row) in enumerate(top.iterrows()):
             if row.get('icon'):
                 fig.add_layout_image(dict(source=row['icon'], x=row['name'], y=row['count'], xref="x", yref="y", sizex=0.5, sizey=max_y*0.1, xanchor="center", yanchor="bottom"))
-        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title="Quest Activity")
+        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=translate("Quest Activity", lang))
         visual_content = dcc.Graph(figure=fig)
 
     elif mode == "surged":
@@ -864,7 +932,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
             fig.add_trace(go.Scatter(x=d['time_bucket'], y=d['count'], mode='lines+markers', name=name))
 
         fig.update_xaxes(dtick=1)
-        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title="Quest Activity")
+        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=translate("Quest Activity", lang))
         visual_content = dcc.Graph(figure=fig)
 
     elif mode == "grouped":
@@ -882,7 +950,7 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
         page_df = table_df.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
 
         # Equal column sizing with specific width for Image
-        header_cells = [html.Th("Image", style={"backgroundColor": "#1a1a1a", "width": "60px"})]
+        header_cells = [html.Th(translate("Image", lang), style={"backgroundColor": "#1a1a1a", "width": "60px"})]
         for c in ["type", "name", "count"]:
             label = c.title()
             arrow = " ▲" if col == c and ascending else (" ▼" if col == c else "")
@@ -903,11 +971,31 @@ def update_visuals(data, search_term, sort, page, mode, source, selected_area):
 
         controls = html.Div([
             dbc.Row([
-                dbc.Col([html.Span(f"Total: {total_rows} | Rows: ", className="me-2 align-middle"), dcc.Dropdown(id="quests-rows-per-page-selector", options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': 'All', 'value': total_rows}], value=rows_per_page, clearable=False, className="rows-per-page-selector", style={"width":"80px", "display":"inline-block", "color":"black", "verticalAlign": "middle"})], width="auto", className="d-flex align-items-center"),
                 dbc.Col([
-                    dbc.ButtonGroup([dbc.Button("<<", id="quests-first-page-btn", size="sm", disabled=current_page <= 1), dbc.Button("<", id="quests-prev-page-btn", size="sm", disabled=current_page <= 1)], className="me-2"),
-                    html.Span("Page ", className="align-middle me-1"), dcc.Input(id="quests-goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True, style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}), html.Span(f" of {total_pages_val}", className="align-middle ms-1 me-2"),
-                    dbc.ButtonGroup([dbc.Button(">", id="quests-next-page-btn", size="sm", disabled=current_page >= total_pages_val), dbc.Button(">>", id="quests-last-page-btn", size="sm", disabled=current_page >= total_pages_val)]),
+                    # Translated "Total" and "Rows"
+                    html.Span(f"{translate('Total', lang)}: {total_rows} | {translate('Rows', lang)}: ", className="me-2 align-middle"),
+                    dcc.Dropdown(
+                        id="quests-rows-per-page-selector",
+                        # Translated "All" in options
+                        options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': translate('All', lang), 'value': total_rows}],
+                        value=rows_per_page, clearable=False, className="rows-per-page-selector",
+                        style={"width":"80px", "display":"inline-block", "color":"black", "verticalAlign": "middle"}
+                    )
+                ], width="auto", className="d-flex align-items-center"),
+                dbc.Col([
+                    dbc.ButtonGroup([
+                        dbc.Button("<<", id="quests-first-page-btn", size="sm", disabled=current_page <= 1),
+                        dbc.Button("<", id="quests-prev-page-btn", size="sm", disabled=current_page <= 1)
+                    ], className="me-2"),
+                    # Translated "Page"
+                    html.Span(f"{translate('Page', lang)} ", className="align-middle me-1"),
+                    dcc.Input(id="quests-goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True, style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}),
+                    # Translated "of"
+                    html.Span(f" {translate('of', lang)} {total_pages_val}", className="align-middle ms-1 me-2"),
+                    dbc.ButtonGroup([
+                        dbc.Button(">", id="quests-next-page-btn", size="sm", disabled=current_page >= total_pages_val),
+                        dbc.Button(">>", id="quests-last-page-btn", size="sm", disabled=current_page >= total_pages_val)
+                    ]),
                 ], width="auto", className="d-flex align-items-center justify-content-end ms-auto")
             ], className="g-0")
         ], className="p-2 bg-dark rounded mb-2 border border-secondary")

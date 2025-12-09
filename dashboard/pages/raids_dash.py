@@ -225,7 +225,7 @@ def layout(area=None, **kwargs):
                         dbc.Label("Selected Area", id="raids-label-selected-area", className="fw-bold"),
                         dbc.InputGroup([
                             dbc.InputGroupText("🗺️"),
-                            dbc.Input(value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
+                            dbc.Input(id="raids-selected-area-display", value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
                             dbc.Button("Change", id="raids-open-area-modal", color="primary")
                         ], className="mb-3")
                     ], width=12, md=6),
@@ -407,7 +407,7 @@ def layout(area=None, **kwargs):
                         dbc.CardBody([
                             # Fluid Search for Quick Filter already outside loading
                             dbc.Input(id="raids-quick-filter-search", placeholder="Search Pokemon...", size="sm", className="mb-2"),
-                            html.P("Click to hide/show Pokemon from map", className="text-muted small mb-2"),
+                            html.P(id="raids-quick-filter-instructions", children="Click to hide/show Pokémon from map", className="text-muted small mb-2"),
                             html.Div(id="raids-quick-filter-grid",
                                      style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
                         ])
@@ -432,22 +432,31 @@ def layout(area=None, **kwargs):
 
 # 0. Static Translation Callback
 @callback(
-    [Output("raids-page-title", "children"),
-     Output("raids-settings-header", "children"),
+    [Output("raids-page-title", "children"), Output("raids-settings-header", "children"),
      Output("raids-label-selected-area", "children"), Output("raids-open-area-modal", "children"),
      Output("raids-label-data-source", "children"), Output("raids-label-stats", "children"),
-     Output("raids-label-sql", "children"),
-     Output("raids-label-time-window", "children"), Output("raids-label-date-range", "children"),
-     Output("raids-label-interval", "children"), Output("raids-label-view-mode", "children"),
-     Output("raids-label-actions", "children"), Output("raids-submit-btn", "children"),
-     Output("raids-label-heatmap-display-mode", "children"),
+     Output("raids-label-sql", "children"), Output("raids-label-time-window", "children"),
+     Output("raids-label-date-range", "children"), Output("raids-label-interval", "children"),
+     Output("raids-label-view-mode", "children"), Output("raids-label-actions", "children"),
+     Output("raids-submit-btn", "children"), Output("raids-label-heatmap-display-mode", "children"),
      Output("raids-modal-title-area", "children"), Output("raids-close-area-modal", "children"),
      Output("raids-card-header-total-counts", "children"), Output("raids-card-header-activity", "children"),
-     Output("raids-card-header-raw", "children"), Output("raids-card-header-quick-filter", "children"), Output("raids-card-header-heatmap", "children")],
-    Input("language-store", "data")
+     Output("raids-card-header-raw", "children"), Output("raids-card-header-quick-filter", "children"),
+     Output("raids-card-header-heatmap", "children"), Output("raids-selected-area-display", "value"),
+     Output("raids-area-filter-input", "placeholder"), Output("raids-quick-filter-search", "placeholder"),
+     Output("raids-quick-filter-show-all", "children"), Output("raids-quick-filter-show-all", "title"),
+     Output("raids-quick-filter-hide-all", "children"), Output("raids-quick-filter-hide-all", "title"),
+     Output("raids-quick-filter-instructions", "children")],
+    [Input("language-store", "data"),  Input("raids-area-selector", "value")],
 )
-def update_static_translations(lang):
+def update_static_translations(lang, current_area):
     lang = lang or "en"
+
+    if current_area:
+        area_text = current_area
+    else:
+        area_text = translate("No Area Selected", lang)
+
     return (
         translate("Raid Analytics", lang),
         translate("Analysis Settings", lang),
@@ -460,7 +469,13 @@ def update_static_translations(lang):
         translate("Heatmap Display Mode", lang),
         translate("Select an Area", lang), translate("Close", lang),
         translate("Total Counts", lang), translate("Activity Data", lang),
-        translate("Raw Data Inspector", lang), translate("Raid Boss Filter", lang), translate("Raid Heatmap", lang)
+        translate("Raw Data Inspector", lang), translate("Raid Boss Filter", lang), translate("Raid Heatmap", lang),
+        area_text,
+        translate("Filter areas by name...", lang),
+        translate("Search Pokemon...", lang),
+        translate("All", lang), translate("Show All", lang),
+        translate("None", lang), translate("Hide All", lang),
+        translate("Click to hide/show Pokémon from map", lang)
     )
 
 # Parsing Logic
@@ -578,7 +593,7 @@ def toggle_source_controls(source):
 @callback(
     [Output("raids-mode-selector", "options"), Output("raids-mode-selector", "value"),
      Output("raids-data-source-selector", "options"), Output("raids-data-source-sql-selector", "options"),
-     Output("raids-heatmap-display-mode", "options")],
+     Output("raids-heatmap-display-mode", "options"), Output("raids-interval-selector", "options")],
     [Input("raids-combined-source-store", "data"), Input("language-store", "data")],
     [State("raids-mode-persistence-store", "data"), State("raids-mode-selector", "value")]
 )
@@ -610,7 +625,12 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("Grid Overlay", lang), "value": "grid"}
     ]
 
-    return allowed, final_value, source_opts, sql_opts, heatmap_mode_opts
+    # Interval Options
+    interval_opts = [
+        {"label": translate("Hourly", lang), "value": "hourly"}
+    ]
+
+    return allowed, final_value, source_opts, sql_opts, heatmap_mode_opts, interval_opts
 
 @callback(Output("raids-mode-persistence-store", "data"), Input("raids-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
@@ -1077,7 +1097,7 @@ def update_visuals(data, search_term, sort, page, lang, mode, source):
                 fig.add_trace(go.Scatter(x=d['time_bucket'], y=d['count'], mode='lines+markers', name=str(m), line=dict(color=c)))
             fig.update_xaxes(range=[-0.5, 23.5], dtick=1)
 
-        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{mode.title()} Data")
+        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{translate(mode.title(), lang)} {translate('Data', lang)}")
         visual_content = dcc.Graph(figure=fig, id="raids-main-graph")
 
     return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "block"}

@@ -12,7 +12,7 @@ import json
 import re
 import os
 from pathlib import Path
-from functools import lru_cache
+from dashboard.translations.manager import translate
 
 dash.register_page(__name__, path='/invasions', title='Invasion Analytics')
 
@@ -86,18 +86,18 @@ def parse_invasion_key(key_str):
 
 # Layout
 
-def generate_area_cards(geofences, selected_area_name):
+def generate_area_cards(geofences, selected_area_name, lang="en"):
     cards = []
     for idx, geo in enumerate(geofences):
         safe_name = re.sub(r'[^a-zA-Z0-9]', '_', geo['name'])
         is_selected = (selected_area_name == geo['name'])
-        map_children = [html.Div("✓ Selected", style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
+        map_children = [html.Div("✓ " + translate("Selected", lang), style={'position': 'absolute', 'top': '10px', 'right': '10px', 'backgroundColor': '#28a745', 'color': 'white', 'padding': '4px 8px', 'borderRadius': '4px', 'fontWeight': 'bold', 'zIndex': '1000'})] if is_selected else []
 
         card = dbc.Card([
             html.Div(map_children, id=f"invasions-area-map-{safe_name}", **{'data-map-geofence': json.dumps(geo)}, style={'height': '150px', 'backgroundColor': '#1a1a1a', 'position': 'relative'}),
             dbc.CardBody([
                 html.H5(geo['name'], className="card-title text-truncate", style={'color': '#28a745' if is_selected else 'inherit'}),
-                dbc.Button("✓ Selected" if is_selected else "Select", href=f"/invasions?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
+                dbc.Button("✓" + translate("Selected", lang) if is_selected else translate("Select", lang), href=f"/invasions?area={geo['name']}", color="success" if is_selected else "primary", size="sm", className="w-100", disabled=is_selected)
             ])
         ], style={"width": "14rem", "margin": "10px", "border": f"3px solid {'#28a745' if is_selected else 'transparent'}"}, className="shadow-sm")
 
@@ -107,7 +107,7 @@ def generate_area_cards(geofences, selected_area_name):
 
 def layout(area=None, **kwargs):
     geofences = get_cached_geofences() or []
-    initial_cards = generate_area_cards(geofences, area)
+    initial_cards = generate_area_cards(geofences, area, "en")
     area_options = [{"label": g["name"], "value": g["name"]} for g in geofences]
     area_label = area if area else "No Area Selected"
 
@@ -127,7 +127,7 @@ def layout(area=None, **kwargs):
 
         # Header
         dbc.Row([
-            dbc.Col(html.H2("Invasion Analytics", className="text-white"), width=12, className="my-4"),
+            dbc.Col(html.H2("Invasion Analytics", id="invasions-page-title", className="text-white"), width=12, className="my-4"),
         ]),
 
         # Notification Area
@@ -135,26 +135,26 @@ def layout(area=None, **kwargs):
 
         # Main Control Card
         dbc.Card([
-            dbc.CardHeader("⚙️ Analysis Settings", className="fw-bold"),
+            dbc.CardHeader("⚙️ Analysis Settings", id="invasions-settings-header", className="fw-bold"),
             dbc.CardBody([
                 dbc.Row([
                     # Area Selection
                     dbc.Col([
-                        dbc.Label("Selected Area", className="fw-bold"),
+                        dbc.Label("Selected Area", id="invasions-label-selected-area", className="fw-bold"),
                         dbc.InputGroup([
                             dbc.InputGroupText("🗺️"),
-                            dbc.Input(value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
+                            dbc.Input(id="invasions-selected-area-display", value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
                             dbc.Button("Change", id="invasions-open-area-modal", color="primary")
                         ], className="mb-3")
                     ], width=12, md=6),
 
                     # Data Source
                     dbc.Col([
-                        dbc.Label("Data Source", className="fw-bold"),
+                        dbc.Label("Data Source", id="invasions-label-data-source", className="fw-bold"),
                         html.Div([
                             # Row 1: Stats (Live & Historical)
                             html.Div([
-                                html.Span("Stats: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("Stats: ", id="invasions-label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="invasions-stats-source-selector",
                                     options=[
@@ -168,7 +168,7 @@ def layout(area=None, **kwargs):
                             ], className="d-flex align-items-center mb-1"),
                             # Row 2: SQL (Heatmap)
                             html.Div([
-                                html.Span("SQL: ", className="text-muted small me-2", style={"minWidth": "45px"}),
+                                html.Span("SQL: ", id="invasions-label-sql", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
                                     id="invasions-sql-source-selector",
                                     options=[{"label": "Heatmap", "value": "sql_heatmap"}],
@@ -188,18 +188,18 @@ def layout(area=None, **kwargs):
                     # Time Control
                     dbc.Col([
                         html.Div(id="invasions-live-controls", children=[
-                            dbc.Label("📅 Time Window (Hours)"),
+                            dbc.Label("📅 Time Window (Hours)", id="invasions-label-time-window"),
                             dbc.InputGroup([
                                 dbc.Input(id="invasions-live-time-input", type="number", min=1, max=72, value=1),
                                 dbc.InputGroupText("hours")
                             ])
                         ]),
                         html.Div(id="invasions-historical-controls", style={"display": "none"}, children=[
-                            dbc.Label("📅 Date Range"),
+                            dbc.Label("📅 Date Range", id="invasions-label-date-range"),
                             dcc.DatePickerRange(id="invasions-historical-date-picker", min_date_allowed=date(2023, 1, 1), max_date_allowed=date.today(), start_date=date.today(), end_date=date.today(), className="d-block w-100", persistence=True, persistence_type="local")
                         ]),
                         html.Div(id="invasions-heatmap-controls", style={"display": "none"}, children=[
-                            dbc.Label("📅 Date Range"),
+                            dbc.Label("📅 Date Range", id="invasions-label-date-range-2"),
                             dcc.DatePickerRange(id="invasions-heatmap-date-picker", min_date_allowed=date(2023, 1, 1), max_date_allowed=date.today(), start_date=date.today(), end_date=date.today(), className="d-block w-100", persistence=True, persistence_type="local")
                         ])
                     ], width=6, md=3),
@@ -207,20 +207,20 @@ def layout(area=None, **kwargs):
                     # Interval / Display Mode
                     dbc.Col([
                         html.Div(id="invasions-interval-control-container", style={"display": "none"}, children=[
-                            dbc.Label("⏱️ Interval"),
+                            dbc.Label("⏱️ Interval", id="invasions-label-interval"),
                             dcc.Dropdown(id="invasions-interval-selector", options=[{"label": "Hourly", "value": "hourly"}], value="hourly", clearable=False, className="text-dark")
                         ]),
                     ], width=6, md=3),
 
                     # Mode
                     dbc.Col([
-                        dbc.Label("📊 View Mode"),
+                        dbc.Label("📊 View Mode", id="invasions-label-view-mode"),
                         dcc.Dropdown(id="invasions-mode-selector", options=[], value=None, clearable=False, className="text-dark")
                     ], width=6, md=3),
 
                     # Actions
                     dbc.Col([
-                        dbc.Label("Actions", style={"visibility": "hidden"}),
+                        dbc.Label("Actions", id="invasions-label-actions", style={"visibility": "hidden"}),
                         dbc.Button("Run Analysis", id="invasions-submit-btn", color="success", className="w-100 fw-bold")
                     ], width=6, md=3)
                 ], className="align-items-end g-3"),
@@ -229,7 +229,7 @@ def layout(area=None, **kwargs):
                     html.Hr(className="my-3"),
                     dbc.Row([
                         dbc.Col([
-                            dbc.Label("🗺️ Heatmap Display Mode", className="fw-bold"),
+                            dbc.Label("🗺️ Heatmap Display Mode", id="invasions-label-heatmap-display-mode", className="fw-bold"),
                             dbc.RadioItems(
                                 id="invasions-heatmap-display-mode",
                                 options=[
@@ -251,7 +251,7 @@ def layout(area=None, **kwargs):
 
         # Area Selection Modal
         dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle("Select an Area")),
+            dbc.ModalHeader(dbc.ModalTitle("Select an Area", id="invasions-modal-title-area")),
             dbc.ModalBody([
                 html.Div(
                     dbc.Input(id="invasions-area-filter-input", placeholder="Filter areas by name...", className="mb-3", autoFocus=True),
@@ -268,7 +268,7 @@ def layout(area=None, **kwargs):
             dbc.Row([
                 # Sidebar
                 dbc.Col(dbc.Card([
-                    dbc.CardHeader("📈 Total Counts"),
+                    dbc.CardHeader("📈 Total Counts", id="invasions-card-header-total-counts"),
                     dbc.CardBody(
                         # Wrapped inner content for loading spinner
                         dcc.Loading(html.Div(id="invasions-total-counts-display"))
@@ -277,7 +277,7 @@ def layout(area=None, **kwargs):
 
                 # Activity Data
                 dbc.Col(dbc.Card([
-                    dbc.CardHeader("📋 Activity Data"),
+                    dbc.CardHeader("📋 Activity Data", id="invasions-card-header-activity"),
                     dbc.CardBody([
                          # Embedded Search Input (Visible only in Grouped mode)
                          # debounce=False for fluid search
@@ -296,7 +296,7 @@ def layout(area=None, **kwargs):
             ]),
 
             dbc.Row([dbc.Col(dbc.Card([
-                dbc.CardHeader("🛠️ Raw Data Inspector"),
+                dbc.CardHeader("🛠️ Raw Data Inspector", id="invasions-card-header-raw"),
                 dbc.CardBody(html.Pre(id="invasions-raw-data-display", style={"maxHeight": "300px", "overflow": "scroll"}))
             ], className="shadow-sm border-0"), width=12)])
         ]),
@@ -310,7 +310,7 @@ def layout(area=None, **kwargs):
                         dbc.CardHeader([
                             dbc.Row([
                                 dbc.Col([
-                                    html.Span("🎯 Grunt Filter", className="me-2"),
+                                    html.Span("🎯 Grunt Filter", id="invasions-card-header-quick-filter", className="me-2"),
                                     html.Span(id="invasions-quick-filter-count", className="text-muted small")
                                 ], width="auto", className="d-flex align-items-center"),
                                 dbc.Col([
@@ -323,7 +323,7 @@ def layout(area=None, **kwargs):
                         ]),
                         dbc.CardBody([
                             dbc.Input(id="invasions-quick-filter-search", placeholder="Search grunts...", size="sm", className="mb-2"),
-                            html.P("Click to hide/show grunts from map", className="text-muted small mb-2"),
+                            html.P(id="invasions-quick-filter-instructions", children="Click to hide/show grunts from map", className="text-muted small mb-2"),
                             html.Div(id="invasions-quick-filter-grid",
                                      style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
                         ])
@@ -334,7 +334,7 @@ def layout(area=None, **kwargs):
                 dbc.Col([
                     dbc.Card([
                         dbc.CardHeader([
-                            html.Span("🗺️ Invasion Heatmap", className="fw-bold"),
+                            html.Span("🗺️ Invasion Heatmap", id="invasions-card-header-heatmap", className="fw-bold"),
                             html.Span(id="invasions-heatmap-stats", className="ms-3 text-muted small")
                         ]),
                         dbc.CardBody([
@@ -345,6 +345,58 @@ def layout(area=None, **kwargs):
             ])
         ])
     ])
+
+# 0. Static Translation Callback
+@callback(
+    [Output("invasions-page-title", "children"), Output("invasions-settings-header", "children"),
+     Output("invasions-label-selected-area", "children"), Output("invasions-open-area-modal", "children"),
+     Output("invasions-label-data-source", "children"), Output("invasions-label-stats", "children"),
+     Output("invasions-label-sql", "children"), Output("invasions-label-time-window", "children"),
+     Output("invasions-label-date-range", "children"), Output("invasions-label-date-range-2", "children"),
+     Output("invasions-label-interval", "children"), Output("invasions-label-view-mode", "children"),
+     Output("invasions-label-actions", "children"), Output("invasions-submit-btn", "children"),
+     Output("invasions-label-heatmap-display-mode", "children"), Output("invasions-modal-title-area", "children"),
+     Output("invasions-close-area-modal", "children"), Output("invasions-card-header-total-counts", "children"),
+     Output("invasions-card-header-activity", "children"), Output("invasions-card-header-raw", "children"),
+     Output("invasions-card-header-quick-filter", "children"), Output("invasions-card-header-heatmap", "children"),
+     Output("invasions-quick-filter-show-all", "children"), Output("invasions-quick-filter-show-all", "title"),
+     Output("invasions-quick-filter-hide-all", "children"), Output("invasions-quick-filter-hide-all", "title"),
+     Output("invasions-area-filter-input", "placeholder"), Output("invasions-search-input", "placeholder"),
+     Output("invasions-selected-area-display", "value"), Output("invasions-quick-filter-search", "placeholder"),
+     Output("invasions-quick-filter-instructions", "children"),
+    ],
+    [Input("language-store", "data"), Input("invasions-area-selector", "value")],
+)
+def update_static_translations(lang, current_area):
+    lang = lang or "en"
+
+    if current_area:
+        area_text = current_area
+    else:
+        area_text = translate("No Area Selected", lang)
+
+    return (
+        translate("Invasion Analytics", lang),
+        translate("Analysis Settings", lang),
+        translate("Selected Area", lang), translate("Change", lang),
+        translate("Data Source", lang), translate("Stats", lang),
+        translate("SQL", lang),
+        translate("Time Window", lang), translate("Date Range", lang),
+        translate("Date Range", lang),
+        translate("Interval", lang), translate("View Mode", lang),
+        translate("Actions", lang), translate("Run Analysis", lang),
+        translate("Heatmap Display Mode", lang),
+        translate("Select an Area", lang), translate("Close", lang),
+        translate("Total Counts", lang), translate("Activity Data", lang),
+        translate("Raw Data Inspector", lang), translate("Grunt Filter", lang), translate("Invasion Heatmap", lang),
+        translate("All", lang), translate("Show All", lang),
+        translate("None", lang), translate("Hide All", lang),
+        translate("Filter areas by name...", lang),
+        f"🔍 {translate('Search Invasions...', lang)}",
+        area_text,
+        translate("Search grunts...", lang),
+        translate("Click to hide/show grunts from map", lang)
+    )
 
 # Parsing Logic
 
@@ -473,19 +525,45 @@ def toggle_source_controls(source):
     return {"display": "block"}, {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
 
 @callback(
-    [Output("invasions-mode-selector", "options"), Output("invasions-mode-selector", "value")],
-    Input("invasions-combined-source-store", "data"),
+    [Output("invasions-mode-selector", "options"), Output("invasions-mode-selector", "value"),
+     Output("invasions-stats-source-selector", "options"), Output("invasions-sql-source-selector", "options"),
+     Output("invasions-heatmap-display-mode", "options"), Output("invasions-interval-selector", "options")],
+    [Input("invasions-combined-source-store", "data"), Input("language-store", "data")],
     [State("invasions-mode-persistence-store", "data"), State("invasions-mode-selector", "value")]
 )
-def restrict_modes(source, stored_mode, current_ui_mode):
+def restrict_modes(source, lang, stored_mode, current_ui_mode):
+    lang = lang or "en"
     if source == "sql_heatmap":
-        return [{"label": "Map View", "value": "map"}], "map"
-    full_options = [{"label": "Surged (Hourly)", "value": "surged"}, {"label": "Grouped (Table)", "value": "grouped"}, {"label": "Sum (Totals)", "value": "sum"}]
+        heatmap_opts = [{"label": translate("Map View", lang), "value": "map"}]
+        return heatmap_opts, "map", dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+    full_options = [
+        {"label": translate("Surged (Hourly)", lang), "value": "surged"},
+        {"label": translate("Grouped (Table)", lang), "value": "grouped"},
+        {"label": translate("Sum (Totals)", lang), "value": "sum"}
+    ]
     allowed_values = [o['value'] for o in full_options]
     if current_ui_mode in allowed_values: final_value = current_ui_mode
     elif stored_mode in allowed_values: final_value = stored_mode
     else: final_value = allowed_values[0]
-    return full_options, final_value
+
+    # Source Options
+    stats_opts = [{"label": translate("Live", lang), "value": "live"}, {"label": translate("Historical", lang), "value": "historical"}]
+    sql_opts = [{"label": translate("Heatmap", lang), "value": "sql_heatmap"}]
+
+    # Heatmap Display Options
+    heatmap_mode_opts = [
+        {"label": translate("Markers (PokéStops)", lang), "value": "markers"},
+        {"label": translate("Density Heatmap", lang), "value": "density"},
+        {"label": translate("Grid Overlay", lang), "value": "grid"}
+    ]
+
+    # Interval Options
+    interval_opts = [
+        {"label": translate("Hourly", lang), "value": "hourly"}
+    ]
+
+    return full_options, final_value, stats_opts, sql_opts, heatmap_mode_opts, interval_opts
 
 @callback(Output("invasions-mode-persistence-store", "data"), Input("invasions-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
@@ -526,17 +604,14 @@ def handle_modals_and_search(ao, ac, mode, isa):
     if tid in ["invasions-open-area-modal", "invasions-close-area-modal"]: return not isa, search_style
     return isa, search_style
 
-# --- Area Cards Filter & Scroll ---
-@callback(Output("invasions-area-cards-container", "children"), [Input("invasions-area-filter-input", "value")], [State("invasions-area-selector", "value")])
-def filter_area_cards(search_term, selected_area):
+# Area Cards Filter & Scroll
+@callback(Output("invasions-area-cards-container", "children"),
+          [Input("invasions-area-filter-input", "value"), Input("language-store", "data")],
+          [State("invasions-area-selector", "value")])
+def filter_area_cards(search_term, lang, selected_area):
     geofences = get_cached_geofences() or []
     if search_term: geofences = [g for g in geofences if search_term.lower() in g['name'].lower()]
-    return generate_area_cards(geofences, selected_area)
-
-dash.clientside_callback(
-    ClientsideFunction(namespace='clientside', function_name='scrollToSelected'),
-    Output("invasions-clientside-dummy-store", "data"), Input("invasions-area-modal", "is_open")
-)
+    return generate_area_cards(geofences, selected_area, lang or "en")
 
 # Quick Filter Callbacks
 @callback(
@@ -704,14 +779,16 @@ def reset_invasions_hidden_grunts_on_new_data(heatmap_data):
     [State("invasions-area-selector", "value"), State("invasions-live-time-input", "value"),
      State("invasions-historical-date-picker", "start_date"), State("invasions-historical-date-picker", "end_date"),
      State("invasions-heatmap-date-picker", "start_date"), State("invasions-heatmap-date-picker", "end_date"),
-     State("invasions-interval-selector", "value"), State("invasions-mode-selector", "value")]
+     State("invasions-interval-selector", "value"), State("invasions-mode-selector", "value"),
+     State("language-store", "data")]
 )
-def fetch_data(n, source, area, live_h, hist_start, hist_end, heatmap_start, heatmap_end, interval, mode):
+def fetch_data(n, source, area, live_h, hist_start, hist_end, heatmap_start, heatmap_end, interval, mode, lang):
+    lang = lang or "en"
     # Default outputs: raw_data, stats_style, notification, heatmap_data, heatmap_style, heatmap_stats
     if not n:
         return {}, {"display": "none"}, None, [], {"display": "none"}, ""
     if not area:
-        return {}, {"display": "none"}, dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), "Please select an Area first."], color="warning", dismissable=True, duration=4000), [], {"display": "none"}, ""
+        return {}, {"display": "none"}, dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), translate("Please select an Area first.", lang)], color="warning", dismissable=True, duration=4000), [], {"display": "none"}, ""
 
     try:
         if source == "sql_heatmap":
@@ -739,7 +816,10 @@ def fetch_data(n, source, area, live_h, hist_start, hist_end, heatmap_start, hea
             # Calculate stats
             total_invasions = sum(p.get('count', 0) for p in heatmap_data)
             unique_stops = len(set(p.get('pokestop_name', '') for p in heatmap_data))
-            stats_text = f"{unique_stops} pokestops • {total_invasions} invasions"
+
+            stops_word = translate("pokestops", lang)
+            invasions_word = translate("invasions", lang)
+            stats_text = f"{unique_stops} {stops_word} • {total_invasions} {invasions_word}"
 
             logger.info(f"✅ Invasion Heatmap: {len(heatmap_data)} data points, {unique_stops} pokestops, {total_invasions} invasions")
 
@@ -792,12 +872,13 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 # Visuals Update
 @callback(
     [Output("invasions-total-counts-display", "children"), Output("invasions-main-visual-container", "children"), Output("invasions-raw-data-display", "children"), Output("invasions-total-pages-store", "data"), Output("invasions-main-visual-container", "style")],
-    [Input("invasions-raw-data-store", "data"), Input("invasions-search-input", "value"), Input("invasions-table-sort-store", "data"), Input("invasions-table-page-store", "data")],
+    [Input("invasions-raw-data-store", "data"), Input("invasions-search-input", "value"), Input("invasions-table-sort-store", "data"), Input("invasions-table-page-store", "data"), Input("language-store", "data")],
     [State("invasions-mode-selector", "value"), State("invasions-combined-source-store", "data")]
 )
-def update_visuals(data, search_term, sort, page, mode, source):
+def update_visuals(data, search_term, sort, page, lang, mode, source):
+    lang = lang or "en"
     if source == "sql_heatmap":
-        return [], html.Div("View heatmap below"), "", 1, {"display": "none"}
+        return [], html.Div(translate("View heatmap below", lang)), "", 1, {"display": "none"}
 
     if not data: return [], html.Div(), "", 1, {"display": "block"}
 
@@ -860,9 +941,9 @@ def update_visuals(data, search_term, sort, page, mode, source):
         page_df = table_df.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
 
         header_row = html.Tr([
-            html.Th("Image", style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center", "width": "60px"}),
-            html.Th(html.Span(["Type", html.Span(" ▲" if col == 'metric' and ascending else (" ▼" if col == 'metric' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "invasions-sort-header", "index": "metric"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"}),
-            html.Th(html.Span(["Count", html.Span(" ▲" if col == 'count' and ascending else (" ▼" if col == 'count' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "invasions-sort-header", "index": "count"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"})
+            html.Th(translate("Image", lang), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center", "width": "60px"}),
+            html.Th(html.Span([translate("Type", lang), html.Span(" ▲" if col == 'metric' and ascending else (" ▼" if col == 'metric' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "invasions-sort-header", "index": "metric"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"}),
+            html.Th(html.Span([translate("Count", lang), html.Span(" ▲" if col == 'count' and ascending else (" ▼" if col == 'count' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "invasions-sort-header", "index": "count"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "zIndex": "10", "position": "sticky", "top": "0", "textAlign": "center"})
         ])
 
         rows = []
@@ -877,10 +958,10 @@ def update_visuals(data, search_term, sort, page, mode, source):
 
         controls = html.Div([
             dbc.Row([
-                dbc.Col([html.Span(f"Total: {total_rows} | Rows: ", className="me-2 align-middle"), dcc.Dropdown(id="invasions-rows-per-page-selector", options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': 'All', 'value': total_rows}], value=rows_per_page, clearable=False, className="rows-per-page-selector", style={"width":"80px", "display":"inline-block", "color":"black", "verticalAlign": "middle"})], width="auto", className="d-flex align-items-center"),
+                dbc.Col([html.Span(f"{translate('Total', lang)}: {total_rows} | {translate('Rows', lang)}: ", className="me-2 align-middle"), dcc.Dropdown(id="invasions-rows-per-page-selector", options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': translate('All', lang), 'value': total_rows}], value=rows_per_page, clearable=False, className="rows-per-page-selector", style={"width":"80px", "display":"inline-block", "color":"black", "verticalAlign": "middle"})], width="auto", className="d-flex align-items-center"),
                 dbc.Col([
                     dbc.ButtonGroup([dbc.Button("<<", id="invasions-first-page-btn", size="sm", disabled=current_page <= 1), dbc.Button("<", id="invasions-prev-page-btn", size="sm", disabled=current_page <= 1)], className="me-2"),
-                    html.Span("Page ", className="align-middle me-1"), dcc.Input(id="invasions-goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True, style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}), html.Span(f" of {total_pages_val}", className="align-middle ms-1 me-2"),
+                    html.Span(f"{translate('Page', lang)} ", className="align-middle me-1"), dcc.Input(id="invasions-goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True, style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}), html.Span(f" {translate('of', lang)} {total_pages_val}", className="align-middle ms-1 me-2"),
                     dbc.ButtonGroup([dbc.Button(">", id="invasions-next-page-btn", size="sm", disabled=current_page >= total_pages_val), dbc.Button(">>", id="invasions-last-page-btn", size="sm", disabled=current_page >= total_pages_val)]),
                 ], width="auto", className="d-flex align-items-center justify-content-end ms-auto")
             ], className="g-0")
@@ -933,7 +1014,7 @@ def update_visuals(data, search_term, sort, page, mode, source):
                 fig.add_trace(go.Scatter(x=d['time_bucket'], y=d['count'], mode='lines+markers', name=str(m), line=dict(color=color)))
             fig.update_xaxes(range=[-0.5, 23.5], dtick=1)
 
-        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{mode.title()} Data")
+        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{translate(mode.title(), lang)} {translate('Data', lang)}")
         visual_content = dcc.Graph(figure=fig, id="invasions-main-graph")
 
     return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "block"}

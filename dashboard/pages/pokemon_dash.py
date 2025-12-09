@@ -258,7 +258,7 @@ def layout(area=None, **kwargs):
                         dbc.Label("Selected Area", id="label-selected-area", className="fw-bold"),
                         dbc.InputGroup([
                             dbc.InputGroupText("🗺️"),
-                            dbc.Input(value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
+                            dbc.Input(id="pokemons-selected-area-display", value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
                             dbc.Button("Change", id="open-area-modal", color="primary")
                         ], className="mb-3")
                     ], width=12, md=6),
@@ -443,7 +443,7 @@ def layout(area=None, **kwargs):
             dbc.ModalHeader(dbc.ModalTitle("Select an Area", id="modal-title-area")),
             dbc.ModalBody([
                 html.Div(
-                    dbc.Input(id="area-filter-input", placeholder="Filter areas...", className="mb-3", autoFocus=True),
+                    dbc.Input(id="area-filter-input", placeholder="Filter areas by name...", className="mb-3", autoFocus=True),
                     style={"position": "sticky", "top": "-16px", "zIndex": "1020", "backgroundColor": "var(--bs-modal-bg, #fff)", "paddingTop": "16px", "paddingBottom": "10px", "marginBottom": "10px", "borderBottom": "1px solid #dee2e6"}
                 ),
                 html.Div(initial_cards, id="area-cards-container", className="d-flex flex-wrap justify-content-center")
@@ -460,7 +460,7 @@ def layout(area=None, **kwargs):
                     dbc.Col(dbc.Button("Select All", id="selection-select-all", color="success", className="w-100"), width=2),
                     dbc.Col(dbc.Button("Clear", id="selection-clear", color="danger", className="w-100"), width=2),
                 ]),
-                html.P("Select specific Pokémon to include. If >75% are selected, 'All' is queried.", className="text-muted small"),
+                html.P(id="pokemons-heatmap-filter-instruction", children="Select specific Pokémon to include. If >75% are selected, 'All' is queried.", className="text-muted small"),
                 html.Div(id="select-all-hint", className="small mb-2 fw-bold"),
                 html.Div(id="selection-count-display", className="text-warning small mb-2 fw-bold"),
 
@@ -505,7 +505,7 @@ def layout(area=None, **kwargs):
                             ]),
                             dbc.CardBody([
                                 dbc.Input(id="pokemon-quick-filter-search", placeholder="Search Pokémon...", size="sm", className="mb-2"),
-                                html.P("Click to hide/show Pokémon from map", className="text-muted small mb-2"),
+                                html.P(id="pokemon-quick-filter-instructions", children="Click to hide/show Pokémon from map", className="text-muted small mb-2"),
                                 html.Div(id="pokemon-quick-filter-grid",
                                          style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
                             ])
@@ -567,7 +567,7 @@ def layout(area=None, **kwargs):
                         ]),
                         dbc.CardBody([
                             dbc.Input(id="pokemon-quick-filter-search-2", placeholder="Search Pokémon...", size="sm", className="mb-2"),
-                            html.P("Click to hide/show Pokémon from map", className="text-muted small mb-2"),
+                            html.P(id="pokemon-quick-filter-search-2-instructions", children="Click to hide/show Pokémon from map", className="text-muted small mb-2"),
                             html.Div(id="pokemon-quick-filter-grid-2",
                                      style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "justifyContent": "center", "maxHeight": "500px", "overflowY": "auto"})
                         ])
@@ -672,25 +672,44 @@ def parse_data_to_df(data, mode, source):
 
 # 0. Static Translation Callback
 @callback(
-    [Output("page-title-text", "children"),
-     Output("settings-header-text", "children"),
-     Output("label-selected-area", "children"), Output("open-area-modal", "children"),
-     Output("label-data-source", "children"), Output("label-stats", "children"),
-     Output("label-tth", "children"), Output("label-sql", "children"),
-     Output("label-time-window", "children"), Output("label-date-range", "children"),
-     Output("label-month-range", "children"), Output("label-start", "children"), Output("label-end", "children"),
-     Output("label-interval", "children"), Output("label-view-mode", "children"),
-     Output("label-actions", "children"), Output("open-selection-modal", "children"), Output("submit-btn", "children"),
-     Output("label-iv-filter", "children"), Output("label-level-filter", "children"),
-     Output("label-heatmap-display-mode", "children"),
-     Output("modal-title-area", "children"), Output("close-area-modal", "children"),
-     Output("modal-title-selection", "children"), Output("selection-select-all", "children"), Output("selection-clear", "children"), Output("close-selection-modal", "children"),
-     Output("card-header-total-counts", "children"), Output("card-header-activity", "children"),
-     Output("card-header-raw", "children"), Output("card-header-quick-filter", "children"), Output("card-header-heatmap", "children")],
-    Input("language-store", "data")
+    [
+        Output("page-title-text", "children"), Output("settings-header-text", "children"),
+        Output("label-selected-area", "children"), Output("open-area-modal", "children"),
+        Output("label-data-source", "children"), Output("label-stats", "children"),
+        Output("label-tth", "children"), Output("label-sql", "children"),
+        Output("label-time-window", "children"), Output("label-date-range", "children"),
+        Output("label-month-range", "children"), Output("label-start", "children"),
+        Output("label-end", "children"), Output("label-interval", "children"),
+        Output("label-view-mode", "children"), Output("label-actions", "children"),
+        Output("open-selection-modal", "children"), Output("submit-btn", "children"),
+        Output("label-iv-filter", "children"), Output("label-level-filter", "children"),
+        Output("label-heatmap-display-mode", "children"), Output("modal-title-area", "children"),
+        Output("close-area-modal", "children"), Output("modal-title-selection", "children"),
+        Output("selection-select-all", "children"), Output("selection-clear", "children"),
+        Output("close-selection-modal", "children"), Output("card-header-total-counts", "children"),
+        Output("card-header-activity", "children"), Output("card-header-raw", "children"),
+        Output("card-header-quick-filter", "children"), Output("card-header-heatmap", "children"),
+        Output("pokemon-quick-filter-instructions", "children"), Output("pokemons-selected-area-display", "value"),
+        Output("area-filter-input", "placeholder"), Output("table-search-input", "placeholder"),
+        Output("selection-search", "placeholder"), Output("pokemon-quick-filter-search", "placeholder"),
+        Output("pokemon-quick-filter-search-2", "placeholder"), Output("pokemon-quick-filter-search-2-instructions", "placeholder"),
+        Output("pokemons-heatmap-filter-instruction", "children"), Output("sel-prev-top", "children"),
+        Output("sel-next-top", "children")
+    ],
+    [
+        Input("language-store", "data"),
+        Input("area-selector", "value"),
+    ]
 )
-def update_static_translations(lang):
+def update_static_translations(lang, current_area):
     lang = lang or "en"
+
+    if current_area:
+        area_text = current_area
+    else:
+        area_text = translate("No Area Selected", lang)
+
+
     return (
         translate("Pokémon Analytics", lang),
         translate("Analysis Settings", lang),
@@ -706,7 +725,18 @@ def update_static_translations(lang):
         translate("Select an Area", lang), translate("Close", lang),
         translate("Select Pokémon", lang), translate("Select All", lang), translate("Clear", lang), translate("Done", lang),
         translate("Total Counts", lang), translate("Activity Data", lang),
-        translate("Raw Data Inspector", lang), translate("Pokémon Filter", lang), translate("Heatmap", lang)
+        translate("Raw Data Inspector", lang), translate("Pokémon Filter", lang), translate("Heatmap", lang),
+        translate("Click to hide/show Pokémon from map", lang),
+        area_text,
+        translate("Filter areas by name...", lang),
+        f"🔍 {translate('Search Table...', lang)}",
+        translate("Search Pokémon...", lang),
+        translate("Search Pokémon...", lang),
+        translate("Search Pokémon...", lang),
+        translate("Click to hide/show Pokémon from map", lang),
+        translate("Select specific Pokémon to include. If >75% are selected, 'All' is queried.", lang),
+        translate("Prev", lang),
+        translate("Next", lang)
     )
 
 # Callback to combine all three data source selectors into one value
@@ -788,7 +818,7 @@ def toggle_source_controls(source):
 @callback(
     [Output("mode-selector", "options"), Output("mode-selector", "value"),
      Output("data-source-selector", "options"), Output("data-source-tth-selector", "options"), Output("data-source-sql-selector", "options"),
-     Output("heatmap-display-mode", "options")],
+     Output("heatmap-display-mode", "options"), Output("interval-selector", "options")],
     [Input("combined-source-store", "data"), Input("language-store", "data")],
     [State("mode-persistence-store", "data"), State("mode-selector", "value")]
 )
@@ -826,7 +856,12 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("Grid Overlay", lang), "value": "grid"}
     ]
 
-    return allowed, final_val, source_opts, tth_opts, sql_opts, heatmap_mode_opts
+    # Interval Options
+    interval_opts = [
+        {"label": translate("Hourly", lang), "value": "hourly"}
+    ]
+
+    return allowed, final_val, source_opts, tth_opts, sql_opts, heatmap_mode_opts, interval_opts
 
 @callback(Output("mode-persistence-store", "data"), Input("mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
@@ -939,9 +974,11 @@ dash.clientside_callback(
      Input({"type": "selection-item", "index": ALL}, "n_clicks"),
      Input("iv-slider", "value")],
     [State("selection-page-store", "data"),
-     State("selection-store", "data")]
+     State("selection-store", "data"),
+     State("language-store", "data")]
 )
-def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, iv_range, page, selected):
+def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, iv_range, page, selected, lang):
+    lang = lang or "en"
     trigger = ctx.triggered_id
     options = _load_pokedex_data()
     selected_set = set(selected or [])
@@ -1010,22 +1047,31 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
             title=item['name']
         ))
 
-    page_text = f"Page {page} / {total_pages} ({len(options)} total)"
+    page_text = translate("Page {current} / {total} ({count} total)", lang).format(
+        current=page, total=total_pages, count=len(options)
+    )
 
     # Dynamic hint message for Select All based on IV range
     if select_all_enabled:
-        hint_msg = [html.I(className="bi bi-check-circle-fill me-1 text-success"), f"Select All allowed (range: {iv_span}%)"]
+        # Key: "Select All allowed (range: {val}%)"
+        hint_str = translate("Select All allowed (range: {val}%)", lang).format(val=iv_span)
+        hint_msg = [html.I(className="bi bi-check-circle-fill me-1 text-success"), hint_str]
         hint_class = "text-success"
     else:
-        hint_msg = [html.I(className="bi bi-x-circle-fill me-1 text-danger"), f"Select All disabled (range too wide: {iv_span}%)"]
+        # Key: "Select All disabled (range too wide: {val}%)"
+        hint_str = translate("Select All disabled (range too wide: {val}%)", lang).format(val=iv_span)
+        hint_msg = [html.I(className="bi bi-x-circle-fill me-1 text-danger"), hint_str]
         hint_class = "text-danger"
 
     # Selection count message
     selected_count = len(selected_set)
     if selected_count == 0:
-        count_msg = [html.I(className="bi bi-exclamation-triangle-fill me-1"), "No Pokémon selected - selection required to run query"]
+        # Key: "No Pokémon selected - selection required to run query"
+        count_msg = [html.I(className="bi bi-exclamation-triangle-fill me-1"), translate("No Pokémon selected - selection required to run query", lang)]
     else:
-        count_msg = f"✓ {selected_count} Pokémon selected"
+        # Key: "{val} Pokémon selected"
+        sel_str = translate("{val} Pokémon selected", lang).format(val=selected_count)
+        count_msg = f"✓ {sel_str}"
 
     return grid_children, page_text, page, list(selected_set), not select_all_enabled, hint_msg, hint_class, count_msg
 
@@ -1526,10 +1572,10 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
         controls = html.Div([
             dbc.Row([
                 dbc.Col([
-                    html.Span(f"Total: {total_rows} | Rows: ", className="me-2 align-middle"),
+                    html.Span(f"{translate('Total', lang)}: {total_rows} | {translate('Rows', lang)}: ", className="me-2 align-middle"),
                     dcc.Dropdown(
                         id="rows-per-page-selector",
-                        options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': 'All', 'value': total_rows}],
+                        options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': translate('All', lang), 'value': total_rows}],
                         value=rows_per_page, clearable=False, className="rows-per-page-selector",
                         style={"width": "80px", "display": "inline-block", "color": "black", "verticalAlign": "middle"}
                     )
@@ -1539,7 +1585,7 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
                         dbc.Button("<<", id="first-page-btn", size="sm", disabled=current_page <= 1),
                         dbc.Button("<", id="prev-page-btn", size="sm", disabled=current_page <= 1)
                     ], className="me-2"),
-                    html.Span("Page ", className="align-middle me-1"),
+                    html.Span(f"{translate('Page', lang)} ", className="align-middle me-1"),
                     dcc.Input(id="goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True,
                               style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}),
                     html.Span(f" of {total_pages_val}", className="align-middle ms-1 me-2"),
@@ -1651,10 +1697,10 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
 
         controls = html.Div([
             dbc.Row([
-                dbc.Col([html.Span(f"Total: {total_rows} | Rows: ", className="me-2 align-middle"), dcc.Dropdown(id="rows-per-page-selector", options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': 'All', 'value': total_rows}], value=rows_per_page, clearable=False, className="rows-per-page-selector", style={"width":"80px", "display":"inline-block", "color":"black", "verticalAlign": "middle"})], width="auto", className="d-flex align-items-center"),
+                dbc.Col([html.Span(f"{translate('Total', lang)}: {total_rows} | {translate('Rows', lang)}: ", className="me-2 align-middle"), dcc.Dropdown(id="rows-per-page-selector", options=[{'label': str(x), 'value': x} for x in [10, 25, 50, 100]] + [{'label': translate('All', lang), 'value': total_rows}], value=rows_per_page, clearable=False, className="rows-per-page-selector", style={"width":"80px", "display":"inline-block", "color":"black", "verticalAlign": "middle"})], width="auto", className="d-flex align-items-center"),
                 dbc.Col([
                     dbc.ButtonGroup([dbc.Button("<<", id="first-page-btn", size="sm", disabled=current_page <= 1), dbc.Button("<", id="prev-page-btn", size="sm", disabled=current_page <= 1)], className="me-2"),
-                    html.Span("Page ", className="align-middle me-1"), dcc.Input(id="goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True, style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}), html.Span(f" of {total_pages_val}", className="align-middle ms-1 me-2"),
+                    html.Span(f"{translate('Page', lang)} ", className="align-middle me-1"), dcc.Input(id="goto-page-input", type="number", min=1, max=total_pages_val, value=current_page, debounce=True, style={"width": "60px", "textAlign": "center", "display": "inline-block", "color": "black"}), html.Span(f" of {total_pages_val}", className="align-middle ms-1 me-2"),
                     dbc.ButtonGroup([dbc.Button(">", id="next-page-btn", size="sm", disabled=current_page >= total_pages_val), dbc.Button(">>", id="last-page-btn", size="sm", disabled=current_page >= total_pages_val)]),
                 ], width="auto", className="d-flex align-items-center justify-content-end ms-auto")
             ], className="g-0")
@@ -1722,7 +1768,7 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
                      fig.add_trace(go.Scatter(x=d['time_bucket'], y=d['count'], mode='lines+markers', name=str(m)))
                  fig.update_xaxes(range=[-0.5, 23.5], dtick=1)
 
-        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{mode.title()} Data")
+        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title=f"{translate(mode.title(), lang)} {translate('Data', lang)}")
         visual_content = dcc.Graph(figure=fig, id="main-graph")
 
     return total_div, visual_content, json.dumps(data, indent=2), total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
