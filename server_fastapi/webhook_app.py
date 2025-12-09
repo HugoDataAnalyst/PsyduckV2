@@ -25,6 +25,9 @@ from tzlocal import get_localzone
 from datetime import datetime, timedelta
 from utils.supersivor import Service, start_services, stop_services
 
+# I'll need to refactor a lot of the stuff here, to ensure background tasks only run on lead Worker
+# Important global states will need to be cached in Redis too..
+
 redis_manager = RedisManager()
 
 def detect_and_store_local_timezone():
