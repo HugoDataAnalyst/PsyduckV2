@@ -85,8 +85,8 @@ def create_time_toggle(id_name):
         className="btn-group",
         inputClassName="btn-check",
         labelClassName="btn btn-outline-light btn-sm cursor-pointer",
-        labelCheckedClassName="active",
-        style={"marginLeft": "auto"}
+        labelCheckedClassName="active"
+        #style={"marginLeft": "auto"}
     )
 
 def create_mini_stat(count, label, color, icon_url=None, icon_class=None):
@@ -136,17 +136,18 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
+                        html.Div([
+                            html.Img(src=ICONS["pokemon"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                            html.Span("Pokémon Stats", id="poke-header-text", className="fw-bold fs-5")
+                        ], className="d-flex align-items-center justify-content-center mb-2"),
                         html.Div(
-                            [
-                                html.Img(src=ICONS["pokemon"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Pokémon Stats", id="poke-header-text", className="fw-bold fs-5")
-                            ],
-                        className="d-flex align-items-center me-3"),
-                        create_time_toggle("poke-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
+                            create_time_toggle("poke-time-toggle"),
+                            className="d-flex justify-content-center w-100"
+                        )
+                    ], className="d-flex flex-column w-100")
                 ], className="bg-primary text-white"),
                 dbc.CardBody([
-                    html.P(id="poke-desc", children="Global activity over the last 24 hours.", className="card-text text-muted mb-4 small"),
+                    html.P(id="poke-desc", children="Global activity over the last 24 hours.", className="card-text text-muted mb-4 small text-center"),
                     html.Div(id="global-pokemon-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
                     html.Div(dbc.Button("View Pokémons", id="btn-view-poke", href="/pokemon", color="outline-primary", size="sm", className="w-100"), className="mt-auto")
                 ]),
@@ -156,17 +157,18 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
+                        html.Div([
+                            html.Img(src=ICONS["raid"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                            html.Span("Raid Stats", id="raid-header-text", className="fw-bold fs-5"),
+                        ], className="d-flex align-items-center justify-content-center mb-2"),
                         html.Div(
-                            [
-                                html.Img(src=ICONS["raid"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Raid Stats", id="raid-header-text", className="fw-bold fs-5"),
-                            ],
-                        className="d-flex align-items-center me-3"),
-                        create_time_toggle("raid-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
+                            create_time_toggle("raid-time-toggle"),
+                            className="d-flex justify-content-center w-100"
+                        )
+                    ], className="d-flex flex-column w-100")
                 ], className="bg-danger text-white"),
                 dbc.CardBody([
-                    html.P(id="raid-desc", children="Global Raid Battles (24h).", className="card-text text-muted mb-4 small"),
+                    html.P(id="raid-desc", children="Global Raid Battles (24h).", className="card-text text-muted mb-4 small text-center"),
                     html.Div(id="global-raid-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
                     html.Div(dbc.Button("View Raids", id="btn-view-raid", href="/raids", color="outline-danger", size="sm", className="w-100"), className="mt-auto")
                 ]),
@@ -176,17 +178,18 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
+                        html.Div([
+                            html.Img(src=ICONS["invasion"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                            html.Span("Invasion Stats", id="inv-header-text", className="fw-bold fs-5")
+                        ], className="d-flex align-items-center justify-content-center mb-2"),
                         html.Div(
-                            [
-                                html.Img(src=ICONS["invasion"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Invasion Stats", id="inv-header-text", className="fw-bold fs-5")
-                            ],
-                        className="d-flex align-items-center me-3"),
-                        create_time_toggle("invasion-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
+                            create_time_toggle("invasion-time-toggle"),
+                            className="d-flex justify-content-center w-100"
+                        )
+                    ], className="d-flex flex-column w-100")
                 ], className="bg-dark text-white", style={"borderBottom": "2px solid #555"}),
                 dbc.CardBody([
-                    html.P(id="inv-desc", children="Global Team Rocket Activity (24h).", className="card-text text-muted mb-4 small"),
+                    html.P(id="inv-desc", children="Global Team Rocket Activity (24h).", className="card-text text-muted mb-4 small text-center"),
                     html.Div(id="global-invasion-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
                     html.Div(dbc.Button("View Invasions", id="btn-view-inv", href="/invasions", color="outline-secondary", size="sm", className="w-100"), className="mt-auto")
                 ]),
@@ -196,17 +199,18 @@ def layout():
             dbc.Col(dbc.Card([
                 dbc.CardHeader([
                     html.Div([
+                        html.Div([
+                            html.Img(src=ICONS["quest"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
+                            html.Span("Quest Stats", id="quest-header-text", className="fw-bold fs-5")
+                        ], className="d-flex align-items-center justify-content-center mb-2"),
                         html.Div(
-                            [
-                                html.Img(src=ICONS["quest"], style={"height": "1.5em", "width": "auto"}, className="me-2"),
-                                html.Span("Quest Stats", id="quest-header-text", className="fw-bold fs-5")
-                            ],
-                            className="d-flex align-items-center me-3"),
-                        create_time_toggle("quest-time-toggle")
-                    ], className="d-flex justify-content-between align-items-center w-100 flex-wrap")
+                            create_time_toggle("quest-time-toggle"),
+                            className="d-flex justify-content-center w-100"
+                        )
+                    ], className="d-flex flex-column w-100")
                 ], className="bg-info text-white"),
                 dbc.CardBody([
-                    html.P(id="quest-desc", children="Global Field Research & Stops (24h).", className="card-text text-muted mb-4 small"),
+                    html.P(id="quest-desc", children="Global Field Research & Stops (24h).", className="card-text text-muted mb-4 small text-center"),
                     html.Div(id="global-quest-stats-container", className="d-flex flex-wrap justify-content-around gap-3 mb-4"),
                     html.Div(dbc.Button("View Quests", id="btn-view-quest", href="/quests", color="outline-info", size="sm", className="w-100"), className="mt-auto")
                 ]),
