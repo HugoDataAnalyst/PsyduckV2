@@ -798,14 +798,35 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
 
     # Extract raw data for quest_mode totals AR vs Normal for TOP SIDEBAR
     working_data = data.get('data', data) if isinstance(data, dict) else data
-    quest_modes = working_data.get("quest_mode", {}) if isinstance(working_data, dict) else {}
+    ar_quests_count = 0
+    normal_quests_count = 0
 
-    # Handle both string integers and names
-    ar_val = quest_modes.get("1", quest_modes.get("ar", 0))
-    normal_val = quest_modes.get("0", quest_modes.get("normal", 0))
-
-    ar_quests_count = safe_int(ar_val)
-    normal_quests_count = safe_int(normal_val)
+    if isinstance(working_data, dict):
+        # Check for direct quest_mode (SUM mode structure)
+        if "quest_mode" in working_data:
+            quest_modes = working_data["quest_mode"]
+            ar_val = quest_modes.get("1", quest_modes.get("ar", 0))
+            normal_val = quest_modes.get("0", quest_modes.get("normal", 0))
+            ar_quests_count = safe_int(ar_val)
+            normal_quests_count = safe_int(normal_val)
+        else:
+            # Grouped mode: check for date buckets with nested quest_mode OR live ts: keys
+            for key, value in working_data.items():
+                # Historical grouped: date bucket like "2025120901" with nested quest_mode
+                if isinstance(value, dict) and "quest_mode" in value:
+                    qm = value["quest_mode"]
+                    ar_quests_count += safe_int(qm.get("1", qm.get("ar", 0)))
+                    normal_quests_count += safe_int(qm.get("0", qm.get("normal", 0)))
+                # Live grouped: ts:quests_total:ar:... or ts:quests_total:normal:...
+                elif isinstance(key, str) and key.startswith("ts:quests_total:"):
+                    parts = key.split(":")
+                    if len(parts) >= 3:
+                        quest_mode_type = parts[2].lower()
+                        count_val = safe_int(value)
+                        if quest_mode_type == "ar":
+                            ar_quests_count += count_val
+                        elif quest_mode_type == "normal":
+                            normal_quests_count += count_val
 
     if mode == "grouped" and search_term:
         s = search_term.lower()
@@ -815,8 +836,8 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
             df['category'].str.lower().str.contains(s, na=False)
         ]
 
-    # Calculate Total Count for Sidebar filtered sum or absolute total
-    total_count = df[df['time_bucket'] == 'Total']['count'].sum() if mode == 'sum' else df['count'].sum()
+    # Calculate Total Count for Sidebar - only AR + Normal quests combined
+    total_count = ar_quests_count + normal_quests_count
 
     # SIDEBAR CONSTRUCTION
     sidebar = [html.H1(f"{total_count:,}", className="text-primary")]
@@ -850,24 +871,62 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
 
     # 4. Existing Categories Breakdown - Explicitly Filter out General and Quest Mode
     # This prevents them from appearing in the generic bottom list with broken icons or duplication
+    # Use translated category names to ensure filtering works in all languages
     if 'category' in df.columns:
-        filtered_df = df[~df['category'].isin(['General', 'Quest Mode'])]
+        excluded_categories = ['General', translate("Quest Mode", lang)]
+        filtered_df = df[~df['category'].isin(excluded_categories)]
         cat_gb = filtered_df.groupby('category')['count'].sum().reset_index().sort_values('count', ascending=False)
 
+        # Icon mapping with all language translations (EN, PT, DE, FR)
         cat_to_icon_path = {
-            "Pokemon": "misc/pokemon.webp", "Item": "reward/item/0.webp", "Stardust": "reward/stardust/0.webp",
-            "Candy": "reward/candy/0.webp", "XP": "reward/experience/0.webp", "Mega Energy": "reward/mega_resource/0.webp",
-            "XL Candy": "reward/xl_candy/0.webp", "Pokecoin": "reward/pokecoin/0.webp", "Sticker": "reward/sticker/0.webp",
-            "Incident": "reward/incident/0.webp", "Badge": "misc/badge_3.webp", "Egg": "misc/egg.webp",
-            "Friendship": "misc/bestbuddy.webp"
+            # English
+            "Pokemon": "misc/pokemon.webp", "Pokémon Encounter": "misc/pokemon.webp",
+            "Item": "reward/item/0.webp", "Stardust": "reward/stardust/0.webp",
+            "Candy": "reward/candy/0.webp", "XP": "reward/experience/0.webp",
+            "Mega Energy": "reward/mega_resource/0.webp", "XL Candy": "reward/xl_candy/0.webp",
+            "PokéCoin": "reward/pokecoin/0.webp", "Pokecoin": "reward/pokecoin/0.webp",
+            "Sticker": "reward/sticker/0.webp", "Team GO Rocket": "reward/incident/0.webp",
+            "Incident": "reward/incident/0.webp", "Medal": "misc/badge_3.webp",
+            "Badge": "misc/badge_3.webp", "Egg": "misc/egg.webp", "Friendship": "misc/bestbuddy.webp",
+            # Portuguese
+            "Encontro com Pokémon": "misc/pokemon.webp", "Poeira Estelar": "reward/stardust/0.webp",
+            "Doce": "reward/candy/0.webp", "PX": "reward/experience/0.webp",
+            "Megaenergia": "reward/mega_resource/0.webp", "Doce GG": "reward/xl_candy/0.webp",
+            "Pokémoeda": "reward/pokecoin/0.webp", "Adesivo": "reward/sticker/0.webp",
+            "Equipe GO Rocket": "reward/incident/0.webp", "Medalha": "misc/badge_3.webp",
+            "Ovo": "misc/egg.webp", "Amizade": "misc/bestbuddy.webp",
+            # German
+            "Pokémon-Begegnung": "misc/pokemon.webp", "Sternenstaub": "reward/stardust/0.webp",
+            "Bonbon": "reward/candy/0.webp", "EP": "reward/experience/0.webp",
+            "Mega-Energie": "reward/mega_resource/0.webp", "XL-Bonbon": "reward/xl_candy/0.webp",
+            "PokéMünze": "reward/pokecoin/0.webp", "Medaille": "misc/badge_3.webp",
+            "Ei": "misc/egg.webp", "Freundschaft": "misc/bestbuddy.webp",
+            # French
+            "Rencontre Pokémon": "misc/pokemon.webp", "Objet": "reward/item/0.webp",
+            "Poussière Étoile": "reward/stardust/0.webp", "Méga-Énergie": "reward/mega_resource/0.webp",
+            "Bonbon XL": "reward/xl_candy/0.webp", "PokéPièce": "reward/pokecoin/0.webp",
+            "Médaille": "misc/badge_3.webp", "Œuf": "misc/egg.webp", "Amitié": "misc/bestbuddy.webp",
         }
 
         for _, r in cat_gb.iterrows():
             cat_name = r['category']
             path = cat_to_icon_path.get(cat_name)
             if not path:
-                if "Item" in cat_name: path = "reward/item/0.webp"
-                elif "Pokemon" in cat_name: path = "misc/pokemon.webp"
+                # Fallback: check for common substrings
+                cat_lower = cat_name.lower()
+                if "item" in cat_lower or "objet" in cat_lower: path = "reward/item/0.webp"
+                elif "pokemon" in cat_lower or "pokémon" in cat_lower: path = "misc/pokemon.webp"
+                elif "stardust" in cat_lower or "poeira" in cat_lower or "sternenstaub" in cat_lower or "poussière" in cat_lower: path = "reward/stardust/0.webp"
+                elif "candy" in cat_lower or "doce" in cat_lower or "bonbon" in cat_lower: path = "reward/candy/0.webp"
+                elif "mega" in cat_lower: path = "reward/mega_resource/0.webp"
+                elif "xl" in cat_lower or "gg" in cat_lower: path = "reward/xl_candy/0.webp"
+                elif "xp" in cat_lower or "px" in cat_lower or "ep" in cat_lower: path = "reward/experience/0.webp"
+                elif "coin" in cat_lower or "moeda" in cat_lower or "münze" in cat_lower or "pièce" in cat_lower: path = "reward/pokecoin/0.webp"
+                elif "sticker" in cat_lower or "adesivo" in cat_lower: path = "reward/sticker/0.webp"
+                elif "rocket" in cat_lower: path = "reward/incident/0.webp"
+                elif "medal" in cat_lower or "badge" in cat_lower or "medalha" in cat_lower or "medaille" in cat_lower or "médaille" in cat_lower: path = "misc/badge_3.webp"
+                elif "egg" in cat_lower or "ovo" in cat_lower or "ei" in cat_lower or "œuf" in cat_lower: path = "misc/egg.webp"
+                elif "friend" in cat_lower or "amizade" in cat_lower or "freundschaft" in cat_lower or "amitié" in cat_lower: path = "misc/bestbuddy.webp"
                 else: path = "misc/0.webp"
 
             icon_src = get_cached_icon_url_internal(path)
