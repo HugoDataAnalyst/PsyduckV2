@@ -18,6 +18,7 @@ FLAG_ICONS = {
     "en": "https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/1x1/gb.svg",
     "pt": "https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/1x1/pt.svg",
     "de": "https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/1x1/de.svg",
+    "fr": "https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/1x1/fr.svg",
 }
 
 ICONS = {
@@ -141,6 +142,10 @@ def generate_navbar_items(lang="en"):
                 html.Img(src=FLAG_ICONS["de"], style={**flag_style, "marginRight": "10px"}),
                 "Deutsch"
             ], id="lang-switch-de", n_clicks=0),
+            dbc.DropdownMenuItem([
+                html.Img(src=FLAG_ICONS["fr"], style={**flag_style, "marginRight": "10px"}),
+                "Français"
+            ], id="lang-switch-fr", n_clicks=0),
         ],
         nav=True, in_navbar=True, align_end=True
     )
@@ -187,20 +192,23 @@ app.layout = dbc.Container([
     [
         Input("lang-switch-en", "n_clicks"),
         Input("lang-switch-pt", "n_clicks"),
-        Input("lang-switch-de", "n_clicks")
+        Input("lang-switch-de", "n_clicks"),
+        Input("lang-switch-fr", "n_clicks")
     ],
     State("language-store", "data"),
     prevent_initial_call=True
 )
-def update_language(n_en, n_pt, n_de, current_lang): # Added n_de arg
+def update_language(n_en, n_pt, n_de, n_fr, current_lang):
     if not ctx.triggered: return current_lang
     button_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
     if button_id == "lang-switch-en": return "en"
     if button_id == "lang-switch-pt": return "pt"
-    if button_id == "lang-switch-de": return "de" # Added Logic
+    if button_id == "lang-switch-de": return "de"
+    if button_id == "lang-switch-fr": return "fr"
 
     return current_lang
+
 @app.callback(
     [Output("main-navbar", "children"), Output("main-footer", "children")],
     Input("language-store", "data")
