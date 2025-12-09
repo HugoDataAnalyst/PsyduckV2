@@ -176,3 +176,5 @@ api_base_url = get_env_var("API_BASE_URL")
 dashboard_ip = get_env_var("DASHBOARD_IP", "127.0.0.1")
 dashboard_port = get_env_int("DASHBOARD_PORT", 8050)
 dashboard_debug_mode = get_env_var("DASH_DEBUG_MODE", "FALSE").upper() == "TRUE"
+dashboard_workers = get_env_int("DASH_WORKERS", 1)
+

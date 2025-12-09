@@ -12,7 +12,7 @@ import json
 import re
 import os
 from pathlib import Path
-from dashboard.translations.manager import translate
+from dashboard.translations.manager import translate, translate_invader, translate_incident_display
 
 dash.register_page(__name__, path='/invasions', title='Invasion Analytics')
 
@@ -21,39 +21,6 @@ ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/mai
 # Define Cache Paths
 ASSETS_PATH = Path(__file__).parent / ".." / "assets"
 INVASION_ICONS_PATH = ASSETS_PATH / "invasion_icons"
-
-_GRUNT_MAP = None
-_INCIDENT_DISPLAY_TYPES = None
-
-def _get_grunt_map():
-    """Loads grunts.json: ID -> Name (e.g. 52 -> Balloon Grunt Male)"""
-    global _GRUNT_MAP
-    if _GRUNT_MAP is None:
-        try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'invasions', 'grunts.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'invasions', 'grunts.json')
-            with open(path, 'r') as f:
-                data = json.load(f)
-                _GRUNT_MAP = {v: k.replace("_", " ").title().replace("Npc", "NPC") for k, v in data.items()}
-        except Exception as e:
-            logger.error(f"Error loading grunts.json: {e}")
-            _GRUNT_MAP = {}
-    return _GRUNT_MAP
-
-def _get_incident_display_types():
-    """Loads incident_display_types.json: ID -> Name"""
-    global _INCIDENT_DISPLAY_TYPES
-    if _INCIDENT_DISPLAY_TYPES is None:
-        try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'invasions', 'incident_display_types.json')
-            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'invasions', 'incident_display_types.json')
-            with open(path, 'r') as f:
-                data = json.load(f)
-                _INCIDENT_DISPLAY_TYPES = {int(k): v for k, v in data.items()}
-        except Exception as e:
-            logger.error(f"Error loading incident_display_types.json: {e}")
-            _INCIDENT_DISPLAY_TYPES = {}
-    return _INCIDENT_DISPLAY_TYPES
 
 
 # Cached wrapper for invasion icons with local fallback - we can uncomment the lru_cache later if we want to use it like this
@@ -67,13 +34,11 @@ def get_invasion_icon_url(character_id):
 
     return f"{ICON_BASE_URL}/invasion/{filename}"
 
-def parse_invasion_key(key_str):
+def parse_invasion_key(key_str, lang="en"):
     """
     Parses keys like '1:10' (Display:Character).
     Returns (display_type_id, character_id, label)
     """
-    grunt_map = _get_grunt_map()
-    incident_display_types = _get_incident_display_types()
     parts = str(key_str).split(':')
 
     if len(parts) >= 2:
@@ -81,14 +46,12 @@ def parse_invasion_key(key_str):
             disp_id = int(parts[0])
             char_id = int(parts[1])
 
-            # Try to get specific name from grunts.json
-            specific_name = grunt_map.get(char_id)
+            # Try to get translated name for character
+            label = translate_invader(char_id, lang)
 
-            if specific_name:
-                label = specific_name
-            else:
-                # Fallback to Display Type
-                disp_name = incident_display_types.get(disp_id, f"Type {disp_id}")
+            # If fallback occurred (contains #), use display type instead
+            if f"#{char_id}" in label:
+                disp_name = translate_incident_display(disp_id, lang)
                 label = f"{disp_name} (ID: {char_id})"
 
             return disp_id, char_id, label
@@ -412,7 +375,7 @@ def update_static_translations(lang, current_area):
 
 # Parsing Logic
 
-def parse_data_to_df(data, mode, source):
+def parse_data_to_df(data, mode, source, lang="en"):
     records = []
     working_data = data.get('data', data) if isinstance(data, dict) else data
 
@@ -423,7 +386,7 @@ def parse_data_to_df(data, mode, source):
 
             if "confirmed" in working_data and isinstance(working_data["confirmed"], dict):
                 for k, v in working_data["confirmed"].items():
-                    lbl = "Confirmed" if str(k) == "1" else "Unconfirmed"
+                    lbl = translate("Confirmed", lang) if str(k) == "1" else translate("Unconfirmed", lang)
                     records.append({"metric": lbl, "count": v, "key": lbl, "char_id": -1, "time_bucket": "Total"})
 
             items_dict = {}
@@ -434,7 +397,7 @@ def parse_data_to_df(data, mode, source):
 
             for key_str, count in items_dict.items():
                 if not isinstance(count, (int, float)): continue
-                disp_id, char_id, label = parse_invasion_key(key_str)
+                disp_id, char_id, label = parse_invasion_key(key_str, lang)
                 records.append({"metric": label, "count": count, "key": f"{disp_id}:{char_id}", "char_id": char_id, "time_bucket": "Total"})
 
     elif mode == "grouped":
@@ -443,7 +406,7 @@ def parse_data_to_df(data, mode, source):
             for key_str, content in source_dict.items():
                 if source_dict is working_data and key_str in ["total", "confirmed", "grunt", "display_type+character"]: continue
                 if ":" in str(key_str):
-                    disp_id, char_id, label = parse_invasion_key(key_str)
+                    disp_id, char_id, label = parse_invasion_key(key_str, lang)
                     final_count = 0
                     if isinstance(content, (int, float)): final_count = content
                     elif isinstance(content, dict): final_count = sum(v for v in content.values() if isinstance(v, (int, float)))
@@ -469,17 +432,17 @@ def parse_data_to_df(data, mode, source):
                         elif "grunt" in content: items_dict = {f"1:{k}": v for k,v in content["grunt"].items()}
 
                         for k, v in items_dict.items():
-                            disp_id, char_id, label = parse_invasion_key(k)
+                            disp_id, char_id, label = parse_invasion_key(k, lang)
                             records.append({"metric": label, "count": v, "key": f"{disp_id}:{char_id}", "char_id": char_id, "time_bucket": h_val})
 
                         if "confirmed" in content and isinstance(content["confirmed"], dict):
                              for k, v in content["confirmed"].items():
-                                lbl = "Confirmed" if str(k) == "1" else "Unconfirmed"
+                                lbl = translate("Confirmed", lang) if str(k) == "1" else translate("Unconfirmed", lang)
                                 records.append({"metric": lbl, "count": v, "key": lbl, "char_id": -1, "time_bucket": h_val})
             else:
                 for key_str, hourly_data in working_data.items():
                     if ":" in key_str:
-                        disp_id, char_id, label = parse_invasion_key(key_str)
+                        disp_id, char_id, label = parse_invasion_key(key_str, lang)
                         if isinstance(hourly_data, dict):
                             for hour_key, count in hourly_data.items():
                                 h_val = hour_key
@@ -489,7 +452,7 @@ def parse_data_to_df(data, mode, source):
                                 records.append({"metric": label, "count": count, "key": f"{disp_id}:{char_id}", "char_id": char_id, "time_bucket": h_val})
                     elif key_str == "confirmed" and isinstance(hourly_data, dict):
                          for status_key, time_dict in hourly_data.items():
-                             lbl = "Confirmed" if str(status_key) == "1" else "Unconfirmed"
+                             lbl = translate("Confirmed", lang) if str(status_key) == "1" else translate("Unconfirmed", lang)
                              if isinstance(time_dict, dict):
                                  for hour_key, count in time_dict.items():
                                     h_val = hour_key
@@ -629,16 +592,16 @@ def filter_area_cards(search_term, lang, selected_area):
 @callback(
     [Output("invasions-quick-filter-grid", "children"), Output("invasions-quick-filter-count", "children")],
     [Input("invasions-heatmap-data-store", "data"),
-     Input("invasions-quick-filter-search", "value")],
+     Input("invasions-quick-filter-search", "value"),
+     Input("language-store", "data")],
     [State("invasions-combined-source-store", "data"),
      State("invasions-heatmap-hidden-grunts", "data")]
 )
-def populate_invasions_quick_filter(heatmap_data, search_term, source, hidden_grunts):
+def populate_invasions_quick_filter(heatmap_data, search_term, lang, source, hidden_grunts):
     """Populate grunt image grid for quick filtering - fluid search"""
+    lang = lang or "en"
     if source != "sql_heatmap" or not heatmap_data:
         return [], ""
-
-    grunt_map = _get_grunt_map()
 
     # 1. Process Data - aggregate by character
     grunt_set = {}
@@ -646,7 +609,7 @@ def populate_invasions_quick_filter(heatmap_data, search_term, source, hidden_gr
         char_id = record.get('character') or 0
         key = str(char_id)
         if key not in grunt_set:
-            grunt_name = grunt_map.get(char_id, f"Grunt {char_id}")
+            grunt_name = translate_invader(char_id, lang)
             grunt_set[key] = {
                 'char_id': int(char_id),
                 'name': grunt_name,
@@ -894,7 +857,7 @@ def update_visuals(data, search_term, sort, page, lang, mode, source):
 
     if not data: return [], html.Div(), "", 1, {"display": "block"}
 
-    df = parse_data_to_df(data, mode, source)
+    df = parse_data_to_df(data, mode, source, lang)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "block"}
 
     # Search Logic - Grouped Mode
