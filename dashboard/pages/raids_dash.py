@@ -13,7 +13,7 @@ import re
 import os
 from pathlib import Path
 from functools import lru_cache
-from dashboard.translations.manager import translate
+from dashboard.translations.manager import translate, translate_pokemon
 
 dash.register_page(__name__, path='/raids', title='Raid Analytics')
 
@@ -66,20 +66,25 @@ def _get_form_map():
             _FORM_MAP = {}
     return _FORM_MAP
 
-def resolve_pokemon_name(pid, form_id):
+def resolve_pokemon_name(pid, form_id, lang="en"):
+    """
+    Returns the Pokemon name with form suffix if applicable.
+    Uses translation system for localized Pokemon names.
+    """
     species_map = _get_species_map()
     form_map = _get_form_map()
 
     pid = safe_int(pid)
     form_id = safe_int(form_id)
 
-    base_name = species_map.get(pid, f"Pokemon {pid}")
+    # Get translated species name
+    base_name = translate_pokemon(pid, lang)
 
     # If no form or form is 0 or Unset, just return species
     if form_id <= 0:
         return base_name
 
-    # Try to find specific form name
+    # Try to find specific form name from form_map
     form_name_full = form_map.get(form_id)
 
     if form_name_full:
@@ -87,6 +92,15 @@ def resolve_pokemon_name(pid, form_id):
         # unless it is Alola/Galar/Hisui/etc
         if "Normal" in form_name_full and not any(x in form_name_full for x in ["Alola", "Galar", "Hisui"]):
              return base_name
+        # Extract form suffix from the full form name and append to translated base name
+        for species_name in species_map.values():
+            species_upper = species_name.upper().replace(" ", "_")
+            if form_name_full.upper().replace(" ", "_").startswith(species_upper + "_"):
+                form_suffix = form_name_full[len(species_name):].strip()
+                if form_suffix.startswith("_"):
+                    form_suffix = form_suffix[1:]
+                form_suffix = form_suffix.replace("_", " ").title()
+                return f"{base_name} ({form_suffix})" if form_suffix else base_name
         return form_name_full
 
     return base_name
@@ -480,7 +494,7 @@ def update_static_translations(lang, current_area):
 
 # Parsing Logic
 
-def parse_data_to_df(data, mode, source):
+def parse_data_to_df(data, mode, source, lang="en"):
     records = []
 
     # Parse nested dictionaries like raid_level, raid_costume
@@ -541,7 +555,7 @@ def parse_data_to_df(data, mode, source):
                     if len(parts) >= 2:
                         pid, form = parts[0], parts[1]
                         # Resolve Name here for search filtering using Maps
-                        name = resolve_pokemon_name(pid, form)
+                        name = resolve_pokemon_name(pid, form, lang)
                         records.append({"metric": "count", "pid": int(pid), "form": int(form), "key": name, "count": count, "time_bucket": "Total"})
 
     df = pd.DataFrame(records)
@@ -668,12 +682,14 @@ def update_heatmap_mode_store(val): return val
 @callback(
     [Output("raids-quick-filter-grid", "children"), Output("raids-quick-filter-count", "children")],
     [Input("raids-heatmap-data-store", "data"),
-     Input("raids-quick-filter-search", "value")],
+     Input("raids-quick-filter-search", "value"),
+     Input("language-store", "data")],
     [State("raids-combined-source-store", "data"),
      State("raids-heatmap-hidden-pokemon", "data")]
 )
-def populate_raids_quick_filter(heatmap_data, search_term, source, hidden_pokemon):
+def populate_raids_quick_filter(heatmap_data, search_term, lang, source, hidden_pokemon):
     """Populate Pokemon image grid for quick filtering raid bosses - fluid search"""
+    lang = lang or "en"
     if source != "sql_heatmap" or not heatmap_data:
         return [], ""
 
@@ -702,7 +718,7 @@ def populate_raids_quick_filter(heatmap_data, search_term, source, hidden_pokemo
 
     for key, data in sorted_pokemon:
         if search_lower:
-            name = resolve_pokemon_name(data['pid'], data['form']).lower()
+            name = resolve_pokemon_name(data['pid'], data['form'], lang).lower()
             if search_lower not in name:
                 continue
         filtered_list.append((key, data))
@@ -714,7 +730,7 @@ def populate_raids_quick_filter(heatmap_data, search_term, source, hidden_pokemo
     for key, data in filtered_list:
         is_hidden = key in hidden_set
         icon_url = data.get('icon_url') or get_pokemon_icon_url(data['pid'], data['form'])
-        pokemon_name = resolve_pokemon_name(data['pid'], data['form'])
+        pokemon_name = resolve_pokemon_name(data['pid'], data['form'], lang)
 
         style = {
             "cursor": "pointer",
@@ -955,7 +971,7 @@ def update_visuals(data, search_term, sort, page, lang, mode, source):
     lang = lang or "en"
     if not data: return [], html.Div(), "", 1, {"display": "block"}
 
-    df = parse_data_to_df(data, mode, source)
+    df = parse_data_to_df(data, mode, source, lang)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "block"}
 
     # Search Logic Grouped Mode

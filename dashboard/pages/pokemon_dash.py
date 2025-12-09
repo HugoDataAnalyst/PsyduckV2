@@ -12,7 +12,7 @@ import json
 import re
 import os
 from pathlib import Path
-from dashboard.translations.manager import translate
+from dashboard.translations.manager import translate, translate_pokemon
 
 dash.register_page(__name__, path='/pokemon', title='Pokémon Analytics')
 
@@ -115,31 +115,50 @@ def safe_int(value):
     if isinstance(value, (int, float)): return int(value)
     return 0
 
-def resolve_pokemon_name(pid, form_id):
+def resolve_pokemon_name(pid, form_id, lang="en"):
+    """
+    Returns the Pokemon name with form suffix if applicable.
+    Uses translation system for localized Pokemon names.
+    """
     _load_pokedex_data()
-    for p in _ALL_POKEMON_OPTIONS:
-        if p['pid'] == pid and p['form'] == form_id:
-            return p['name']
-    for name, s_pid in _SPECIES_MAP.items():
-        if s_pid == pid:
-            return f"{name.title()} (Form {form_id})"
-    return f"Pokemon {pid}:{form_id}"
+    pid = int(pid) if isinstance(pid, str) and str(pid).isdigit() else (pid if isinstance(pid, int) else 0)
+    form_id = int(form_id) if isinstance(form_id, str) and str(form_id).isdigit() else (form_id if isinstance(form_id, int) else 0)
 
-def resolve_pokemon_name_parts(pid, form_id):
-    """Returns tuple of (species_name, form_name) for display purposes"""
+    # Get translated species name
+    species_name = translate_pokemon(pid, lang)
+
+    # For form 0, return just the species name
+    if form_id == 0:
+        return species_name
+
+    # Try to find form name from pokedex.json (FORM_MAP)
+    form_name = None
+    for form_key, fid in _FORM_MAP.items():
+        if fid == form_id:
+            # Check if this form key starts with our species
+            for name_key in _SPECIES_MAP.keys():
+                if form_key.startswith(name_key + "_") and _SPECIES_MAP[name_key] == pid:
+                    # Extract form part after species name
+                    form_part = form_key.replace(name_key + "_", "")
+                    form_name = form_part.replace("_", " ").title()
+                    break
+            if form_name:
+                break
+
+    if form_name:
+        return f"{species_name} ({form_name})"
+
+    return f"{species_name} (Form {form_id})" if form_id != 0 else species_name
+
+def resolve_pokemon_name_parts(pid, form_id, lang="en"):
+    """Returns tuple of (species_name, form_name) for display purposes.
+    Uses translation system for localized Pokemon names."""
     _load_pokedex_data()
     pid = int(pid) if isinstance(pid, str) and pid.isdigit() else (pid if isinstance(pid, int) else 0)
     form_id = int(form_id) if isinstance(form_id, str) and str(form_id).isdigit() else (form_id if isinstance(form_id, int) else 0)
 
-    # Find the species name from pokedex_id.json reverse lookup
-    species_name = None
-    for name, s_pid in _SPECIES_MAP.items():
-        if s_pid == pid:
-            species_name = name.replace("_", " ").title()
-            break
-
-    if not species_name:
-        species_name = f"Pokemon #{pid}"
+    # Get translated species name
+    species_name = translate_pokemon(pid, lang)
 
     # For form 0, return just the species name with no form label
     if form_id == 0:
@@ -147,7 +166,6 @@ def resolve_pokemon_name_parts(pid, form_id):
 
     # Try to find form name from pokedex.json (FORM_MAP)
     form_name = None
-    species_key = species_name.upper().replace(" ", "_")
 
     for form_key, fid in _FORM_MAP.items():
         if fid == form_id:
@@ -592,7 +610,7 @@ def layout(area=None, **kwargs):
 
 # Parsing Logic
 
-def parse_data_to_df(data, mode, source):
+def parse_data_to_df(data, mode, source, lang="en"):
     if source == "sql_heatmap": return pd.DataFrame(data) if data else pd.DataFrame()
     records = []
 
@@ -635,7 +653,7 @@ def parse_data_to_df(data, mode, source):
                     parts = key_str.split(":")
                     if len(parts) >= 3:
                         pid, form, metric = parts[0], parts[1], parts[2]
-                        name = resolve_pokemon_name(pid, form)
+                        name = resolve_pokemon_name(pid, form, lang)
                         records.append({"metric": metric, "pid": int(pid) if pid.isdigit() else 0, "form": int(form) if form.isdigit() else 0, "key": name, "count": count, "time_bucket": "Total"})
             elif isinstance(first_val, dict):
                 for metric, items in data.items():
@@ -643,7 +661,7 @@ def parse_data_to_df(data, mode, source):
                         for key_str, count in items.items():
                             parts = key_str.split(":")
                             pid, form = (parts[0], parts[1]) if len(parts) >= 2 else (0, 0)
-                            name = resolve_pokemon_name(pid, form)
+                            name = resolve_pokemon_name(pid, form, lang)
                             records.append({"metric": metric, "pid": int(pid) if pid.isdigit() else 0, "form": int(form) if form.isdigit() else 0, "key": name, "count": count, "time_bucket": "Total"})
 
     elif "historical" in source:
@@ -659,7 +677,7 @@ def parse_data_to_df(data, mode, source):
                             parts = key_str.split(":")
                             if len(parts) >= 3:
                                 pid, form, metric = parts[0], parts[1], parts[2]
-                                name = resolve_pokemon_name(pid, form)
+                                name = resolve_pokemon_name(pid, form, lang)
                                 records.append({"metric": metric, "pid": int(pid) if pid.isdigit() else 0, "form": int(form) if form.isdigit() else 0, "key": name, "count": count, "time_bucket": h_val})
                         else:
                             records.append({"metric": key_str, "pid": "All", "form": "All", "key": "All", "count": count, "time_bucket": h_val})
@@ -1036,15 +1054,16 @@ def update_selection_grid(search, prev_c, next_c, all_c, clear_c, item_clicks, i
         key = item['key']
         is_sel = key in selected_set
         cls = "pokemon-filter-item" + (" selected" if is_sel else "")
+        display_name = resolve_pokemon_name(item['pid'], item['form'], lang)
 
         grid_children.append(html.Div(
             [
                 html.Img(src=get_pokemon_icon_url(item['pid'], item['form']), style={"width": "48px", "height": "48px", "display": "block"}),
-                html.Div(item['name'], style={"fontSize": "10px", "textAlign": "center", "overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap", "maxWidth": "60px"})
+                html.Div(display_name, style={"fontSize": "10px", "textAlign": "center", "overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap", "maxWidth": "60px"})
             ],
             id={"type": "selection-item", "index": key},
             className=cls,
-            title=item['name']
+            title=display_name
         ))
 
     page_text = translate("Page {current} / {total} ({count} total)", lang).format(
@@ -1216,8 +1235,8 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
                     grouped = df.groupby(['latitude', 'longitude', 'pokemon_id', 'form'])['count'].sum().reset_index()
 
                     # Add Pokemon names and icon URLs for display in JS
-                    def add_pokemon_info(row):
-                        species, form_name = resolve_pokemon_name_parts(row['pokemon_id'], row['form'])
+                    def add_pokemon_info(row, lang=lang):
+                        species, form_name = resolve_pokemon_name_parts(row['pokemon_id'], row['form'], lang)
                         icon_url = get_pokemon_icon_url(row['pokemon_id'], row['form'])
                         return pd.Series({'species_name': species, 'form_name': form_name or '', 'icon_url': icon_url})
 
@@ -1293,12 +1312,14 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 @callback(
     [Output("pokemon-quick-filter-grid", "children"), Output("pokemon-quick-filter-count", "children")],
     [Input("heatmap-data-store", "data"),
-     Input("pokemon-quick-filter-search", "value")],
+     Input("pokemon-quick-filter-search", "value"),
+     Input("language-store", "data")],
     [State("combined-source-store", "data"),
      State("heatmap-hidden-pokemon", "data")]
 )
-def populate_pokemon_quick_filter(heatmap_data, search_term, source, hidden_pokemon):
+def populate_pokemon_quick_filter(heatmap_data, search_term, lang, source, hidden_pokemon):
     """Populate Pokemon image grid for quick filtering - fluid search"""
+    lang = lang or "en"
     if source != "sql_heatmap" or not heatmap_data:
         return [], ""
 
@@ -1326,7 +1347,7 @@ def populate_pokemon_quick_filter(heatmap_data, search_term, source, hidden_poke
 
     for key, data in sorted_pokemon:
         if search_lower:
-            name = resolve_pokemon_name(data['pid'], data['form']).lower()
+            name = resolve_pokemon_name(data['pid'], data['form'], lang).lower()
             if search_lower not in name:
                 continue
         filtered_list.append((key, data))
@@ -1354,7 +1375,7 @@ def populate_pokemon_quick_filter(heatmap_data, search_term, source, hidden_poke
             html.Div(f"{data['count']}",
                     style={"fontSize": "10px", "textAlign": "center", "marginTop": "2px", "color": "#aaa"})
         ], id={"type": "pokemon-quick-filter-icon", "index": key}, style=style,
-           title=f"{resolve_pokemon_name(data['pid'], data['form'])}: {data['count']} spawns"))
+           title=f"{resolve_pokemon_name(data['pid'], data['form'], lang)}: {data['count']} spawns"))
 
     count_text = f"({len(filtered_list)}/{len(sorted_pokemon)})" if search_lower else f"({len(sorted_pokemon)})"
 
@@ -1476,8 +1497,8 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
 
         # Search filter
         if search_term:
-            def build_search_name(row):
-                species, form = resolve_pokemon_name_parts(row['pokemon_id'], int(row['form']) if row['form'] else 0)
+            def build_search_name(row, lang=lang):
+                species, form = resolve_pokemon_name_parts(row['pokemon_id'], int(row['form']) if row['form'] else 0, lang)
                 return f"{species} {form}".lower() if form else species.lower()
             shiny_df['search_name'] = shiny_df.apply(build_search_name, axis=1)
             shiny_df = shiny_df[shiny_df['search_name'].str.contains(search_term.lower(), na=False)]
@@ -1538,7 +1559,7 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
 
             pid = r['pokemon_id']
             form = int(r['form']) if r['form'] else 0
-            species_name, form_name = resolve_pokemon_name_parts(pid, form)
+            species_name, form_name = resolve_pokemon_name_parts(pid, form, lang)
 
             # Format shiny rate - convert from percentage to 1/X odds
             shiny_pct = r.get('shiny_pct_pooled', 0)
@@ -1608,13 +1629,13 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
         return total_div, visual_content, raw_text, total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
     if not data: return [], html.Div(), "", 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
-    df = parse_data_to_df(data, mode, source)
+    df = parse_data_to_df(data, mode, source, lang)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
     if mode == "grouped" and search_term:
         # Build searchable name column using species + form names
-        def build_search_name(row):
-            species, form = resolve_pokemon_name_parts(row['pid'], row['form'])
+        def build_search_name(row, lang=lang):
+            species, form = resolve_pokemon_name_parts(row['pid'], row['form'], lang)
             return f"{species} {form}".lower() if form else species.lower()
         df['search_name'] = df.apply(build_search_name, axis=1)
         df = df[df['search_name'].str.contains(search_term.lower(), na=False)]
@@ -1676,7 +1697,7 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
             bg = "#1a1a1a" if i % 2 == 0 else "#242424"
 
             # Get species name and form name parts
-            species_name, form_name = resolve_pokemon_name_parts(r['pid'], r['form'])
+            species_name, form_name = resolve_pokemon_name_parts(r['pid'], r['form'], lang)
 
             # Build Pokemon name cell with bold species name and form name below
             if form_name:
