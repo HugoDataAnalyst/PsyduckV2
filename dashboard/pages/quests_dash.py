@@ -933,23 +933,24 @@ def update_visuals(data, search_term, sort, page, lang, mode, source, selected_a
         page_df = table_df.iloc[(current_page - 1) * rows_per_page : current_page * rows_per_page]
 
         # Equal column sizing with specific width for Image
-        header_cells = [html.Th(translate("Image", lang), style={"backgroundColor": "#1a1a1a", "width": "60px"})]
+        header_cells = [html.Th(translate("Image", lang), style={"backgroundColor": "#1a1a1a", "width": "60px", "textAlign": "center", "verticalAlign": "middle"})]
         for c in ["type", "name", "count"]:
-            label = c.title()
+            label = translate(c.title(), lang)
             arrow = " ▲" if col == c and ascending else (" ▼" if col == c else "")
             # Set equal width for data columns
             header_cells.append(html.Th(
                 html.Span([label, html.Span(arrow, style={"color": "#aaa"})], id={"type": "quests-sort-header", "index": c}, style={"cursor": "pointer"}),
-                style={"backgroundColor": "#1a1a1a", "width": "25%"}
+                style={"backgroundColor": "#1a1a1a", "width": "25%", "textAlign": "center", "verticalAlign": "middle"}
             ))
 
         rows = []
         for _, r in page_df.iterrows():
+            cell_style = {"textAlign": "center", "verticalAlign": "middle"}
             rows.append(html.Tr([
-                html.Td(html.Img(src=r['icon'], style={"width": "40px", "height": "40px", "display": "block", "margin": "auto"})),
-                html.Td(r['type']),
-                html.Td(r['name']),
-                html.Td(f"{r['count']:,}", className="text-end")
+                html.Td(html.Img(src=r['icon'], style={"width": "40px", "height": "40px", "display": "block", "margin": "auto"}), style=cell_style),
+                html.Td(r['type'], style=cell_style),
+                html.Td(r['name'], style=cell_style),
+                html.Td(f"{r['count']:,}", style=cell_style)
             ]))
 
         controls = html.Div([
