@@ -25,6 +25,7 @@ logs/
 config/config.json
 dashboard/dashboard_config.json
 dashboard/assets/custom_images/*
+dashboard/assets/reward_icons/*
 dashboard/assets/pokemon_icons/*
 !dashboard/assets/pokemon_icons/.gitkeep
 dashboard/data/*
