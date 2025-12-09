@@ -19,12 +19,19 @@ class LoggingOptions(TypedDict, total=False):
     keep_total: int
     compression: str
 
+class WaitressQueueFilter(logging.Filter):
+    """
+    Filters out the spammy 'Task queue depth' warning from Waitress.
+    """
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Task queue depth" not in record.getMessage()
+
 
 def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = None) -> None:
     """
     - Console sink with colors.
     - Optional file sink with rotation, retention (count-based) and compression.
-    - Bridges stdlib logging (uvicorn/sqlalchemy/etc.) to Loguru.
+    - Bridges stdlib logging (uvicorn/sqlalchemy/waitress/etc.) to Loguru.
     - Captures unhandled exceptions (sync + asyncio).
     """
     if options is None:
@@ -97,6 +104,9 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     # bridge stdlib logging to Loguru
     class InterceptHandler(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
+            msg = record.getMessage()
+            if "Task queue depth" in msg:
+                return
             try:
                 level = logger.level(record.levelname).name
             except Exception:
@@ -115,11 +125,14 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
         "alembic",
         "aiomysql",
         "asyncio",
+        "waitress",
     ):
         lg = logging.getLogger(name)
         lg.handlers = [InterceptHandler()]
         lg.propagate = False
         lg.setLevel(logging.getLevelName(log_lvl))
+
+    logging.getLogger("waitress").addFilter(WaitressQueueFilter())
 
     # Quiet extremely chatty engine SQL logs:
     logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
