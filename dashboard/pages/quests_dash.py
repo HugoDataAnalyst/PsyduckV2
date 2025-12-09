@@ -13,7 +13,7 @@ import re
 import os
 from pathlib import Path
 from functools import lru_cache
-from dashboard.translations.manager import translate
+from dashboard.translations.manager import translate, translate_pokemon
 
 dash.register_page(__name__, path='/quests', title='Quest Analytics')
 
@@ -23,39 +23,13 @@ ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/mai
 ASSETS_PATH = Path(__file__).parent / ".." / "assets"
 REWARD_ICONS_PATH = ASSETS_PATH / "reward_icons"
 POKEMON_ICONS_PATH = ASSETS_PATH / "pokemon_icons"
-
-REWARD_TYPES = {
-    0: "Unset", 1: "XP", 2: "Item", 3: "Stardust", 4: "Candy", 5: "Avatar",
-    6: "Quest", 7: "Pokémon", 8: "Pokecoin", 9: "XL Candy", 10: "Level Cap",
-    11: "Sticker", 12: "Mega Energy", 13: "Incident", 14: "Attribute",
-    15: "Badge", 16: "Egg", 17: "Stat", 18: "Loot", 19: "Friendship"
-}
-
-QUEST_TYPES = {
-    0: "Unset", 1: "First Catch", 2: "First Spin", 3: "Multi-Part", 4: "Catch Pokémon",
-    5: "Spin Pokestop", 6: "Hatch Egg", 7: "Gym Battle", 8: "Raid Battle", 9: "Complete Quest",
-    10: "Transfer", 11: "Favorite", 12: "Autocomplete", 13: "Use Berry", 14: "Upgrade",
-    15: "Evolve", 16: "Throw", 17: "Buddy Candy", 18: "Badge Rank", 19: "Level Up",
-    20: "Join Raid", 21: "Battle", 22: "Add Friend", 23: "Trade", 24: "Send Gift",
-    25: "Evolve Into", 27: "Combat", 28: "Snapshot", 29: "Battle Rocket", 30: "Purify",
-    31: "Find Rocket", 32: "First Grunt", 33: "Feed Buddy", 34: "Buddy Affection",
-    35: "Pet Buddy", 36: "Buddy Level", 37: "Buddy Walk", 38: "Buddy Yatta", 39: "Incense",
-    40: "Buddy Souvenir", 41: "Collect Reward", 42: "Walk", 43: "Mega Evolve", 44: "Stardust",
-    45: "Collection", 46: "AR Scan", 50: "Evo Walk", 51: "GBL Rank", 53: "Charge Move",
-    54: "Change Form", 55: "Battle NPC", 56: "Power Up", 57: "Wild Snapshot", 58: "Use Item",
-    59: "Open Gift", 60: "Earn XP", 61: "Battle Leader", 62: "First Route", 63: "Sleep Data",
-    64: "Route Travel", 65: "Route Complete", 66: "Collect Tappable", 67: "Ability",
-    68: "NPC Gift Send", 69: "NPC Gift Open", 70: "OAuth", 71: "Fight Mon", 72: "Non-Combat Move",
-    73: "Fuse", 74: "Unfuse", 75: "Walk Meters", 76: "Change Into Form", 77: "Fuse Into",
-    78: "Unfuse Into", 82: "Collect MP", 83: "Loot Station", 84: "Bread Battle", 85: "Bread Move",
-    86: "Unlock Bread", 87: "Enhance Bread", 88: "Collect Stamp", 89: "Dough Battle",
-    90: "Visit Page", 91: "Incubator", 92: "Choose Buddy", 93: "Lure", 94: "Lucky Egg",
-    95: "Pin Postcard", 96: "Feed Gym", 97: "Star Piece", 98: "Reach CP", 99: "Spend Dust"
-}
+QUESTS_ASSETS_PATH = ASSETS_PATH / "pogo_mapping" / "quests"
 
 _SPECIES_MAP = None
 _FORM_MAP = None
 _ITEMS_MAP = None
+_REWARD_TYPES = None
+_QUEST_TYPES = None
 
 def safe_int(value):
     """Safely converts a value to int, handling 'None' strings and NoneType."""
@@ -103,6 +77,35 @@ def _get_items_map():
         except: _ITEMS_MAP = {}
     return _ITEMS_MAP
 
+def _get_reward_types():
+    global _REWARD_TYPES
+    if _REWARD_TYPES is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'quests', 'reward_types.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'quests', 'reward_types.json')
+            with open(path, 'r', encoding='utf-8') as f:
+                # Keys in JSON are strings, convert to int for mapping if needed or handle as strings
+                data = json.load(f)
+                _REWARD_TYPES = {int(k): v for k, v in data.items()}
+        except Exception as e:
+            logger.error(f"Error loading reward_types.json: {e}")
+            _REWARD_TYPES = {}
+    return _REWARD_TYPES
+
+def _get_quest_types():
+    global _QUEST_TYPES
+    if _QUEST_TYPES is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'quests', 'quest_types.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'quests', 'quest_types.json')
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                _QUEST_TYPES = {int(k): v for k, v in data.items()}
+        except Exception as e:
+            logger.error(f"Error loading quest_types.json: {e}")
+            _QUEST_TYPES = {}
+    return _QUEST_TYPES
+
 def get_area_pokestops_count(area_name):
     """Reads the cached global_pokestops.json to find the stop count for the selected area."""
     if not area_name:
@@ -128,16 +131,29 @@ def get_area_pokestops_count(area_name):
         logger.error(f"Error reading pokestops count: {e}")
         return 0
 
-def resolve_pokemon_name(pid, form_id):
+def resolve_pokemon_name(pid, form_id, lang="en"):
+    """
+    Returns the Pokemon name with form suffix if applicable.
+    Uses translation system for localized Pokemon names.
+    """
     species_map = _get_species_map()
     form_map = _get_form_map()
     pid, form_id = safe_int(pid), safe_int(form_id)
-    base_name = species_map.get(pid, f"Pokemon {pid}")
+    base_name = translate_pokemon(pid, lang)
     if form_id <= 0: return base_name
     form_name_full = form_map.get(form_id)
     if form_name_full:
         if "Normal" in form_name_full and not any(x in form_name_full for x in ["Alola", "Galar", "Hisui"]):
              return base_name
+        # Extract form suffix and append to translated base name
+        for species_name in species_map.values():
+            species_upper = species_name.upper().replace(" ", "_")
+            if form_name_full.upper().replace(" ", "_").startswith(species_upper + "_"):
+                form_suffix = form_name_full[len(species_name):].strip()
+                if form_suffix.startswith("_"):
+                    form_suffix = form_suffix[1:]
+                form_suffix = form_suffix.replace("_", " ").title()
+                return f"{base_name} ({form_suffix})" if form_suffix else base_name
         return form_name_full
     return base_name
 
@@ -155,31 +171,31 @@ def get_quest_icon_url(reward_type, item_id=None, poke_id=None, form=0):
     rt = safe_int(reward_type)
     item_id, poke_id, form = safe_int(item_id), safe_int(poke_id), safe_int(form)
 
+    # Load Reward Types
+    reward_types = _get_reward_types()
+
     # Specific Lookups Pokemon
     if rt == 7 and poke_id > 0:
+        # ... (Pokemon icon logic remains same) ...
         filename = f"{poke_id}_f{form}.webp" if form > 0 else f"{poke_id}.webp"
-
-        # 1. Try Specific Form locally
-        if (POKEMON_ICONS_PATH / filename).exists():
-            return f"/assets/pokemon_icons/{filename}"
-
-        # 2. Fallback to Base Form locally
+        if (POKEMON_ICONS_PATH / filename).exists(): return f"/assets/pokemon_icons/{filename}"
         if form > 0:
             base_filename = f"{poke_id}.webp"
-            if (POKEMON_ICONS_PATH / base_filename).exists():
-                return f"/assets/pokemon_icons/{base_filename}"
-
-        # 3. Remote
+            if (POKEMON_ICONS_PATH / base_filename).exists(): return f"/assets/pokemon_icons/{base_filename}"
         return f"{ICON_BASE_URL}/pokemon/{filename}"
 
     # Determine relative path for Rewards
-    relative_path = "misc/0.webp" # Default
+    relative_path = "misc/0.webp"
 
     if rt == 2 and item_id > 0: relative_path = f"reward/item/{item_id}.webp"
     elif rt == 4 and item_id > 0: relative_path = f"reward/candy/{item_id}.webp"
     elif rt == 12 and item_id > 0: relative_path = f"reward/mega_resource/{item_id}.webp"
     elif rt == 9 and item_id > 0: relative_path = f"reward/xl_candy/{item_id}.webp"
     else:
+        # Default mapping using loaded types if needed, or keeping the manual map for icons
+        # Since icons map to IDs, we can keep the manual ID map or load it.
+        # For safety/speed, the ID->Icon map is often static structure.
+        # But let's use the logic provided:
         defaults = {
             0: "reward/unset/0.webp", 1: "reward/experience/0.webp", 2: "reward/item/0.webp",
             3: "reward/stardust/0.webp", 4: "reward/candy/0.webp", 5: "reward/avatar_clothing/0.webp",
@@ -441,6 +457,9 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
 
     items_map = _get_items_map()
     species_map = _get_species_map()
+    # Load dynamic maps
+    reward_types_map = _get_reward_types()
+    quest_types_map = _get_quest_types()
 
     if mode == "sum":
         if "total" in working_data:
@@ -507,7 +526,7 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
             agg_key = f"{q_type_id}_{r_type_id}_{item_id}_{amount}_{pid}_{form}"
 
             if agg_key not in agg_map:
-                q_name = QUEST_TYPES.get(q_type_id, f"Type {q_type_id}")
+                q_name = quest_types_map.get(q_type_id, f"Type {q_type_id}")
                 r_name, category, filter_key, icon_url = "Unknown", "Other", "other", None
                 amt_display = f" x{amount}" if amount > 1 else ""
 
@@ -515,25 +534,25 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
                     category, i_name = "Item", items_map.get(item_id, f"Item {item_id}")
                     r_name, filter_key, icon_url = f"{i_name}{amt_display}", f"item_{item_id}", get_quest_icon_url(r_type_id, item_id=item_id)
                 elif r_type_id == 7:
-                    category, p_name = "Pokemon", resolve_pokemon_name(pid, form)
+                    category, p_name = "Pokemon", resolve_pokemon_name(pid, form, lang)
                     r_name, filter_key, icon_url = f"{p_name}", f"poke_{pid}_{form}", get_quest_icon_url(r_type_id, poke_id=pid, form=form)
                 elif r_type_id == 3:
                     category, r_name, filter_key, icon_url = "Stardust", f"Stardust{amt_display}", "stardust", get_quest_icon_url(3)
                 elif r_type_id == 12:
                     category = "Mega Energy"
                     target_id = pid if pid > 0 else item_id
-                    p_name = resolve_pokemon_name(target_id, 0)
+                    p_name = resolve_pokemon_name(target_id, 0, lang)
                     r_name, filter_key, icon_url = f"{p_name} Mega Energy{amt_display}", f"mega_{target_id}", get_quest_icon_url(7, poke_id=target_id) if target_id > 0 else get_quest_icon_url(12)
                 elif r_type_id == 9:
-                    category, p_name = "XL Candy", resolve_pokemon_name(item_id, 0)
+                    category, p_name = "XL Candy", resolve_pokemon_name(item_id, 0, lang)
                     r_name, filter_key, icon_url = f"{p_name} XL Candy{amt_display}", f"xl_{item_id}", get_quest_icon_url(9, item_id=item_id)
                 elif r_type_id == 4:
-                    category, p_name = "Candy", resolve_pokemon_name(item_id, 0)
+                    category, p_name = "Candy", resolve_pokemon_name(item_id, 0, lang)
                     r_name, filter_key, icon_url = f"{p_name} Candy{amt_display}", f"candy_{item_id}", get_quest_icon_url(4, item_id=item_id)
                 elif r_type_id == 1:
                     category, r_name, filter_key, icon_url = "XP", f"XP{amt_display}", "xp", get_quest_icon_url(1)
                 else:
-                    category = REWARD_TYPES.get(r_type_id, "Unknown")
+                    category = reward_types_map.get(r_type_id, "Unknown")
                     r_name, filter_key, icon_url = f"{category}{amt_display}", f"other_{r_type_id}", get_quest_icon_url(r_type_id)
 
                 agg_map[agg_key] = {
@@ -555,7 +574,7 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
 
             time_data = working_data[key_str]
 
-            q_name = QUEST_TYPES.get(q_type_id, f"Type {q_type_id}")
+            q_name = quest_types_map.get(q_type_id, f"Type {q_type_id}")
             r_name, category, filter_key, icon_url = "Unknown", "Other", "other", None
             amt_display = f" x{amount}" if amount > 1 else ""
 
@@ -563,25 +582,25 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
                 category, i_name = "Item", items_map.get(item_id, f"Item {item_id}")
                 r_name, filter_key, icon_url = f"{i_name}{amt_display}", f"item_{item_id}", get_quest_icon_url(r_type_id, item_id=item_id)
             elif r_type_id == 7:
-                category, p_name = "Pokemon", resolve_pokemon_name(pid, form)
+                category, p_name = "Pokemon", resolve_pokemon_name(pid, form, lang)
                 r_name, filter_key, icon_url = f"{p_name}", f"poke_{pid}_{form}", get_quest_icon_url(r_type_id, poke_id=pid, form=form)
             elif r_type_id == 3:
                 category, r_name, filter_key, icon_url = "Stardust", f"Stardust{amt_display}", "stardust", get_quest_icon_url(3)
             elif r_type_id == 12:
                 category = "Mega Energy"
                 target_id = pid if pid > 0 else item_id
-                p_name = resolve_pokemon_name(target_id, 0)
+                p_name = resolve_pokemon_name(target_id, 0, lang)
                 r_name, filter_key, icon_url = f"{p_name} Mega Energy{amt_display}", f"mega_{target_id}", get_quest_icon_url(7, poke_id=target_id) if target_id > 0 else get_quest_icon_url(12)
             elif r_type_id == 9:
-                category, p_name = "XL Candy", resolve_pokemon_name(item_id, 0)
+                category, p_name = "XL Candy", resolve_pokemon_name(item_id, 0, lang)
                 r_name, filter_key, icon_url = f"{p_name} XL Candy{amt_display}", f"xl_{item_id}", get_quest_icon_url(9, item_id=item_id)
             elif r_type_id == 4:
-                category, p_name = "Candy", resolve_pokemon_name(item_id, 0)
+                category, p_name = "Candy", resolve_pokemon_name(item_id, 0, lang)
                 r_name, filter_key, icon_url = f"{p_name} Candy{amt_display}", f"candy_{item_id}", get_quest_icon_url(4, item_id=item_id)
             elif r_type_id == 1:
                 category, r_name, filter_key, icon_url = "XP", f"XP{amt_display}", "xp", get_quest_icon_url(1)
             else:
-                category = REWARD_TYPES.get(r_type_id, "Unknown")
+                category = reward_types_map.get(r_type_id, "Unknown")
                 r_name, filter_key, icon_url = f"{category}{amt_display}", f"other_{r_type_id}", get_quest_icon_url(r_type_id)
 
             if isinstance(time_data, dict):
@@ -612,7 +631,7 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
                 for p_id_str, count in details["reward_poke"].items():
                     p_id = safe_int(p_id_str)
                     if p_id == 0: continue
-                    p_name = resolve_pokemon_name(p_id, 0)
+                    p_name = resolve_pokemon_name(p_id, 0, lang)
                     records.append({
                         "type": translate("Pokemon Encounter", lang), "name": p_name, "count": count,
                         "key": f"poke_{p_id}_0", "category": "Pokemon", "time_bucket": "Total",
