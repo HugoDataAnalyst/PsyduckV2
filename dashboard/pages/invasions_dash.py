@@ -22,13 +22,8 @@ ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/mai
 ASSETS_PATH = Path(__file__).parent / ".." / "assets"
 INVASION_ICONS_PATH = ASSETS_PATH / "invasion_icons"
 
-INCIDENT_DISPLAY_TYPES = {
-    0: "None", 1: "Grunt", 2: "Leader", 3: "Giovanni", 4: "Grunt B",
-    5: "Event NPC", 6: "Route NPC", 7: "Generic", 8: "Stop Encounter",
-    9: "Contest", 10: "Natural Art A", 11: "Natural Art B"
-}
-
 _GRUNT_MAP = None
+_INCIDENT_DISPLAY_TYPES = None
 
 def _get_grunt_map():
     """Loads grunts.json: ID -> Name (e.g. 52 -> Balloon Grunt Male)"""
@@ -44,6 +39,22 @@ def _get_grunt_map():
             logger.error(f"Error loading grunts.json: {e}")
             _GRUNT_MAP = {}
     return _GRUNT_MAP
+
+def _get_incident_display_types():
+    """Loads incident_display_types.json: ID -> Name"""
+    global _INCIDENT_DISPLAY_TYPES
+    if _INCIDENT_DISPLAY_TYPES is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'pogo_mapping', 'invasions', 'incident_display_types.json')
+            if not os.path.exists(path): path = os.path.join(os.getcwd(), 'assets', 'pogo_mapping', 'invasions', 'incident_display_types.json')
+            with open(path, 'r') as f:
+                data = json.load(f)
+                _INCIDENT_DISPLAY_TYPES = {int(k): v for k, v in data.items()}
+        except Exception as e:
+            logger.error(f"Error loading incident_display_types.json: {e}")
+            _INCIDENT_DISPLAY_TYPES = {}
+    return _INCIDENT_DISPLAY_TYPES
+
 
 # Cached wrapper for invasion icons with local fallback - we can uncomment the lru_cache later if we want to use it like this
 #@lru_cache(maxsize=None)
@@ -62,6 +73,7 @@ def parse_invasion_key(key_str):
     Returns (display_type_id, character_id, label)
     """
     grunt_map = _get_grunt_map()
+    incident_display_types = _get_incident_display_types()
     parts = str(key_str).split(':')
 
     if len(parts) >= 2:
@@ -76,7 +88,7 @@ def parse_invasion_key(key_str):
                 label = specific_name
             else:
                 # Fallback to Display Type
-                disp_name = INCIDENT_DISPLAY_TYPES.get(disp_id, f"Type {disp_id}")
+                disp_name = incident_display_types.get(disp_id, f"Type {disp_id}")
                 label = f"{disp_name} (ID: {char_id})"
 
             return disp_id, char_id, label
