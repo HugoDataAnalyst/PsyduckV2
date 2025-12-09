@@ -17,6 +17,7 @@ REMOTE_ROOT_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/m
 
 ICON_CACHE_DIR = Path(__file__).parent / "assets" / "pokemon_icons"
 REWARD_CACHE_DIR = Path(__file__).parent / "assets" / "reward_icons"
+GLOBAL_AREAS_FILE = Path(__file__).parent / "data" / "global_areas.json"
 
 # Ensure cache directories exist
 ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,6 +57,122 @@ def get_cached_geofences():
     except Exception as e:
         logger.info(f"Error fetching geofences: {e}")
     return []
+
+def update_global_areas_cache():
+    """
+    Fetches all geofences from API and caches their id + name to global_areas.json.
+    Returns the list of areas or None on failure.
+    """
+    try:
+        geofences = get_cached_geofences()
+        if not geofences:
+            logger.warning("No geofences returned from API")
+            return None
+
+        # Extract id and name from each geofence
+        areas = [{"id": gf.get("id"), "name": gf.get("name")} for gf in geofences if gf.get("name")]
+
+        if not areas:
+            logger.warning("No valid areas found in geofences")
+            return None
+
+        # Ensure data directory exists
+        GLOBAL_AREAS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write one id+name per line for readability
+        with open(GLOBAL_AREAS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(areas, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"[Task] Global areas cache updated with {len(areas)} areas")
+        return areas
+
+    except Exception as e:
+        logger.error(f"Error updating global areas cache: {e}")
+        return None
+
+
+def load_global_areas():
+    """
+    Loads the cached global areas from global_areas.json.
+    Returns list of area dicts with 'id' and 'name' keys, or empty list if not found.
+    """
+    try:
+        if GLOBAL_AREAS_FILE.exists():
+            with open(GLOBAL_AREAS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Handle both formats:
+                # - Dict format from get_global_areas_task: {"areas": [...], "count": ..., "last_updated": ...}
+                # - List format (direct areas list)
+                if isinstance(data, dict) and "areas" in data:
+                    return data["areas"]
+                elif isinstance(data, list):
+                    return data
+    except Exception as e:
+        logger.warning(f"Error loading global areas cache: {e}")
+    return []
+
+
+def get_global_areas_task():
+    """
+    Background task wrapper for updating global areas cache.
+    Returns the areas data with timestamp for consistency with other tasks.
+    """
+    areas = update_global_areas_cache()
+    if areas:
+        return {
+            "areas": areas,
+            "count": len(areas),
+            "last_updated": time.time()
+        }
+    return None
+
+
+def _fetch_single_area(endpoint, params, area_name, headers):
+    """
+    Helper to fetch data for a single area.
+    Returns (area_name, data) tuple or (area_name, None) on failure.
+    """
+    try:
+        area_params = params.copy()
+        area_params["area"] = area_name
+        response = requests.get(endpoint, headers=headers, params=area_params, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and "data" in data:
+                return (area_name, data.get("data", {}))
+            return (area_name, data)
+    except Exception as e:
+        logger.debug(f"Error fetching {area_name}: {e}")
+    return (area_name, None)
+
+
+def fetch_all_areas_parallel(endpoint, params, max_workers=10):
+    """
+    Fetches data from all areas in parallel and returns a dict of {area_name: data}.
+    Uses global_areas.json for the list of areas.
+    """
+    areas = load_global_areas()
+    if not areas:
+        logger.warning("No areas found in global_areas.json - falling back to empty result")
+        return {}
+
+    headers = get_api_headers()
+    results = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_fetch_single_area, endpoint, params, area["name"], headers): area["name"]
+            for area in areas
+        }
+
+        for future in as_completed(futures):
+            area_name, data = future.result()
+            if data:
+                results[area_name] = data
+
+    logger.info(f"Fetched data from {len(results)}/{len(areas)} areas")
+    return results
+
 
 def get_pokemon_stats(endpoint_type="counter", params=None):
     """
@@ -534,6 +651,8 @@ def get_global_pokemon_task(endpoint_type="counter", params=None):
     Hybrid Function:
     1. If params=None: Acts as Background Task (fetches global totals -> aggregates -> returns summary).
     2. If params provided: Acts as Generic Fetcher (fetches endpoint -> returns raw data).
+
+    When area is "global", fetches data from all areas in parallel and aggregates.
     """
 
     # Setup Defaults for Background Task if needed
@@ -567,28 +686,38 @@ def get_global_pokemon_task(endpoint_type="counter", params=None):
         # Default standard timeseries
         endpoint = "/api/redis/get_pokemon_timeseries"
 
-    # Execute Request
     try:
-        url = f"{API_BASE_URL}{endpoint}"
-        response = requests.get(url, headers=get_api_headers(), params=params)
+        # If area is "global", fetch from all areas in parallel
+        if params.get("area") == "global":
+            url = f"{API_BASE_URL}{endpoint}"
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+        else:
+            # Single area request
+            url = f"{API_BASE_URL}{endpoint}"
+            response = requests.get(url, headers=get_api_headers(), params=params)
 
-        if response.status_code != 200:
-            logger.info(f"Error fetching global pokemon: HTTP {response.status_code}")
-            return None
+            if response.status_code != 200:
+                logger.info(f"Error fetching pokemon: HTTP {response.status_code}")
+                return None
 
-        raw_data = response.json()
-        if isinstance(raw_data, dict) and "data" in raw_data:
-            raw_data = raw_data.get("data", {})
+            raw_data = response.json()
+            if isinstance(raw_data, dict) and "data" in raw_data:
+                raw_data = raw_data.get("data", {})
 
         if not raw_data:
             return None
 
-        # Perform specific aggregation
+        # Perform specific aggregation for counter endpoint
         if endpoint_type == "counter":
             aggregated = defaultdict(int)
             for area_name, content in raw_data.items():
-                if not isinstance(content, dict): continue
-                stats = content.get('data', {})
+                if not isinstance(content, dict):
+                    # Direct key-value from single area
+                    if isinstance(content, (int, float)):
+                        aggregated[area_name] += content
+                    continue
+                # Handle nested data structure
+                stats = content.get('data', content)
                 if not stats: continue
                 for key, value in stats.items():
                     if isinstance(value, (int, float)):
@@ -609,6 +738,7 @@ def get_global_pokemon_task(endpoint_type="counter", params=None):
 def get_global_raids_task(endpoint_type="counter", params=None):
     """
     Hybrid Function: Background Task (defaults) OR Generic Fetcher.
+    When area is "global", fetches data from all areas in parallel and aggregates.
     """
 
     if params is None:
@@ -638,16 +768,22 @@ def get_global_raids_task(endpoint_type="counter", params=None):
         endpoint = "/api/redis/get_raid_timeseries"
 
     try:
-        url = f"{API_BASE_URL}{endpoint}"
-        response = requests.get(url, headers=get_api_headers(), params=params)
+        # If area is "global", fetch from all areas in parallel
+        if params.get("area") == "global":
+            url = f"{API_BASE_URL}{endpoint}"
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+        else:
+            # Single area request
+            url = f"{API_BASE_URL}{endpoint}"
+            response = requests.get(url, headers=get_api_headers(), params=params)
 
-        if response.status_code != 200:
-            logger.info(f"Error fetching global raids: HTTP {response.status_code}")
-            return None
+            if response.status_code != 200:
+                logger.info(f"Error fetching raids: HTTP {response.status_code}")
+                return None
 
-        raw_data = response.json()
-        if isinstance(raw_data, dict) and "data" in raw_data:
-            raw_data = raw_data.get("data", {})
+            raw_data = response.json()
+            if isinstance(raw_data, dict) and "data" in raw_data:
+                raw_data = raw_data.get("data", {})
 
         if not raw_data:
             return None
@@ -658,8 +794,10 @@ def get_global_raids_task(endpoint_type="counter", params=None):
             raid_levels_agg = defaultdict(int)
 
             for area_name, content in raw_data.items():
-                if not isinstance(content, dict): continue
-                stats = content.get('data', {})
+                if not isinstance(content, dict):
+                    continue
+                # Handle nested data structure
+                stats = content.get('data', content)
                 if not stats: continue
 
                 total_raids += stats.get('total', 0)
@@ -686,6 +824,7 @@ def get_global_raids_task(endpoint_type="counter", params=None):
 def get_global_invasions_task(endpoint_type="counter", params=None):
     """
     Hybrid Function: Background Task (defaults) OR Generic Fetcher.
+    When area is "global", fetches data from all areas in parallel and aggregates.
     """
 
     if params is None:
@@ -716,16 +855,22 @@ def get_global_invasions_task(endpoint_type="counter", params=None):
         endpoint = "/api/redis/get_invasion_timeseries"
 
     try:
-        url = f"{API_BASE_URL}{endpoint}"
-        response = requests.get(url, headers=get_api_headers(), params=params)
+        # If area is "global", fetch from all areas in parallel
+        if params.get("area") == "global":
+            url = f"{API_BASE_URL}{endpoint}"
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+        else:
+            # Single area request
+            url = f"{API_BASE_URL}{endpoint}"
+            response = requests.get(url, headers=get_api_headers(), params=params)
 
-        if response.status_code != 200:
-            logger.info(f"Error fetching global invasions: HTTP {response.status_code}")
-            return None
+            if response.status_code != 200:
+                logger.info(f"Error fetching invasions: HTTP {response.status_code}")
+                return None
 
-        raw_data = response.json()
-        if isinstance(raw_data, dict) and "data" in raw_data:
-            raw_data = raw_data.get("data", {})
+            raw_data = response.json()
+            if isinstance(raw_data, dict) and "data" in raw_data:
+                raw_data = raw_data.get("data", {})
 
         if not raw_data:
             return None
@@ -737,9 +882,12 @@ def get_global_invasions_task(endpoint_type="counter", params=None):
             unconfirmed_count = 0
 
             for area_name, content in raw_data.items():
-                if not isinstance(content, dict): continue
-                stats = content.get('data', {})
-                if not stats: continue
+                if not isinstance(content, dict):
+                    continue
+                # Handle nested data structure - fetch_all_areas_parallel already extracts "data"
+                stats = content.get('data', content)
+                if not stats:
+                    continue
 
                 total_invasions += stats.get('total', 0)
                 confirmed_data = stats.get('confirmed', {})
@@ -807,6 +955,7 @@ def get_global_pokestops_task(params=None):
 def get_global_quests_task(endpoint_type="counter", params=None):
     """
     Hybrid Function: Background Task (defaults) OR Generic Fetcher.
+    When area is "global", fetches data from all areas in parallel and aggregates.
     """
 
     if params is None:
@@ -839,16 +988,22 @@ def get_global_quests_task(endpoint_type="counter", params=None):
         endpoint = "/api/redis/get_quest_timeseries"
 
     try:
-        url = f"{API_BASE_URL}{endpoint}"
-        response = requests.get(url, headers=get_api_headers(), params=params)
+        # If area is "global", fetch from all areas in parallel
+        if params.get("area") == "global":
+            url = f"{API_BASE_URL}{endpoint}"
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+        else:
+            # Single area request
+            url = f"{API_BASE_URL}{endpoint}"
+            response = requests.get(url, headers=get_api_headers(), params=params)
 
-        if response.status_code != 200:
-            logger.info(f"Error fetching global quests: HTTP {response.status_code}")
-            return None
+            if response.status_code != 200:
+                logger.info(f"Error fetching quests: HTTP {response.status_code}")
+                return None
 
-        raw_data = response.json()
-        if isinstance(raw_data, dict) and "data" in raw_data:
-            raw_data = raw_data.get("data", {})
+            raw_data = response.json()
+            if isinstance(raw_data, dict) and "data" in raw_data:
+                raw_data = raw_data.get("data", {})
 
         if not raw_data:
             return None
@@ -860,9 +1015,12 @@ def get_global_quests_task(endpoint_type="counter", params=None):
 
             # 1. Calculate Quest Stats from API response
             for area_name, content in raw_data.items():
-                if not isinstance(content, dict): continue
-                stats = content.get('data', {})
-                if not stats: continue
+                if not isinstance(content, dict):
+                    continue
+                # Handle nested data structure - fetch_all_areas_parallel already extracts "data"
+                stats = content.get('data', content)
+                if not stats:
+                    continue
 
                 # Note: We skip 'total' here as we want the pokestop count from the file
                 quest_modes = stats.get('quest_mode', {})

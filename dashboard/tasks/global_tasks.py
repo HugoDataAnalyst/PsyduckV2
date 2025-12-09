@@ -13,12 +13,14 @@ from dashboard.utils import (
     get_global_invasions_task,
     get_global_quests_task,
     get_global_pokestops_task,
+    get_global_areas_task,
 )
 
 # Relative path to data/ folder
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 
 # Map
+"""
 TASK_CONFIG = {
     "pokestops": {
         "func": get_global_pokestops_task,
@@ -109,66 +111,217 @@ TASK_CONFIG = {
         }
     }
 }
+"""
 
-def update_global_stats_concurrently():
+# Default intervals (in seconds)
+DEFAULT_INTERVAL = 3600        # 1 hour for most tasks
+DAILY_INTERVAL = 86400         # 24 hours for alltime/historical tasks
+
+TASK_CONFIG = {
+    # --- Fast refresh tasks (every hour) ---
+    "areas": {
+        "func": get_global_areas_task,
+        "file": os.path.join(DATA_DIR, 'global_areas.json'),
+        "task_interval": DEFAULT_INTERVAL
+    },
+    "pokestops": {
+        "func": get_global_pokestops_task,
+        "file": os.path.join(DATA_DIR, 'global_pokestops.json'),
+        "task_interval": DEFAULT_INTERVAL
+    },
+    "pokemons_daily": {
+        "func": get_global_pokemon_task,
+        "file": os.path.join(DATA_DIR, 'global_pokes.json'),
+        "task_interval": DEFAULT_INTERVAL
+    },
+    "raids_daily": {
+        "func": get_global_raids_task,
+        "file": os.path.join(DATA_DIR, 'global_raids.json'),
+        "task_interval": DEFAULT_INTERVAL
+    },
+    "invasions_daily": {
+        "func": get_global_invasions_task,
+        "file": os.path.join(DATA_DIR, 'global_invasions.json'),
+        "task_interval": DEFAULT_INTERVAL
+    },
+    "quests_daily": {
+        "func": get_global_quests_task,
+        "file": os.path.join(DATA_DIR, 'global_quests.json'),
+        "task_interval": DEFAULT_INTERVAL
+    },
+    "pokemon_alltime": {
+        "func": get_global_pokemon_task,
+        "file": os.path.join(DATA_DIR, 'global_pokes_alltime.json'),
+        "params": {
+            "counter_type": "totals",
+            "area": "global",
+            "start_time": "26280 hours", # This will now be honored
+            "end_time": "now",
+            "mode": "sum",
+            "interval": "hourly",
+            "metric": "all",
+            "pokemon_id": "all",
+            "form_id": "all",
+            "response_format": "json"
+        },
+        "task_interval": DAILY_INTERVAL
+    },
+}
+
+class BackgroundRunner:
     """
-    Executes all global stats tasks concurrently using a ThreadPoolExecutor.
-    If 'params' are provided in TASK_CONFIG, they are passed to the function.
+    Manages background tasks with per-task intervals and graceful termination.
     """
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
+    def __init__(self, check_interval=60):
+        """
+        Args:
+            check_interval: How often (seconds) to check if any tasks are due to run.
+        """
+        self.check_interval = check_interval
+        self._stop_event = threading.Event()
+        self._thread = None
+        self._last_run_times = {}  # {task_name: timestamp}
 
-    logger.info("[Task] Starting Concurrent Global Stats Update...")
-    start_time = time.time()
+    def _get_due_tasks(self, force_all=False):
+        """
+        Returns list of task names that are due to run based on their individual intervals.
 
-    with ThreadPoolExecutor(max_workers=len(TASK_CONFIG)) as executor:
-        future_to_name = {}
+        Args:
+            force_all: If True, returns all tasks (used for initial run)
+        """
+        if force_all:
+            return list(TASK_CONFIG.keys())
 
-        # Iterate over config and submit tasks conditionally
+        current_time = time.time()
+        due_tasks = []
+
         for name, config in TASK_CONFIG.items():
-            func = config["func"]
-            task_params = config.get("params") # Check if params exist
+            task_interval = config.get("task_interval", DEFAULT_INTERVAL)
+            last_run = self._last_run_times.get(name, 0)
 
-            if task_params:
-                # Pass specific params (e.g., for pokemon_alltime)
-                future = executor.submit(func, params=task_params)
-            else:
-                # Use defaults (for daily tasks)
-                future = executor.submit(func)
+            if (current_time - last_run) >= task_interval:
+                due_tasks.append(name)
 
-            future_to_name[future] = name
+        return due_tasks
 
-        for future in as_completed(future_to_name):
-            task_name = future_to_name[future]
-            config = TASK_CONFIG[task_name]
+    def update_tasks_concurrently(self, task_names):
+        """
+        Executes specified tasks concurrently using a ThreadPoolExecutor.
 
-            try:
-                final_data = future.result()
-                if final_data:
-                    with open(config["file"], 'w', encoding='utf-8') as f:
-                        json.dump(final_data, f, indent=2, ensure_ascii=False)
+        Args:
+            task_names: List of task names to execute
+        """
+        if not task_names:
+            return
 
-                    # Success Logging
-                    count_val = final_data.get('total', 0)
-                    # Handle quests slightly differently as it uses 'total_stops' sometimes
-                    if 'total_stops' in final_data:
-                         count_val = final_data.get('total_stops', 0)
+        if not os.path.exists(DATA_DIR):
+            os.makedirs(DATA_DIR)
 
-                    logger.info(f"[Task] Global {task_name} updated. Count: {count_val}")
+        logger.info(f"[Task] Running {len(task_names)} task(s): {', '.join(task_names)}")
+        start_time = time.time()
+
+        with ThreadPoolExecutor(max_workers=len(task_names)) as executor:
+            future_to_name = {}
+
+            for name in task_names:
+                if self._stop_event.is_set():
+                    logger.info("[Task] Stop signal received. Aborting remaining tasks.")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
+
+                config = TASK_CONFIG[name]
+                func = config["func"]
+                task_params = config.get("params")
+
+                if task_params:
+                    future = executor.submit(func, params=task_params)
                 else:
-                    logger.info(f"[Task] Global {task_name} received no data.")
+                    future = executor.submit(func)
 
-            except Exception as e:
-                logger.error(f"[Task] Error updating global {task_name}: {e}")
+                future_to_name[future] = name
 
-    logger.info(f"[Task] Concurrent update finished in {time.time() - start_time:.2f}s.")
+            for future in as_completed(future_to_name):
+                if self._stop_event.is_set():
+                    break
 
-def run_schedule():
-    while True:
-        update_global_stats_concurrently()
-        time.sleep(300)
+                task_name = future_to_name[future]
+                config = TASK_CONFIG[task_name]
+
+                try:
+                    final_data = future.result()
+                    if final_data:
+                        with open(config["file"], 'w', encoding='utf-8') as f:
+                            json.dump(final_data, f, indent=2, ensure_ascii=False)
+
+                        # Success Logging
+                        count_val = final_data.get('total', 0)
+                        if 'total_pokestops' in final_data:
+                            count_val = final_data.get('total_pokestops', 0)
+                        elif 'count' in final_data:
+                            count_val = final_data.get('count', 0)
+
+                        task_interval = config.get("task_interval", DEFAULT_INTERVAL)
+                        logger.info(f"[Task] {task_name} updated. Count: {count_val} (next run in {task_interval}s)")
+
+                        # Update last run time on success
+                        self._last_run_times[task_name] = time.time()
+                    else:
+                        logger.info(f"[Task] {task_name} received no data.")
+                        # Still update last run time to avoid hammering on failures
+                        self._last_run_times[task_name] = time.time()
+
+                except Exception as e:
+                    logger.error(f"[Task] Error updating {task_name}: {e}")
+                    # Update last run time even on error to avoid infinite retry loops
+                    self._last_run_times[task_name] = time.time()
+
+        logger.info(f"[Task] Batch finished in {time.time() - start_time:.2f}s.")
+
+    def _run_schedule(self):
+        """
+        Main loop that checks for due tasks at regular intervals.
+        """
+        # Run all tasks immediately on start
+        logger.info("[Task] Initial run: executing all tasks...")
+        self.update_tasks_concurrently(self._get_due_tasks(force_all=True))
+
+        while not self._stop_event.is_set():
+            # Wait for check_interval OR until stop event is set
+            if self._stop_event.wait(self.check_interval):
+                break
+
+            # Check which tasks are due and run them
+            due_tasks = self._get_due_tasks()
+            if due_tasks:
+                self.update_tasks_concurrently(due_tasks)
+
+        logger.info("[System] BackgroundRunner loop has exited cleanly.")
+
+    def start(self):
+        """Start the background thread."""
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("[System] Background tasks are already running.")
+            return
+
+        self._stop_event.clear()
+        self._last_run_times = {}  # Reset on start
+        self._thread = threading.Thread(target=self._run_schedule, daemon=True)
+        self._thread.start()
+        logger.info("[System] Background task scheduler started.")
+
+    def stop(self):
+        """Signal the background thread to stop and wait for it to finish."""
+        logger.info("[System] Stopping background tasks...")
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+            logger.info("[System] Background tasks stopped.")
+
+# Create a singleton instance - checks every 60 seconds for due tasks
+_runner = BackgroundRunner(check_interval=60)
 
 def start_background_tasks():
-    thread = threading.Thread(target=run_schedule, daemon=True)
-    thread.start()
-    logger.info("[System] All Global Stats background tasks started.")
+    _runner.start()
+
+def stop_background_tasks():
+    _runner.stop()
