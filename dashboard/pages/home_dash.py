@@ -66,7 +66,8 @@ ICONS = {
     "pvp_great": f"{icon_base_url}/misc/1500.webp",
     "pvp_ultra": f"{icon_base_url}/misc/2500.webp",
     "shiny": f"{icon_base_url}/misc/sparkles.webp",
-    "ar_quest": f"{icon_base_url}/misc/ar.webp",
+    "ar_quest": f"{icon_base_url}/pokestop/0_ar.webp",
+    "normal_quest": f"{icon_base_url}/pokestop/0.webp",
     "pokemon": f"{icon_base_url}/misc/pokemon.webp",
     "raid": f"{icon_base_url}/misc/raid2.webp",
     "invasion": f"{icon_base_url}/misc/invasion.webp",
@@ -365,7 +366,7 @@ def update_quests(n, toggle_val, lang):
             content = [
                 get_total_header(data.get('total_pokestops', 0), translate("Total PokéStops", lang)),
                 create_mini_stat(quests.get('ar', 0), translate("AR Quests", lang), "#17a2b8", icon_url=ICONS['ar_quest']),
-                create_mini_stat(quests.get('normal', 0), translate("Normal", lang), "#e0e0e0", icon_class="bi bi-vinyl"),
+                create_mini_stat(quests.get('normal', 0), translate("Normal", lang), "#e0e0e0", icon_url=ICONS['normal_quest']),
             ]
         except Exception as e:
             print(f"Error quests: {e}")
