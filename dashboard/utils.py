@@ -13,10 +13,14 @@ from utils.logger import logger
 
 API_BASE_URL = AppConfig.api_base_url
 ICON_BASE_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main/pokemon"
-ICON_CACHE_DIR = Path(__file__).parent / "assets" / "pokemon_icons"
+REMOTE_ROOT_URL = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
 
-# Ensure cache directory exists
+ICON_CACHE_DIR = Path(__file__).parent / "assets" / "pokemon_icons"
+REWARD_CACHE_DIR = Path(__file__).parent / "assets" / "reward_icons"
+
+# Ensure cache directories exist
 ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+REWARD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _POKEDEX_FORMS = None
 def _load_pokedex_forms():
@@ -24,7 +28,7 @@ def _load_pokedex_forms():
     global _POKEDEX_FORMS
     if _POKEDEX_FORMS is None:
         try:
-            pokedex_path = os.path.join(os.path.dirname(__file__), 'assets', 'pokedex.json')
+            pokedex_path = os.path.join(os.path.dirname(__file__), 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
             with open(pokedex_path, 'r') as f:
                 forms_by_name = json.load(f)
                 # Create reverse mapping: form_id -> form_name
@@ -185,6 +189,23 @@ def get_quests_stats(endpoint_type="counter", params=None):
         logger.info(f"Error fetching quests stats: {e}")
     return {}
 
+def _download_file(remote_url, local_path):
+    """Generic file downloader with validation."""
+    if local_path.exists():
+        return True
+
+    # Ensure subdirectory exists
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        response = requests.get(remote_url, timeout=10)
+        if response.status_code == 200:
+            local_path.write_bytes(response.content)
+            return True
+    except Exception:
+        pass
+    return False
+
 def _download_pokemon_icon(pid, form=0):
     """
     Downloads a single Pokemon icon to local cache.
@@ -268,7 +289,7 @@ def _get_pokemon_list_from_uicons():
 
     # Step 1: Get forms from UICONS_index.json
     try:
-        uicons_path = os.path.join(os.path.dirname(__file__), 'assets', 'UICONS_index.json')
+        uicons_path = os.path.join(os.path.dirname(__file__), 'assets', 'pogo_mapping', 'UICONS_index.json')
         with open(uicons_path, 'r') as f:
             uicons_data = json.load(f)
 
@@ -297,8 +318,8 @@ def _get_pokemon_list_from_uicons():
 
     # Step 2: Add forms from pokedex.json that might not be in UICONS
     try:
-        pokedex_path = os.path.join(os.path.dirname(__file__), 'assets', 'pokedex.json')
-        species_path = os.path.join(os.path.dirname(__file__), 'assets', 'pokedex_id.json')
+        pokedex_path = os.path.join(os.path.dirname(__file__), 'assets', 'pogo_mapping', 'pokemons', 'pokedex.json')
+        species_path = os.path.join(os.path.dirname(__file__), 'assets', 'pogo_mapping', 'pokemons', 'pokedex_id.json')
 
         # Load species map (name -> pid)
         with open(species_path, 'r') as f:
@@ -832,7 +853,7 @@ def get_global_quests_task(endpoint_type="counter", params=None):
         if not raw_data:
             return None
 
-# Background Task Aggregation
+        # Background Task Aggregation
         if endpoint_type == "counter":
             total_ar_quests = 0
             total_normal_quests = 0
@@ -877,3 +898,50 @@ def get_global_quests_task(endpoint_type="counter", params=None):
     except Exception as e:
         logger.error(f"Error in get_global_quests_task: {e}")
         return None
+
+# Pre-cache Reward Icons
+def precache_reward_icons(max_workers=20):
+    """
+    Parses UICONS_index.json for reward/misc categories and downloads them.
+    Preserves directory structure relative to 'assets/reward_icons'.
+    """
+    logger.info("📦 Starting Reward/Misc Icon Pre-caching...")
+
+    uicons_path = os.path.join(os.path.dirname(__file__), 'assets', 'pogo_mapping', 'UICONS_index.json')
+    tasks = []
+
+    # Categories to cache (matching Quest/Invasion usage)
+    target_categories = ['reward', 'misc', 'pokestop', 'station', 'raid', 'gym', 'team', 'weather', 'invasion']
+
+    try:
+        if os.path.exists(uicons_path):
+            with open(uicons_path, 'r') as f:
+                data = json.load(f)
+
+            for cat in target_categories:
+                if cat in data:
+                    for filename in data[cat]:
+                        # filename e.g., "item/1.webp" inside category "reward"
+                        # Remote URL: .../main/reward/item/1.webp
+                        # Local Path: assets/reward_icons/reward/item/1.webp
+                        relative_path = f"{cat}/{filename}"
+                        remote_url = f"{REMOTE_ROOT_URL}/{relative_path}"
+                        local_path = REWARD_CACHE_DIR / relative_path
+
+                        tasks.append((remote_url, local_path))
+        else:
+            logger.warning("UICONS_index.json not found. Skipping reward precache.")
+            return 0
+
+        successful = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_download_file, url, path) for url, path in tasks]
+            for f in as_completed(futures):
+                if f.result(): successful += 1
+
+        logger.info(f"Reward Icon Cache: {successful}/{len(tasks)} verified/downloaded.")
+        return successful
+
+    except Exception as e:
+        logger.error(f"Error in precache_reward_icons: {e}")
+        return 0
