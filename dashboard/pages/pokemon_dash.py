@@ -1685,7 +1685,11 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
         header_cells.append(html.Th(html.Span([translate("Pokémon", lang), html.Span(" ▲" if col == 'key' and ascending else (" ▼" if col == 'key' else ""), style={"color": "#aaa", "marginLeft": "5px"})], id={"type": "sort-header", "index": "key"}, style={"cursor": "pointer"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}))
 
         for c in [x for x in pivot.columns if x not in ['pid', 'form', 'key']]:
-             label = html.Img(src=metric_icons[c.lower()], style={"width":"24px", "height":"24px", "verticalAlign":"middle"}) if c.lower() in metric_icons else c
+             if c.lower() in metric_icons:
+                 label = html.Img(src=metric_icons[c.lower()], style={"width":"24px", "height":"24px", "verticalAlign":"middle"})
+             else:
+                 label = translate(c.title(), lang)
+
              arrow = " ▲" if col == c and ascending else (" ▼" if col == c else "")
              header_cells.append(html.Th(html.Span([label, html.Span(arrow, style={"color": "#aaa"})], id={"type": "sort-header", "index": c}, style={"cursor": "pointer", "display":"inline-flex", "alignItems":"center", "justifyContent": "center"}), style={"backgroundColor": "#1a1a1a", "position": "sticky", "top": "0", "zIndex": "10", "textAlign": "center", "verticalAlign": "middle"}))
 
