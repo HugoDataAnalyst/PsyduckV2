@@ -6,6 +6,14 @@ from typing import TypedDict, Optional
 from loguru import logger
 
 
+def get_worker_id() -> str:
+    """
+    Get a unique worker identifier based on PID.
+    Useful for multi-worker uvicorn deployments.
+    """
+    return f"W-{os.getpid()}"
+
+
 class LoggingOptions(TypedDict, total=False):
     # formatting toggles
     show_file: bool
@@ -48,15 +56,21 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     compression   = options.get("compression", "gz")
 
     # format
+    # When show_process is True, show "W-<PID>" format for easy worker identification
+    # in multi-worker uvicorn deployments
     log_fmt = (
         "<n><d><level>{time:YYYY-MM-DD HH:mm:ss.SSS} | "
         f"{'{file:>15.15}:' if show_file else ''}"
         f"{'{function:>15.15}' if show_function else ''}"
         f"{':{line:<4} | ' if (show_file or show_function) else ''}"
-        f"{'{process.name:>12.12} | ' if show_process else ''}"
+        f"{'{extra[worker_id]:>8.8} | ' if show_process else ''}"
         f"{'{thread.name:<11.11} | ' if show_thread else ''}"
         "{level:1.1} | </level></d></n><level>{message}</level>"
     )
+
+    # Configure logger with worker_id in extra for multi-worker identification
+    worker_id = f"W-{os.getpid()}"
+    logger.configure(extra={"worker_id": worker_id})
 
     # Remove defaults to avoid duplicates if setup called twice
     logger.remove()
@@ -165,4 +179,4 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     )
 
 
-__all__ = ["logger", "setup_logging"]
+__all__ = ["logger", "setup_logging", "get_worker_id"]
