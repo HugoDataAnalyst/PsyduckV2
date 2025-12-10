@@ -172,6 +172,9 @@ api_header_secret = get_env_var("API_HEADER_SECRET")
 api_secret_key = get_env_var("API_SECRET_KEY")
 api_base_url = get_env_var("API_BASE_URL")
 
+# Uvicorn Workers
+uvicorn_workers = get_env_int("UVICORN_WORKERS", 1)
+
 # DASHBOARD
 dashboard_ip = get_env_var("DASHBOARD_IP", "127.0.0.1")
 dashboard_port = get_env_int("DASHBOARD_PORT", 8050)
