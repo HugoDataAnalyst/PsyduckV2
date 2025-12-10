@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
+from utils.global_state_manager import GlobalStateManager
 from webhook.filter_data import WebhookFilter
 from webhook.parser_data import (
     process_pokemon_data,
@@ -31,8 +32,14 @@ async def process_single_event(event: dict):
         logger.warning("❌ Invalid webhook format: Missing 'type'.")
         return {"status": "error", "message": "Invalid webhook format"}
 
-    # Initialize WebhookFilter with the global geofences
-    webhook_filter = WebhookFilter(allowed_types={data_type}, geofences=global_state.geofences)
+    # Get geofences from GlobalStateManager
+    # This ensures all workers have up-to-date geofences even after leader refreshes
+    geofences = await GlobalStateManager.get_geofences()
+    if geofences is None:
+        # Fallback to legacy global_state if GlobalStateManager not initialized
+        geofences = global_state.geofences
+
+    webhook_filter = WebhookFilter(allowed_types={data_type}, geofences=geofences)
     filtered_data = await webhook_filter.filter_webhook_data(event)
 
     if not filtered_data:
