@@ -15,6 +15,18 @@ from timezonefinder import TimezoneFinder
 from shapely.geometry import Polygon, shape
 import pytz
 
+# Import for multi-worker state sharing
+_global_state_manager = None
+
+def _get_global_state_manager():
+    #imported lazily to avoid circular imports
+    """Lazy import to avoid circular imports."""
+    global _global_state_manager
+    if _global_state_manager is None:
+        from utils.global_state_manager import GlobalStateManager
+        _global_state_manager = GlobalStateManager
+    return _global_state_manager
+
 @dataclass
 class _AreaObj:
     id: int
@@ -259,6 +271,10 @@ class KojiGeofences:
         Continuously refresh Koji Geofences every `self.refresh_interval` seconds.
         Writes only when changes occur (handled by cache_koji_geofences).
         Always syncs in-memory global_state after caching.
+
+        Multi-worker support:
+        - Updates GlobalStateManager so all workers get fresh data
+        - Invalidates local cache to force workers to fetch from Redis
         """
         while True:
             try:
@@ -266,8 +282,19 @@ class KojiGeofences:
                 if ok:
                     current = await self.get_cached_geofences()
                     if current is not None:
+                        # Update legacy global_state for backward compatibility
                         global_state.geofences = current
                         logger.info(f"✅ Updated Koji geofences in memory: {len(current)} entries")
+
+                        # Update GlobalStateManager for multi-worker support
+                        # This invalidates local caches on all workers so they fetch fresh data
+                        try:
+                            gsm = _get_global_state_manager()
+                            # Invalidate local cache so other workers fetch fresh data on next request
+                            gsm.invalidate_local_cache(gsm.GEOFENCES_KEY)
+                            logger.debug("Invalidated GlobalStateManager geofences cache")
+                        except Exception as gsm_err:
+                            logger.warning(f"Could not update GlobalStateManager: {gsm_err}")
             except Exception as e:
                 logger.exception(f"Geofence refresh cycle failed: {e}")
 
