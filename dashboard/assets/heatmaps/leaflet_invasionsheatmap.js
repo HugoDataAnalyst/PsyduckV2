@@ -67,7 +67,7 @@
 
         gruntNameCache = {}; // Mark as loading
 
-        fetch('/assets/grunts.json')
+        fetch('/assets/pogo_mapping/invasions/grunts.json')
             .then(function(response) {
                 if (!response.ok) throw new Error('Failed to load grunts.json');
                 return response.json();
