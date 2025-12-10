@@ -8,6 +8,17 @@ from server_fastapi import global_state
 from utils.koji_geofences import KojiGeofences
 from my_redis.connect_redis import RedisManager
 
+# Import for multi-worker state sharing (imported lazily to avoid circular imports)
+_global_state_manager = None
+
+def _get_global_state_manager():
+    """Lazy import to avoid circular imports."""
+    global _global_state_manager
+    if _global_state_manager is None:
+        from utils.global_state_manager import GlobalStateManager
+        _global_state_manager = GlobalStateManager
+    return _global_state_manager
+
 async def get_golbat_mysql_pool():
     """
     Create and return an aiomysql connection pool for the Golbat DB.
@@ -111,8 +122,17 @@ class GolbatSQLPokestops:
             else:
                 logger.error("❌ Redis not connected; could not cache pokestop counts.")
 
-            # Optionally update global_state
+            # Update legacy global_state for backward compatibility
             global_state.cached_pokestops = final_data
+
+            # Update GlobalStateManager for multi-worker support
+            # Invalidate local cache so other workers fetch fresh data on next request
+            try:
+                gsm = _get_global_state_manager()
+                gsm.invalidate_local_cache(gsm.POKESTOPS_KEY)
+                logger.debug("Invalidated GlobalStateManager pokestops cache")
+            except Exception as gsm_err:
+                logger.warning(f"Could not update GlobalStateManager: {gsm_err}")
 
             return final_data
 
