@@ -5,6 +5,7 @@ from fastapi import FastAPI, Response, openapi
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from server_fastapi.routes import data_api, webhook_router
+from server_fastapi.routes.webhook_router import cleanup_semaphore
 from server_fastapi import global_state
 from my_redis.connect_redis import RedisManager
 from server_fastapi.utils import details, secure_api
@@ -309,6 +310,8 @@ async def lifespan(app: FastAPI):
         # Release leadership
         await leader.release()
 
+    # Clean up semaphore to prevent "leaked semaphore" warnings
+    cleanup_semaphore()
     # Close Redis pools all workers
     await redis_manager.close_redis()
     # Close DB connection all workers
