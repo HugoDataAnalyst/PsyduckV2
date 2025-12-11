@@ -14,7 +14,7 @@ class RedisManager:
     _last_successful_ping = 0
     _connection_attempts = 0
     MAX_RETRY_INTERVAL = 30  # Maximum seconds between retries
-    HEALTH_CHECK_INTERVAL = 60  # Seconds between proactive health checks
+    HEALTH_CHECK_INTERVAL = 15  # Seconds between proactive health checks (reduced for sustained load)
     _reconnect_in_progress = False  # Prevent thundering herd
 
     @classmethod
@@ -181,6 +181,51 @@ class RedisManager:
             finally:
                 # The context manager from client.client() handles the release
                 pass
+
+    async def get_connection_with_retry(self, max_attempts: int = 3, delay: float = 0.5):
+        """
+        Get Redis connection with fast retries for critical operations like webhook processing.
+
+        Unlike check_redis_connection() which uses exponential backoff for background tasks,
+        this method uses short delays suitable for real-time webhook processing where we
+        can't afford to wait long but also don't want to lose data.
+
+        Args:
+            max_attempts: Number of retry attempts (default 3)
+            delay: Delay between attempts in seconds (default 0.5s)
+
+        Returns:
+            Redis client if connected, None if all attempts fail
+        """
+        for attempt in range(1, max_attempts + 1):
+            # Fast path - recently verified connection
+            if self._connection_state == "connected" and \
+               (monotonic() - self._last_successful_ping) < self.HEALTH_CHECK_INTERVAL:
+                return self.redis_client
+
+            # Try to get/verify connection
+            try:
+                if self.redis_client and await self._quick_ping():
+                    self._last_successful_ping = monotonic()
+                    return self.redis_client
+            except Exception:
+                pass
+
+            # Need to reconnect - but don't use full backoff for webhook processing
+            if attempt < max_attempts:
+                # Quick retry without the full reconnection ceremony
+                if not self._reconnect_in_progress:
+                    try:
+                        self._reconnect_in_progress = True
+                        if await self.init_redis():
+                            return self.redis_client
+                    finally:
+                        self._reconnect_in_progress = False
+
+                await asyncio.sleep(delay)
+
+        # All attempts failed - try one more time with full reconnection
+        return await self.check_redis_connection()
 
     async def _cleanup_failed_connection(self):
         """Safely clean up after failed connection attempts."""
