@@ -19,11 +19,22 @@ import config as AppConfig
 
 router = APIRouter()
 
-# Semaphore to limit concurrent Redis connections
+# Semaphore configuration
 # Use half of max connections to leave room for API queries
 MAX_CONCURRENT_REDIS_OPS = max(5, AppConfig.redis_max_connections // 2)
-redis_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REDIS_OPS)
-logger.info(f"🔧 Webhook concurrency limit: {MAX_CONCURRENT_REDIS_OPS} (Redis max: {AppConfig.redis_max_connections})")
+
+# Do NOT instantiate the semaphore globally. Set it to None -> Otherwise we have a global state outside of each worker..
+_redis_semaphore: asyncio.Semaphore | None = None
+
+def get_redis_semaphore() -> asyncio.Semaphore:
+    """
+    Lazy loader ensures the Semaphore is created inside the CURRENT worker's event loop.
+    """
+    global _redis_semaphore
+    if _redis_semaphore is None:
+        _redis_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REDIS_OPS)
+        logger.info(f"🔧 Webhook concurrency limit initialized: {MAX_CONCURRENT_REDIS_OPS} for this worker.")
+    return _redis_semaphore
 
 async def process_single_event(event: dict):
     """Processes a single webhook event."""
@@ -46,8 +57,10 @@ async def process_single_event(event: dict):
         logger.debug("⚠️ Webhook ignored (filtered out).")
         return {"status": "ignored"}
 
+    semaphore = get_redis_semaphore()
+
     # Use semaphore to limit concurrent Redis operations
-    async with redis_semaphore:
+    async with semaphore:
         if data_type == "pokemon":
             logger.debug("✅ Processing 👻 Pokémon data.")
             result = await process_pokemon_data(filtered_data)
