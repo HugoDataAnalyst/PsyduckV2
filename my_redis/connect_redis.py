@@ -2,30 +2,51 @@ import redis.asyncio as redis
 import config as AppConfig
 from utils.logger import logger
 import asyncio
+import os
 from typing import Optional
 from contextlib import asynccontextmanager
 from time import monotonic
 
 class RedisManager:
-    """Enhanced Redis connection manager with smart reconnection logic."""
+    """Enhanced Redis connection manager with smart reconnection logic and multi-worker support."""
     redis_url = AppConfig.redis_url
     _instance = None
     _last_successful_ping = 0
     _connection_attempts = 0
     MAX_RETRY_INTERVAL = 30  # Maximum seconds between retries
     HEALTH_CHECK_INTERVAL = 60  # Seconds between proactive health checks
+    _reconnect_in_progress = False  # Prevent thundering herd
+
+    @classmethod
+    def _get_per_worker_max_connections(cls) -> int:
+        """
+        Calculate max connections per worker to prevent exhausting Redis.
+        Divides total configured connections by number of workers, with a minimum floor.
+        """
+        total_max = AppConfig.redis_max_connections
+        workers = max(1, AppConfig.uvicorn_workers)
+        # Each worker gets a share of connections, with a minimum of 10
+        per_worker = max(10, total_max // workers)
+        return per_worker
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.redis_client = None
-            cls._instance._connection_lock = asyncio.Lock()
+            cls._instance._connection_lock = None  # Lazily created to avoid semaphore leaks
             cls._instance._connection_state = "disconnected"
         return cls._instance
 
+    def _get_connection_lock(self) -> asyncio.Lock:
+        """Lazily create the connection lock in the worker's event loop."""
+        if self._connection_lock is None:
+            self._connection_lock = asyncio.Lock()
+        return self._connection_lock
+
     async def init_redis(self) -> bool:
         """Initialize Redis connection with thread-safe locking."""
-        async with self._connection_lock:
+        lock = self._get_connection_lock()
+        async with lock:
             if self._connection_state == "connected" and await self._quick_ping():
                 return True
 
@@ -33,13 +54,14 @@ class RedisManager:
                 return True
 
             try:
-                logger.info("🔃 Establishing Redis connection...")
+                per_worker_max = self._get_per_worker_max_connections()
+                logger.info(f"🔃 Establishing Redis connection (max_connections={per_worker_max} for this worker)...")
                 self.redis_client = await redis.from_url(
                     self.redis_url,
                     decode_responses=True,
                     socket_keepalive=True,
                     socket_timeout=5,
-                    max_connections=AppConfig.redis_max_connections,
+                    max_connections=per_worker_max,
                     health_check_interval=30,
                     retry_on_timeout=True,
                     socket_connect_timeout=5,
@@ -48,7 +70,7 @@ class RedisManager:
                 if await self._verified_ping():
                     self._connection_attempts = 0
                     self._last_successful_ping = monotonic()
-                    logger.success("✅ Redis connection established")
+                    logger.success(f"✅ Redis connection established (pool size: {per_worker_max})")
                     self._connection_state = "connected"
                     return True
 
@@ -62,8 +84,14 @@ class RedisManager:
                 self._connection_state = "disconnected"
                 return False
 
-    async def check_redis_connection(self) -> bool:
-        """Smart connection checker with exponential backoff."""
+    async def check_redis_connection(self):
+        """
+        Smart connection checker with exponential backoff and circuit breaker.
+
+        Circuit breaker prevents thundering herd: when many concurrent requests
+        find the connection down, only ONE will attempt reconnection while
+        others wait for the result.
+        """
         # Fast path - recently verified connection
         if self._connection_state == "connected" and \
         (monotonic() - self._last_successful_ping) < self.HEALTH_CHECK_INTERVAL:
@@ -78,18 +106,38 @@ class RedisManager:
         except Exception as e:
             logger.warning(f"⚠️ Redis health check failed: {str(e)}")
 
-        # Calculate backoff with jitter
-        base_delay = min(2 ** self._connection_attempts, self.MAX_RETRY_INTERVAL)
-        jitter = base_delay * 0.1  # 10% jitter
-        delay = base_delay + (jitter * (2 * (asyncio.get_running_loop().time() % 1) - 1))
+        # Circuit breaker: If reconnection is already in progress, wait briefly and return
+        # This prevents thundering herd where many concurrent requests all try to reconnect
+        if self._reconnect_in_progress:
+            # Wait a bit for the ongoing reconnection to complete
+            for _ in range(10):  # Wait up to 5 seconds
+                await asyncio.sleep(0.5)
+                if self._connection_state == "connected" and self.redis_client:
+                    return self.redis_client
+                if not self._reconnect_in_progress:
+                    break
+            # Return current state (may still be None)
+            return self.redis_client if self._connection_state == "connected" else None
 
-        logger.warning(f"⏳ Reconnecting in {delay:.1f}s (attempt {self._connection_attempts + 1})")
-        await asyncio.sleep(delay)
+        # Mark reconnection in progress (circuit breaker closed)
+        self._reconnect_in_progress = True
 
-        self._connection_attempts += 1
-        if await self.init_redis():
-            return self.redis_client
-        return None
+        try:
+            # Calculate backoff with jitter
+            base_delay = min(2 ** self._connection_attempts, self.MAX_RETRY_INTERVAL)
+            jitter = base_delay * 0.1  # 10% jitter
+            delay = base_delay + (jitter * (2 * (asyncio.get_running_loop().time() % 1) - 1))
+
+            logger.warning(f"⏳ Reconnecting in {delay:.1f}s (attempt {self._connection_attempts + 1})")
+            await asyncio.sleep(delay)
+
+            self._connection_attempts += 1
+            if await self.init_redis():
+                return self.redis_client
+            return None
+        finally:
+            # Open circuit breaker
+            self._reconnect_in_progress = False
 
     async def _verified_ping(self) -> bool:
         if not self.redis_client:
@@ -145,8 +193,9 @@ class RedisManager:
                 self.redis_client = None
 
     async def close_redis(self):
-        """Gracefully close the Redis connection."""
-        async with self._connection_lock:
+        """Gracefully close the Redis connection and clean up resources."""
+        lock = self._get_connection_lock()
+        async with lock:
             if self.redis_client:
                 try:
                     await self.redis_client.close()
@@ -156,3 +205,7 @@ class RedisManager:
                 finally:
                     self.redis_client = None
                     self._last_successful_ping = 0
+                    self._connection_state = "disconnected"
+
+        # Clean up the lock to help prevent semaphore leaks
+        self._connection_lock = None
