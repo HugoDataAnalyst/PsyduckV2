@@ -55,9 +55,14 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     keep_total    = int(options.get("keep_total", 5))
     compression   = options.get("compression", "gz")
 
-    # format
-    # When show_process is True, show "W-<PID>" format for easy worker identification
-    # in multi-worker uvicorn deployments
+    # FIX: Use the patcher to inject the worker ID dynamically.
+    # We now correctly use the get_worker_id() function we defined above.
+    def worker_id_patcher(record):
+        record["extra"]["worker_id"] = get_worker_id()
+
+    # Configure the core logger with the patcher
+    logger.configure(patcher=worker_id_patcher)
+
     log_fmt = (
         "<n><d><level>{time:YYYY-MM-DD HH:mm:ss.SSS} | "
         f"{'{file:>15.15}:' if show_file else ''}"
@@ -67,10 +72,6 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
         f"{'{thread.name:<11.11} | ' if show_thread else ''}"
         "{level:1.1} | </level></d></n><level>{message}</level>"
     )
-
-    # Configure logger with worker_id in extra for multi-worker identification
-    worker_id = f"W-{os.getpid()}"
-    logger.configure(extra={"worker_id": worker_id})
 
     # Remove defaults to avoid duplicates if setup called twice
     logger.remove()
@@ -180,3 +181,4 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
 
 
 __all__ = ["logger", "setup_logging", "get_worker_id"]
+
