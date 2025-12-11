@@ -19,19 +19,36 @@ def _get_global_state_manager():
         _global_state_manager = GlobalStateManager
     return _global_state_manager
 
+
+def _get_per_worker_golbat_pool_size() -> int:
+    """
+    Calculate max pool size per worker for Golbat DB connections.
+    Uses a smaller pool since this is only used for periodic pokestop refreshes.
+    """
+    # Golbat pool is only used for periodic refreshes, so we need fewer connections
+    total_max = getattr(AppConfig, "golbat_db_pool_max", 20)  # Default 20 total
+    workers = max(1, getattr(AppConfig, "uvicorn_workers", 1))
+    per_worker = max(2, total_max // workers)
+    return per_worker
+
+
 async def get_golbat_mysql_pool():
     """
     Create and return an aiomysql connection pool for the Golbat DB.
+    Pool size is limited per worker to prevent connection exhaustion.
     """
+    per_worker_max = _get_per_worker_golbat_pool_size()
     pool = await aiomysql.create_pool(
         host=AppConfig.golbat_db_host,
         port=AppConfig.golbat_db_port,
         user=AppConfig.golbat_db_user,
         password=AppConfig.golbat_db_password,
         db=AppConfig.golbat_db_name,
+        minsize=0,  # Don't eagerly create connections
+        maxsize=per_worker_max,
         autocommit=True,
-        loop=asyncio.get_running_loop()
     )
+    logger.debug(f"Created Golbat DB pool (maxsize={per_worker_max})")
     return pool
 
 class GolbatSQLPokestops:

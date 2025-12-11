@@ -13,6 +13,20 @@ def _cfg(name: str, default: Any) -> Any:
     return getattr(AppConfig, name, default)
 
 
+def _get_per_worker_pool_size() -> int:
+    """
+    Calculate max pool size per worker to prevent exhausting MySQL connections.
+    Divides total configured pool size by number of workers, with minimum floor.
+
+    Note: minsize is always 0 to prevent startup race conditions where all workers
+    try to open connections simultaneously. Connections are created on demand.
+    """
+    total_max = _cfg("db_pool_max", 100)  # Default to 100 total connections
+    workers = max(1, _cfg("uvicorn_workers", 1))
+    per_worker_max = max(5, total_max // workers)
+    return per_worker_max
+
+
 async def _test_connection(pool: aiomysql.Pool) -> None:
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -25,24 +39,28 @@ async def init_db() -> None:
     retries = _cfg("db_retry_connection", 5)
     delay_s = _cfg("db_retry_delay_sec", 5)
 
+    # Calculate per-worker pool size to prevent exhausting MySQL connections
+    # minsize=0 prevents startup race where all workers try to connect simultaneously
+    per_worker_max = _get_per_worker_pool_size()
+
     for attempt in range(1, retries + 1):
         try:
-            logger.info(f"⬆️ Initializing DB pool (Attempt {attempt}/{retries})...")
+            logger.info(f"⬆️ Initializing DB pool (Attempt {attempt}/{retries}, maxsize={per_worker_max})...")
             _pool = await aiomysql.create_pool(
                 host=_cfg("db_host", "127.0.0.1"),
                 port=_cfg("db_port", 3306),
                 user=_cfg("db_user", "root"),
                 password=_cfg("db_password", ""),
                 db=_cfg("db_name", ""),
-                minsize=_cfg("db_pool_min", 1),
-                maxsize=_cfg("db_pool_max", 10),
+                minsize=0,  # Don't eagerly create connections - prevents startup race
+                maxsize=per_worker_max,
                 autocommit=True,                  # default runtime mode
                 charset="utf8mb4",
                 connect_timeout=_cfg("db_connect_timeout", 10),
                 pool_recycle=_cfg("db_pool_recycle_sec", 1800),  # prevent stale conns
             )
             await _test_connection(_pool)
-            logger.success("✅ Database pool initialized.")
+            logger.success(f"✅ Database pool initialized (maxsize={per_worker_max}).")
             return
         except Exception as e:
             logger.error(f"❌ DB init failed: {e!r}")
