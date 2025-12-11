@@ -21,8 +21,9 @@ class GlobalStateManager:
       - cached_pokestops (existing) - pokestop counts per area
       - psyduckv2:state:user_timezone - local timezone string
 
-    Local cache has a short TTL (default 5 seconds) to reduce Redis round-trips
-    while keeping data reasonably fresh across workers.
+    Local cache has a 60-second TTL to reduce Redis round-trips during high load.
+    Geofences/pokestops rarely change, so longer TTL is safe.
+    Falls back to global_state when Redis is unavailable (for resilience).
     """
 
     # Redis keys
@@ -31,8 +32,9 @@ class GlobalStateManager:
     TIMEZONE_KEY = "psyduckv2:state:user_timezone"
 
     # Local cache configuration
+    # Geofences/pokestops rarely change, so use longer TTL to reduce Redis load
     _local_cache: dict[str, dict[str, Any]] = {}
-    _local_cache_ttl = 5.0  # seconds
+    _local_cache_ttl = 3600.0  # seconds - longer TTL reduces Redis pressure during high load
 
     # Redis manager will be set at startup
     _redis_manager = None
@@ -81,8 +83,9 @@ class GlobalStateManager:
         Get geofences from local cache or Redis.
 
         Returns list of geofence dicts or None if not available.
+        Falls back to global_state if Redis is unavailable (for resilience during high load).
         """
-        # Check local cache first
+        # Check local cache first (fast path - no Redis call)
         cached = cls._get_from_local_cache(cls.GEOFENCES_KEY)
         if cached is not None:
             return cached
@@ -91,24 +94,48 @@ class GlobalStateManager:
         try:
             if not cls._redis_manager:
                 logger.warning("GlobalStateManager: Redis manager not set")
-                return None
+                return cls._fallback_to_global_state_geofences()
 
             client = await cls._redis_manager.check_redis_connection()
             if not client:
                 logger.warning("GlobalStateManager: Redis connection unavailable")
-                return None
+                return cls._fallback_to_global_state_geofences()
 
             raw = await client.get(cls.GEOFENCES_KEY)
             if raw:
                 data = json.loads(raw)
                 cls._update_local_cache(cls.GEOFENCES_KEY, data)
+                # Also update global_state so fallback stays fresh
+                cls._sync_geofences_to_global_state(data)
                 return data
 
-            return None
+            return cls._fallback_to_global_state_geofences()
 
         except Exception as e:
-            logger.error(f"GlobalStateManager: Error getting geofences: {e}")
-            return None
+            logger.warning(f"GlobalStateManager: Redis error getting geofences: {e}, using fallback")
+            return cls._fallback_to_global_state_geofences()
+
+    @classmethod
+    def _sync_geofences_to_global_state(cls, geofences: list) -> None:
+        """
+        Keep global_state.geofences in sync with Redis data.
+        This ensures the fallback always has fresh data.
+        """
+        from server_fastapi import global_state
+        global_state.geofences = geofences
+
+    @classmethod
+    def _fallback_to_global_state_geofences(cls) -> list | None:
+        """
+        Fallback to global_state.geofences when Redis is unavailable.
+        This ensures webhook processing continues during Redis connection issues.
+        """
+        from server_fastapi import global_state
+        if global_state.geofences:
+            # Update local cache so we don't keep hitting this fallback
+            cls._update_local_cache(cls.GEOFENCES_KEY, global_state.geofences)
+            return global_state.geofences
+        return None
 
     @classmethod
     async def set_geofences(cls, geofences: list, expiry: int | None = None):
