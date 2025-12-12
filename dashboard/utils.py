@@ -130,30 +130,67 @@ def get_global_areas_task():
     return None
 
 
-def _fetch_single_area(endpoint, params, area_name, headers):
+def _fetch_single_area(endpoint, params, area_name, headers, max_retries=2):
     """
     Helper to fetch data for a single area.
     Returns (area_name, data, error_reason) tuple.
     - On success: (area_name, data, None)
     - On failure: (area_name, None, error_reason)
+
+    Retries up to max_retries times if response is 200 but data is empty.
     """
-    try:
-        area_params = params.copy()
-        area_params["area"] = area_name
-        response = requests.get(endpoint, headers=headers, params=area_params, timeout=60)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict) and "data" in data:
-                return (area_name, data.get("data", {}), None)
-            return (area_name, data, None)
-        else:
-            return (area_name, None, f"HTTP {response.status_code}")
-    except requests.exceptions.Timeout:
-        return (area_name, None, f"Timeout (60s)")
-    except requests.exceptions.ConnectionError as e:
-        return (area_name, None, f"Connection error: {e}")
-    except Exception as e:
-        return (area_name, None, str(e))
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            area_params = params.copy()
+            area_params["area"] = area_name
+            response = requests.get(endpoint, headers=headers, params=area_params, timeout=60)
+
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict) and "data" in data:
+                    extracted_data = data.get("data", {})
+                else:
+                    extracted_data = data
+
+                # Check if data is empty - retry if we have attempts left
+                if not extracted_data:
+                    if attempt < max_retries:
+                        logger.info(f"Empty result for {area_name}, retrying ({attempt + 1}/{max_retries})...")
+                        time.sleep(0.5)  # Small delay before retry
+                        continue
+                    # Final attempt still empty - return as empty (not an error)
+                    return (area_name, None, None)
+
+                return (area_name, extracted_data, None)
+            else:
+                last_error = f"HTTP {response.status_code}"
+                if attempt < max_retries:
+                    time.sleep(0.5)
+                    continue
+                return (area_name, None, last_error)
+
+        except requests.exceptions.Timeout:
+            last_error = "Timeout (60s)"
+            if attempt < max_retries:
+                time.sleep(0.5)
+                continue
+            return (area_name, None, last_error)
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"Connection error: {e}"
+            if attempt < max_retries:
+                time.sleep(0.5)
+                continue
+            return (area_name, None, last_error)
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries:
+                time.sleep(0.5)
+                continue
+            return (area_name, None, last_error)
+
+    return (area_name, None, last_error)
 
 
 def fetch_all_areas_parallel(endpoint, params, max_workers=5):
