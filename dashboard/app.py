@@ -71,9 +71,11 @@ def build_brand():
 
 brand_content = build_brand()
 
+PAGES_FOLDER = os.path.join(os.path.dirname(__file__), "pages")
 app = dash.Dash(
     __name__,
     use_pages=True,
+    pages_folder=PAGES_FOLDER,
     external_stylesheets=[
         dbc.themes.DARKLY, dbc.icons.BOOTSTRAP,
         "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
@@ -87,6 +89,26 @@ app = dash.Dash(
     ],
     suppress_callback_exceptions=True
 )
+
+app.index_string = f'''
+<!DOCTYPE html>
+<html>
+    <head>
+        {{%metas%}}
+        <title>{{%title%}}</title>
+        <link rel="icon" type="image/png" href="{ICON_URL}">
+        {{%css%}}
+    </head>
+    <body>
+        {{%app_entry%}}
+        <footer>
+            {{%config%}}
+            {{%scripts%}}
+            {{%renderer%}}
+        </footer>
+    </body>
+</html>
+'''
 
 # DYNAMIC CONTENT
 
@@ -231,7 +253,7 @@ def sync_url_to_global_store(search, current_store):
         return dash.no_update
 
     # Parse query string: ?area=London -> {'area': ['London']}
-    # Remove leading '?'
+    # Remove leading ?
     qs = parse_qs(search.lstrip('?'))
     area_list = qs.get('area')
 
