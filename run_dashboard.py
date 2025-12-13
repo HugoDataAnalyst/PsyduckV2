@@ -8,7 +8,11 @@ from dashboard.app import app
 from dashboard.tasks.global_tasks import start_background_tasks, stop_background_tasks
 from dashboard.utils import precache_pokemon_icons, precache_reward_icons
 import config as AppConfig
-from dashboard.pages import home_dash, pokemon_dash, raids_dash, invasions_dash, quests_dash
+
+# Force Dash to complete page discovery and callback registration before Waitress starts
+# This prevents "Callback function not found" errors on startup
+import dash
+_page_count = len(dash.page_registry) if dash.page_registry else 0
 
 setup_logging(
     AppConfig.log_level_dashboard,
