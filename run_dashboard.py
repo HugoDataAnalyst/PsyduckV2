@@ -8,6 +8,7 @@ from dashboard.app import app
 from dashboard.tasks.global_tasks import start_background_tasks, stop_background_tasks
 from dashboard.utils import precache_pokemon_icons, precache_reward_icons
 import config as AppConfig
+from dashboard.pages import home_dash, pokemon_dash, raids_dash, invasions_dash, quests_dash
 
 setup_logging(
     AppConfig.log_level_dashboard,
