@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse
 from utils.logger import logger
 from utils.koji_geofences import KojiGeofences
+from utils.global_state_manager import GlobalStateManager
 from webhook.filter_data import WebhookFilter
 from webhook.parser_data import (
     process_pokemon_data,
@@ -14,8 +15,47 @@ from webhook.parser_data import (
 )
 from server_fastapi import global_state
 from server_fastapi.utils import secure_api
+import config as AppConfig
 
 router = APIRouter()
+
+# Do NOT instantiate the semaphore globally. Set it to None -> Otherwise we have a global state outside of each worker..
+_redis_semaphore: asyncio.Semaphore | None = None
+_max_concurrent_ops: int | None = None
+
+def _calculate_max_concurrent_ops() -> int:
+    """
+    Calculate max concurrent Redis operations per worker.
+    Uses half of the per-worker Redis pool to leave room for API queries.
+    """
+    total_max = AppConfig.redis_max_connections
+    workers = max(1, AppConfig.uvicorn_workers)
+    per_worker_pool = max(10, total_max // workers)
+    # Use half of per-worker pool for webhooks, minimum 5
+    return max(5, per_worker_pool // 2)
+
+
+def get_redis_semaphore() -> asyncio.Semaphore:
+    """
+    Lazy loader ensures the Semaphore is created inside the CURRENT worker's event loop.
+    """
+    global _redis_semaphore, _max_concurrent_ops
+    if _redis_semaphore is None:
+        _max_concurrent_ops = _calculate_max_concurrent_ops()
+        _redis_semaphore = asyncio.Semaphore(_max_concurrent_ops)
+        logger.info(f"🔧 Webhook concurrency limit initialized: {_max_concurrent_ops} for this worker.")
+    return _redis_semaphore
+
+
+def cleanup_semaphore():
+    """
+    Clean up the semaphore during worker shutdown.
+    This helps prevent 'leaked semaphore' warnings from the resource_tracker.
+    """
+    global _redis_semaphore
+    if _redis_semaphore is not None:
+        logger.debug("🧹 Cleaning up webhook semaphore")
+        _redis_semaphore = None
 
 async def process_single_event(event: dict):
     """Processes a single webhook event."""
@@ -24,41 +64,51 @@ async def process_single_event(event: dict):
         logger.warning("❌ Invalid webhook format: Missing 'type'.")
         return {"status": "error", "message": "Invalid webhook format"}
 
-    # Initialize WebhookFilter with the global geofences
-    webhook_filter = WebhookFilter(allowed_types={data_type}, geofences=global_state.geofences)
+    # Get geofences from GlobalStateManager
+    # This ensures all workers have up-to-date geofences even after leader refreshes
+    geofences = await GlobalStateManager.get_geofences()
+    if geofences is None:
+        # Fallback to legacy global_state if GlobalStateManager not initialized
+        geofences = global_state.geofences
+
+    webhook_filter = WebhookFilter(allowed_types={data_type}, geofences=geofences)
     filtered_data = await webhook_filter.filter_webhook_data(event)
 
     if not filtered_data:
         logger.debug("⚠️ Webhook ignored (filtered out).")
         return {"status": "ignored"}
 
-    if data_type == "pokemon":
-        logger.debug("✅ Processing 👻 Pokémon data.")
-        result = await process_pokemon_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    elif data_type == "raid":
-        logger.debug("✅ Processing 👹 Raid data.")
-        result = await process_raid_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    elif data_type == "quest":
-        logger.debug("✅ Processing 🔎 Quest data.")
-        result = await process_quest_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    elif data_type == "invasion":
-        logger.debug("✅ Processing 🕴️ Invasion data.")
-        result = await process_invasion_data(filtered_data)
-        if result:
-            logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
-            return {"status": "success", "processed_data": result}
-    else:
-        logger.debug(f"⚠️ Webhook type '{data_type}' not handled by parser yet.")
-        return {"status": "ignored", "message": f"Webhook type '{data_type}' not processed."}
+    semaphore = get_redis_semaphore()
+
+    # Use semaphore to limit concurrent Redis operations
+    async with semaphore:
+        if data_type == "pokemon":
+            logger.debug("✅ Processing 👻 Pokémon data.")
+            result = await process_pokemon_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 👻 Pokemon Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        elif data_type == "raid":
+            logger.debug("✅ Processing 👹 Raid data.")
+            result = await process_raid_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 👹 Raid Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        elif data_type == "quest":
+            logger.debug("✅ Processing 🔎 Quest data.")
+            result = await process_quest_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 🔎 Quest Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        elif data_type == "invasion":
+            logger.debug("✅ Processing 🕴️ Invasion data.")
+            result = await process_invasion_data(filtered_data)
+            if result:
+                logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        else:
+            logger.debug(f"⚠️ Webhook type '{data_type}' not handled by parser yet.")
+            return {"status": "ignored", "message": f"Webhook type '{data_type}' not processed."}
 
 
 @router.post("/webhook", dependencies=[Depends(secure_api.validate_remote_addr)], include_in_schema=False)
@@ -80,21 +130,35 @@ async def receive_webhook(request: Request):
 
     results = {}
 
-    # Process each event type **concurrently**, but handle each type sequentially
+    # Process each event type **concurrently**, and events within each type also concurrently
     async def process_event_group(event_type, events):
         logger.info(f"🔄 Processing {len(events)} {event_type} events...")
         results[event_type] = []
 
         start_time = time.perf_counter()
-        valid_count = 0
 
-        for event in events:  # Sequential processing per event type
-            result = await process_single_event(event)
-            if result:
-                results[event_type].append(result)
-                if result.get("status") != "ignored":
-                    valid_count += 1
+        # Process events concurrently in batches
+        # Batch size is 2x semaphore to allow for queuing, but capped at 50
+        # This ensures we fully utilize Redis connections without creating too many waiting tasks
+        max_ops = _max_concurrent_ops or _calculate_max_concurrent_ops()
+        batch_size = min(max_ops * 2, 50)
+        for i in range(0, len(events), batch_size):
+            batch = events[i:i + batch_size]
+            # Process batch concurrently
+            batch_results = await asyncio.gather(
+                *[process_single_event(event) for event in batch],
+                return_exceptions=True
+            )
 
+            # Collect results
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Error processing event: {result}")
+                    results[event_type].append({"status": "error", "message": str(result)})
+                elif result:
+                    results[event_type].append(result)
+
+        valid_count = sum(1 for r in results[event_type] if r.get("status") not in ["ignored", "error"])
         elapsed = time.perf_counter() - start_time  # End stopwatch
         if valid_count:
             logger.success(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")

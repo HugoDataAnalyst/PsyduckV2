@@ -14,7 +14,9 @@ redis_manager = RedisManager()
 def build_hash_key(data_type: str, metric: str, area: str, entity: str, form: Union[str, int]) -> str:
     """
     Build a plain text hash key.
-    Example: ts:pokemon:total:Matosinhos:422:0
+
+    Format:
+      ts:pokemon:total:Matosinhos:422:0
     """
     return f"ts:{data_type}:{metric}:{area}:{entity}:{form}"
 
@@ -91,6 +93,6 @@ async def add_pokemon_timeseries_event(data: Dict[str, Any], pipe=None) -> Dict[
                     updated_fields[metric] = "OK"
             await pipe.execute()
 
-    logger.debug(f"✅ Added event for {data_type} {entity} in {area} (form: {form}) at bucket {bucket}")
+    logger.debug(f"✅ Added event for {data_type} {entity} in {area} (form: {form}) bucket {bucket}")
     return updated_fields
 

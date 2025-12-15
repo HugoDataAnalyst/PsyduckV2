@@ -2,95 +2,82 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Dict, Optional, Tuple
-
-from numpy import byte
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
 import config as AppConfig
 
 redis_manager = RedisManager()
 
-# Config knobs for batching / budgets
-SCAN_COUNT_DEFAULT       = 500        # keys per scan step
+# Config knobs for chunked cleanup
+SCAN_COUNT_DEFAULT       = 1000       # keys per scan step
 HSCAN_COUNT_DEFAULT      = 500        # fields per hscan step inside script
 HDEL_BATCH_DEFAULT       = 1000       # max fields HDEL per call
-PER_KEY_STEPS_DEFAULT    = 10         # how many HSCAN-steps per key per eval (keeps script short)
-PER_PATTERN_TIME_BUDGET  = 1.5        # seconds to spend per pattern before yielding
-GLOBAL_TIME_BUDGET       = 8.0        # seconds to spend per cleanup cycle (soft target)
-SLEEP_BETWEEN_KEYS       = 0          # 0 or small sleep to yield
+CHUNK_SIZE_DEFAULT       = 100        # keys per Lua chunk
+CHUNK_SLEEP_DEFAULT      = 0.15       # sleep between chunks (seconds)
 LOCK_KEY                 = "ts:cleanup:lock"
-LOCK_TTL_SEC             = 60         # prevents overlapping runs
+LOCK_TTL_SEC             = 300        # prevents overlapping runs (5 minutes)
 
-# We keep the per-key cleaner as a small script (fast, bounded)
-_PER_KEY_CLEAN_SHA: Optional[str] = None
+# Chunked cleanup script - processes multiple keys per call
+_CLEANUP_CHUNK_SHA: Optional[str] = None
 
-PER_KEY_CLEAN_SCRIPT = r"""
--- Args:
--- KEYS: none
--- ARGV[1]=key
--- ARGV[2]=cutoff (epoch seconds)
--- ARGV[3]=hscan_count
--- ARGV[4]=hdel_batch
--- ARGV[5]=max_steps (how many HSCAN loops to run this call)
+CLEANUP_CHUNK_SCRIPT = r"""
+-- KEYS: array of hash keys to clean
+-- ARGV[1]: cutoff timestamp (seconds)
+-- ARGV[2]: hscan_count
+-- ARGV[3]: hdel_batch
 
-local key          = ARGV[1]
-local cutoff       = tonumber(ARGV[2])
-local hscan_count  = tonumber(ARGV[3] or 500)
-local hdel_batch   = tonumber(ARGV[4] or 1000)
-local max_steps    = tonumber(ARGV[5] or 10)
+local cutoff = tonumber(ARGV[1])
+local hscan_count = tonumber(ARGV[2] or 500)
+local hdel_batch = tonumber(ARGV[3] or 1000)
 
-local removed = 0
-local hcursor = "0"
-local steps = 0
+local total_removed = 0
+local total_emptied = 0
 
-repeat
-    local hreply = redis.call("HSCAN", key, hcursor, "COUNT", hscan_count)
-    hcursor = hreply[1]
-    local flat = hreply[2]
+-- Process each key in the chunk
+for _, key in ipairs(KEYS) do
+    local hcursor = "0"
+    repeat
+        local hreply = redis.call("HSCAN", key, hcursor, "COUNT", hscan_count)
+        hcursor = hreply[1]
+        local flat = hreply[2]
 
-    local pending = {}
-    for i = 1, #flat, 2 do
-        local field = flat[i]
-        local ts = tonumber(field)
-        if ts and ts < cutoff then
-            table.insert(pending, field)
-            if #pending >= hdel_batch then
-                redis.call("HDEL", key, unpack(pending))
-                removed = removed + #pending
-                pending = {}
+        local pending = {}
+        for i = 1, #flat, 2 do
+            local field = flat[i]
+            local ts = tonumber(field)
+            if ts and ts < cutoff then
+                table.insert(pending, field)
+                if #pending >= hdel_batch then
+                    redis.call("HDEL", key, unpack(pending))
+                    total_removed = total_removed + #pending
+                    pending = {}
+                end
             end
         end
-    end
-    if #pending > 0 then
-        redis.call("HDEL", key, unpack(pending))
-        removed = removed + #pending
-    end
+        if #pending > 0 then
+            redis.call("HDEL", key, unpack(pending))
+            total_removed = total_removed + #pending
+        end
+    until hcursor == "0"
 
-    steps = steps + 1
-    if steps >= max_steps then
-        break
-    end
-until hcursor == "0"
-
-local emptied = 0
-if redis.call("TYPE", key).ok == "hash" then
-    if redis.call("HLEN", key) == 0 then
-        redis.call("DEL", key)
-        emptied = 1
+    -- Check if key is now empty and delete it
+    if redis.call("TYPE", key).ok == "hash" then
+        if redis.call("HLEN", key) == 0 then
+            redis.call("DEL", key)
+            total_emptied = total_emptied + 1
+        end
     end
 end
 
--- return: removed, emptied, next_cursor (for continuation)
-return { removed, emptied, hcursor }
+return { total_removed, total_emptied }
 """
 
 def is_noscript_error(e: Exception) -> bool:
     s = str(e)
-    # cover common server/client variations
     needles = (
-        "NOSCRIPT",                    # classic Redis
-        "No matching script",          # some variants
-        "Please use EVAL",             # part of the same message
+        "NOSCRIPT",
+        "No matching script",
+        "Please use EVAL",
     )
     s_up = s.upper()
     return any(n.upper() in s_up for n in needles)
@@ -110,18 +97,19 @@ async def _client():
         return None
     return redis_manager.redis_client
 
-async def _ensure_per_key_script(client):
-    global _PER_KEY_CLEAN_SHA
+async def _ensure_cleanup_script(client):
+    """Load chunked cleanup script into Redis if not already cached"""
+    global _CLEANUP_CHUNK_SHA
     try:
-        if not _PER_KEY_CLEAN_SHA:
-            _PER_KEY_CLEAN_SHA = await client.script_load(PER_KEY_CLEAN_SCRIPT)
+        if not _CLEANUP_CHUNK_SHA:
+            _CLEANUP_CHUNK_SHA = await client.script_load(CLEANUP_CHUNK_SCRIPT)
+            logger.debug(f"♻️ Cleanup script loaded with SHA: {_CLEANUP_CHUNK_SHA}")
     except Exception as e:
-        # If it fails, clear SHA cache to force reload on next call
-        _PER_KEY_CLEAN_SHA = None
+        _CLEANUP_CHUNK_SHA = None
         raise
 
 async def _try_acquire_lock(client) -> bool:
-    # SET lock NX EX to avoid overlapping runs across processes
+    """Acquire cleanup lock to prevent overlapping runs"""
     try:
         ok = await client.set(LOCK_KEY, str(time.time()), nx=True, ex=LOCK_TTL_SEC)
         return bool(ok)
@@ -130,119 +118,127 @@ async def _try_acquire_lock(client) -> bool:
         return False
 
 async def _release_lock(client):
+    """Release cleanup lock"""
     try:
         await client.delete(LOCK_KEY)
     except Exception:
         pass
 
-async def _clean_hash_key(client, key: str, cutoff: int) -> Tuple[int, int, str]:
-    """Run small-batch cleanup on a single hash key. Returns (removed, emptied, next_cursor)."""
-    global _PER_KEY_CLEAN_SHA
-    await _ensure_per_key_script(client)
+async def _scan_keys_by_pattern(client, pattern: str) -> list[str]:
+    """SCAN for all matching keys (non-blocking, fast)"""
+    scan_start = time.monotonic()
+    all_keys = []
 
-    # Redis may return bytes or bytearrays; convert to str for Lua
-    if isinstance(key, (bytes, bytearray)):
-        key = key.decode("utf-8", errors="ignore")
+    cursor = 0
+    while True:
+        cursor, keys = await client.scan(cursor, match=pattern, count=SCAN_COUNT_DEFAULT)
+        all_keys.extend(k.decode() if isinstance(k, bytes) else k for k in keys)
+        if cursor == 0:
+            break
+
+    scan_elapsed = time.monotonic() - scan_start
+    logger.debug(f"♻️ SCAN collected {len(all_keys)} keys for pattern '{pattern}' in {scan_elapsed:.3f}s")
+    return all_keys
+
+async def _clean_keys_chunk(client, keys: list[str], cutoff: int) -> Tuple[int, int]:
+    """Clean a chunk of keys using Lua script. Returns (removed_fields, emptied_keys)."""
+    global _CLEANUP_CHUNK_SHA
+    await _ensure_cleanup_script(client)
+
+    # Convert bytes keys to strings
+    str_keys = [k.decode("utf-8") if isinstance(k, bytes) else k for k in keys]
 
     try:
-        removed, emptied, next_cursor = await client.evalsha(
-            _PER_KEY_CLEAN_SHA,
-            0,
-            key,
+        removed, emptied = await client.evalsha(
+            _CLEANUP_CHUNK_SHA,
+            len(str_keys),
+            *str_keys,
             str(cutoff),
             str(HSCAN_COUNT_DEFAULT),
             str(HDEL_BATCH_DEFAULT),
-            str(PER_KEY_STEPS_DEFAULT),
         )
-        # Redis may return integers as ints already depending on client
-        return int(removed or 0), int(emptied or 0), str(next_cursor or "0")
+        return int(removed or 0), int(emptied or 0)
     except Exception as e:
-        # handle all NOSCRIPT variants (server restarted, script cache flushed, etc.)
         if is_noscript_error(e):
-            logger.warning("📜 Per-key cleanup script missing. Reloading and retrying…")
-            # force reload
-            _PER_KEY_CLEAN_SHA = None
-            await _ensure_per_key_script(client)
-            removed, emptied, next_cursor = await client.evalsha(
-                _PER_KEY_CLEAN_SHA,
-                0,
-                key,
+            logger.warning("📜 Cleanup script missing. Reloading and retrying…")
+            _CLEANUP_CHUNK_SHA = None
+            await _ensure_cleanup_script(client)
+            removed, emptied = await client.evalsha(
+                _CLEANUP_CHUNK_SHA,
+                len(str_keys),
+                *str_keys,
                 str(cutoff),
                 str(HSCAN_COUNT_DEFAULT),
                 str(HDEL_BATCH_DEFAULT),
-                str(PER_KEY_STEPS_DEFAULT),
             )
-            return int(removed or 0), int(emptied or 0), str(next_cursor or "0")
+            return int(removed or 0), int(emptied or 0)
         raise
 
 async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> None:
+    """Cleanup timeseries for a pattern using chunked Lua approach (non-blocking)"""
     client = await _client()
     if not client:
         logger.error(f"❌ Redis connection failed for pattern {pattern}")
         return
 
     cutoff = int(time.time()) - retention_sec
-    logger.debug(f"▶️ Cleanup start for pattern={pattern}, cutoff={cutoff}")
+    logger.info(f"▶️ Cleanup start for pattern={pattern}, retention={retention_sec}s, cutoff={cutoff}")
+
+    started = time.time()
+
+    # Step 1: SCAN for all keys (non-blocking, ~0.1-0.3s)
+    all_keys = await _scan_keys_by_pattern(client, pattern)
+
+    if not all_keys:
+        logger.debug(f"♻️ No keys found for pattern '{pattern}'")
+        return
+
+    # Step 2: Split into chunks
+    chunks = [all_keys[i:i+CHUNK_SIZE_DEFAULT] for i in range(0, len(all_keys), CHUNK_SIZE_DEFAULT)]
+    logger.info(f"♻️ Processing {len(all_keys)} keys in {len(chunks)} chunks of ~{CHUNK_SIZE_DEFAULT} keys")
 
     total_removed = 0
     total_emptied = 0
-    started = time.time()
 
-    # Iterate keys non-blocking using scan_iter (client-side SCAN cursor)
-    async for key in client.scan_iter(match=pattern, count=SCAN_COUNT_DEFAULT):
-        # Per key, call the small Lua cleaner; it may return a non-zero next_cursor -> continue calls
-        next_cursor = "0"
+    # Step 3: Process chunks with sleep intervals
+    for i, chunk in enumerate(chunks):
+        chunk_start = time.monotonic()
+
         try:
-            # loop until the hash has been fully scanned (HSCAN cursor returns "0"),
-            # but keep each eval small; yield to loop between calls
-            while True:
-                removed, emptied, next_cursor = await _clean_hash_key(client, key, cutoff)
-                total_removed += removed
-                total_emptied += emptied
+            removed, emptied = await _clean_keys_chunk(client, chunk, cutoff)
+            total_removed += removed
+            total_emptied += emptied
 
-                # optional cooperative yield
-                if SLEEP_BETWEEN_KEYS:
-                    await asyncio.sleep(SLEEP_BETWEEN_KEYS)
-                else:
-                    await asyncio.sleep(0)
-
-                if next_cursor == "0":
-                    break
-
-                # obey per-pattern time budget; let other work run
-                if (time.time() - started) >= PER_PATTERN_TIME_BUDGET:
-                    # soft break to keep the server responsive; caller may revisit later runs
-                    break
+            chunk_elapsed = time.monotonic() - chunk_start
+            logger.debug(f"♻️ Chunk {i+1}/{len(chunks)} cleaned {len(chunk)} keys: {removed} fields removed, {emptied} keys deleted in {chunk_elapsed:.3f}s")
 
         except Exception as e:
-            # If *this* key fails, log and continue with others
             if "BUSY" in str(e).upper():
-                # Should be rare now; our scripts are tiny.
-                logger.warning(f"⚠️ Redis BUSY while cleaning key={key} (will retry next cycle).")
+                logger.warning(f"⚠️ Redis BUSY while cleaning chunk {i+1}/{len(chunks)} (will retry next cycle)")
             else:
-                logger.error(f"❌ Error cleaning key={key}: {e}")
+                logger.error(f"❌ Error cleaning chunk {i+1}/{len(chunks)}: {e}")
 
-        # check per-pattern time budget
-        if (time.time() - started) >= PER_PATTERN_TIME_BUDGET:
-            # We've spent enough on this pattern now; continue next pattern
-            break
+        # Sleep between chunks to allow writes (except last chunk)
+        if i < len(chunks) - 1:
+            await asyncio.sleep(CHUNK_SLEEP_DEFAULT)
 
     duration = time.time() - started
     logger.success(
-        f"Lua ♻️ cleanup ✅ completed for {pattern}\n"
+        f"♻️ Cleanup ✅ completed for {pattern}\n"
+        f"• Keys processed: {len(all_keys)}\n"
         f"• Fields 🗑️ removed: {total_removed}\n"
         f"• Empty keys 🔥 deleted: {total_emptied}\n"
         f"• Duration ⏱️: {duration:.2f}s"
     )
 
 async def cleanup_timeseries() -> None:
-    """Run cleanup for all patterns with progress tracking (non-blocking, incremental)."""
+    """Run cleanup for all patterns (non-blocking, processes all keys)"""
     client = await _client()
     if not client:
         logger.error("❌ Redis not connected; skip cleanup run.")
         return
 
-    # prevent overlapping runs
+    # Prevent overlapping runs
     if not await _try_acquire_lock(client):
         logger.info("🔒 Another cleanup is in progress; skipping this cycle.")
         return
@@ -250,24 +246,19 @@ async def cleanup_timeseries() -> None:
     try:
         total_start = time.time()
         for pattern, retention in get_retention_mapping().items():
-            logger.debug(f"▶️ Pattern: {pattern}")
+            logger.info(f"▶️ Pattern: {pattern}, retention: {retention}s ({retention/3600:.1f}h)")
             await cleanup_timeseries_for_pattern(pattern, retention)
-            # small yield between patterns
-            await asyncio.sleep(0)
-
-            # optional global budget
-            if (time.time() - total_start) >= GLOBAL_TIME_BUDGET:
-                logger.info("⏱️ Global cleanup time budget reached; deferring remainder to next cycle.")
-                break
+            # Small yield between patterns
+            await asyncio.sleep(0.1)
 
         total_duration = time.time() - total_start
-        logger.debug(f"✅ Cleanup pass finished in ⏱️ {total_duration:.2f}s")
+        logger.success(f"✅ Cleanup pass finished in ⏱️ {total_duration:.2f}s")
 
     finally:
         await _release_lock(client)
 
 async def periodic_cleanup() -> None:
-    """Run cleanup periodically (hourly), cooperatively."""
+    """Run cleanup periodically (based on config interval)"""
     try:
         while True:
             logger.info("▶️ Starting periodic cleanup cycle")
@@ -277,11 +268,11 @@ async def periodic_cleanup() -> None:
                 await cleanup_timeseries()
             except Exception as e:
                 logger.error(f"❌ Cleanup failed: {e}")
-                # on hard failure, wait a bit before retry to avoid tight loops
+                # On hard failure, wait a bit before retry
                 await asyncio.sleep(60)
 
             duration = time.time() - start_time
-            # sleep the remainder of an hour
+            # Sleep the remainder of the interval
             sleep_time = max(AppConfig.cleanup_interval_seconds - duration, 5)
             logger.success(f"✅ Cleanup completed. 💤 Sleeping for ⏱️ {sleep_time:.1f}s")
             await asyncio.sleep(sleep_time)

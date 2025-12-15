@@ -13,7 +13,9 @@ from my_redis.connect_redis import RedisManager
 import warnings
 warnings.filterwarnings("ignore", message="Duplicate entry")
 
+
 # Initialize logging
+# Enable process identification when using multiple workers
 setup_logging(
     AppConfig.log_level,
     {
@@ -24,6 +26,7 @@ setup_logging(
         "compression": "gz",
         "show_file": True,
         "show_function": True,
+        "show_process": AppConfig.uvicorn_workers > 1,
     },
 )
 # Initialize Redis connection
@@ -56,42 +59,78 @@ def apply_migrations() -> None:
     alembic_command.upgrade(cfg, "head")
     logger.success("✅ Alembic migrations are up to date.")
 
-async def start_servers():
+def _validate_worker_config():
+    """
+    Validate that worker configuration is compatible with Redis pool size.
+    """
+    workers = AppConfig.uvicorn_workers
+    # MAX_CONCURRENT_REDIS_OPS is redis_max_connections // 2 (min 5) per worker
+    max_per_worker = max(5, AppConfig.redis_max_connections // 2)
+    total_possible = workers * max_per_worker
+
+    if total_possible > AppConfig.redis_max_connections:
+        logger.warning(
+            f"Workers ({workers}) * concurrent Redis ops ({max_per_worker}) = {total_possible} "
+            f"may exceed Redis pool ({AppConfig.redis_max_connections}). "
+            f"Consider increasing redis_connections in config.json."
+        )
+
+    if workers > 1:
+        logger.info(f"Multi-worker mode: {workers} workers configured")
+
+
+def start_servers():
     """
     Start the PsyduckV2 webhook API.
+
+    Uses uvicorn.run() which properly supports the workers parameter.
+    Note: uvicorn.run() is blocking - it handles the event loop internally.
     """
-    # Configure the webhook API server
-    webhook_api_config = uvicorn.Config(
+    # Validate worker configuration
+    _validate_worker_config()
+
+    logger.info(f"⬆️ Starting PsyduckV2 API server with {AppConfig.uvicorn_workers} worker(s)...")
+
+    # uvicorn.run() properly supports workers parameter (unlike Server.serve())
+    # It will spawn multiple worker processes when workers > 1
+    uvicorn.run(
         "server_fastapi.webhook_app:app",
         host=AppConfig.webhook_ip,
         port=AppConfig.golbat_webhook_port,
-        workers=1,
-        reload=False
+        workers=AppConfig.uvicorn_workers,
+        reload=False,
+        log_level="warning",  # Reduce uvicorn's own logging, we use loguru
     )
-    webhook_api_server = uvicorn.Server(webhook_api_config)
-    logger.info("⬆️ Starting PsyduckV2 API server...")
-    await webhook_api_server.serve()
 
-async def main():
-    apply_migrations()  # Apply any new migrations
-    await init_db()  # Initialize DB
+def main():
+    """
+    Main entry point for PsyduckV2.
+
+    1. Apply database migrations (sync, main process only)
+    2. Start uvicorn with worker processes
+       - Each worker initializes its own DB pool and Redis connection in the lifespan
+       - Leader election determines which worker runs background tasks
+    """
+    # Apply migrations in main process before spawning workers
+    apply_migrations()
+
+    # Initialize DB temporarily to verify connection works
+    # Workers will create their own pools in their lifespan
+    async def verify_db():
+        await init_db()
+        await close_db()
+
+    asyncio.run(verify_db())
 
     logger.info("✅ Psyduck is ready to process data!")
 
-    # Start both API servers concurrently
-    await start_servers()
+    # Start uvicorn - this is blocking and handles worker processes internally
+    # Each worker will run the lifespan in webhook_app.py which initializes DB/Redis
+    start_servers()
 
-    try:
-        while True:
-            await asyncio.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("🫣 Shutting down...")
-    finally:
-        await close_db()
-        await redis_manager.close_redis()
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         logger.info("🫣 Exiting due to keyboard interrupt.")

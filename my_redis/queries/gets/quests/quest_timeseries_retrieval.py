@@ -8,77 +8,68 @@ from server_fastapi import global_state
 
 redis_manager = RedisManager()
 
-QUEST_TIMESERIES_SCRIPT = """
-local pattern = ARGV[1]
-local start_ts = tonumber(ARGV[2])
-local end_ts = tonumber(ARGV[3])
-local mode = ARGV[4]
-local batch_size = 1000
+# Chunked Lua script for Quest timeseries
+TIMESERIES_QUEST_CHUNK_SCRIPT = """
+local start_ts = tonumber(ARGV[1])
+local end_ts = tonumber(ARGV[2])
+local mode = ARGV[3]
 
 local sum_results = {}
 local grouped_results = {}
 local surged_results = {}
 
-local cursor = '0'
-repeat
-  local reply = redis.call('SCAN', cursor, 'MATCH', pattern, 'COUNT', batch_size)
-  cursor = reply[1]
-  local keys = reply[2]
-  for _, key in ipairs(keys) do
+-- Process only the keys passed as KEYS argument
+for _, key in ipairs(KEYS) do
     local hash_data = redis.call('HGETALL', key)
+
     for i = 1, #hash_data, 2 do
-      local ts = tonumber(hash_data[i])
-      local count = tonumber(hash_data[i+1])
-      if ts and count and ts >= start_ts and ts < end_ts then
-         if mode == 'sum' then
-           sum_results[key] = (sum_results[key] or 0) + count
-         elseif mode == 'grouped' then
-           if not grouped_results[key] then grouped_results[key] = {} end
-           local bucket_str = tostring(ts)
-           grouped_results[key][bucket_str] = (grouped_results[key][bucket_str] or 0) + count
-         elseif mode == 'surged' then
-           if not surged_results[key] then surged_results[key] = {} end
-           local hour = tostring(math.floor((ts % 86400) / 3600))
-           surged_results[key][hour] = (surged_results[key][hour] or 0) + count
-         end
-      end
+        local ts = tonumber(hash_data[i])
+        local count = tonumber(hash_data[i+1])
+        if ts and count and ts >= start_ts and ts < end_ts then
+            -- Sum mode: aggregate by key
+            sum_results[key] = (sum_results[key] or 0) + count
+
+            -- Grouped mode: aggregate by key ONLY (remove timestamp granularity)
+            grouped_results[key] = (grouped_results[key] or 0) + count
+
+            -- Surged mode: aggregate by key and hour
+            if not surged_results[key] then
+                surged_results[key] = {}
+            end
+            local hour = tostring(math.floor((ts % 86400) / 3600))
+            surged_results[key][hour] = (surged_results[key][hour] or 0) + count
+        end
     end
-  end
-until cursor == '0'
+end
 
 if mode == 'sum' then
-  local arr = {}
-  for k, v in pairs(sum_results) do
-    table.insert(arr, k)
-    table.insert(arr, v)
-  end
-  return arr
+    local arr = {}
+    for k, v in pairs(sum_results) do
+        table.insert(arr, k)
+        table.insert(arr, v)
+    end
+    return arr
 elseif mode == 'grouped' then
-  local arr = {}
-  for k, groups in pairs(grouped_results) do
-    local inner = {}
-    for bucket, count in pairs(groups) do
-      table.insert(inner, bucket)
-      table.insert(inner, count)
+    local arr = {}
+    for k, v in pairs(grouped_results) do
+        table.insert(arr, k)
+        table.insert(arr, v)
     end
-    table.insert(arr, k)
-    table.insert(arr, inner)
-  end
-  return arr
+    return arr
 elseif mode == 'surged' then
-  local arr = {}
-  for k, hours in pairs(surged_results) do
-    local inner = {}
-    for hour, count in pairs(hours) do
-      table.insert(inner, hour)
-      table.insert(inner, count)
+    local arr = {}
+    for key, hours in pairs(surged_results) do
+        local inner = {}
+        for hour, count in pairs(hours) do
+            table.insert(inner, hour)
+            table.insert(inner, count)
+        end
+        table.insert(arr, key)
+        table.insert(arr, inner)
     end
-    table.insert(arr, k)
-    table.insert(arr, inner)
-  end
-  return arr
+    return arr
 else
-  return {}
+    return {}
 end
 """
 
@@ -91,6 +82,8 @@ class QuestTimeSeries:
         mode: str = "sum",
         quest_mode: str = "all",
         field_details: Union[str, Iterable[str], None] = "all",
+        chunk_size: int = 500,
+        chunk_sleep: float = 0.15,
     ):
         """
         Parameters:
@@ -99,19 +92,20 @@ class QuestTimeSeries:
           - mode: Aggregation mode: "sum", "grouped", or "surged".
           - quest_mode: Quest mode—either "ar" or "normal". If set to "all", a wildcard is used.
           - field_details: The quest type to filter for (i.e. the first field in field_details).
-                         If "all", no filtering on quest type is done.
+                           If "all", no filtering on quest type is done.
+          - chunk_size: Keys per Lua chunk
+          - chunk_sleep: Sleep between chunks (seconds)
 
-        The keys are stored in the new format:
+        The keys are stored in the format:
             ts:quests_total:{quest_mode}:{area}:{field_details}
-        For retrieval, if field_details is not "all", we build a pattern as:
-            {field_details}:*:*:*:*:*
-        so that only keys with that quest type (first field) are returned.
         """
         self.area = area
         self.start = start
         self.end = end
         self.mode = mode.lower()
         self.quest_mode = quest_mode.lower()
+        self.chunk_size = chunk_size
+        self.chunk_sleep = chunk_sleep
         self.script_sha = None
 
         def _norm(x):
@@ -127,16 +121,59 @@ class QuestTimeSeries:
         logger.info(
             f"▶️ Initialized 🔎 QuestTimeSeries area={self.area}, mode={self.mode}, "
             f"quest_mode={self.quest_mode}, quest_types={self.quest_types or 'ALL'}, "
-            f"range={self.start}..{self.end}"
+            f"range={self.start}..{self.end}, "
+            f"chunk_size={self.chunk_size}, chunk_sleep={self.chunk_sleep}s"
         )
+
     async def _load_script(self, client):
+        """Load Lua script into Redis if not already cached"""
         if not self.script_sha:
-            logger.debug("🔄 Loading 🔎 Quest Lua script into Redis...")
-            self.script_sha = await client.script_load(QUEST_TIMESERIES_SCRIPT)
-            logger.debug(f"🔎 Quest Lua script loaded with SHA: {self.script_sha}")
-        else:
-            logger.debug("🔎 Quest Lua script already loaded, reusing cached SHA.")
+            logger.debug("Loading chunked Lua script for Quest into Redis...")
+            self.script_sha = await client.script_load(TIMESERIES_QUEST_CHUNK_SCRIPT)
+            logger.debug(f"Lua script 🔎 loaded with SHA: {self.script_sha}")
         return self.script_sha
+
+    async def _scan_keys_by_patterns(self, client) -> list[str]:
+        """SCAN for all matching keys (non-blocking, fast)"""
+        scan_start = time.monotonic()
+        all_keys = []
+
+        for pattern in self._build_key_patterns():
+            cursor = 0
+            while True:
+                cursor, keys = await client.scan(cursor, match=pattern, count=1000)
+                all_keys.extend(k.decode() if isinstance(k, bytes) else k for k in keys)
+                if cursor == 0:
+                    break
+
+        scan_elapsed = time.monotonic() - scan_start
+        logger.info(f"🔎 SCAN collected {len(all_keys)} keys in {scan_elapsed:.3f}s")
+        return all_keys
+
+    def _convert_redis_result(self, res):
+        """Convert Redis Lua table (list) into Python dict"""
+        if isinstance(res, list):
+            if len(res) % 2 == 0:
+                return {res[i]: self._convert_redis_result(res[i + 1]) for i in range(0, len(res), 2)}
+            else:
+                return [self._convert_redis_result(item) for item in res]
+        return res
+
+    def _merge_results(self, acc_sum, acc_grouped, acc_surged, chunk_data):
+        """Merge chunk results into accumulators"""
+        if self.mode == "sum":
+            for key, cnt in chunk_data.items():
+                acc_sum[key] = acc_sum.get(key, 0) + int(cnt)
+
+        elif self.mode == "grouped":
+            for key, cnt in chunk_data.items():
+                acc_grouped[key] = acc_grouped.get(key, 0) + int(cnt)
+
+        elif self.mode == "surged":
+            for key, hours in chunk_data.items():
+                bucket = acc_surged.setdefault(key, {})
+                for hour, count in hours.items():
+                    bucket[hour] = bucket.get(hour, 0) + int(count)
 
     def _build_key_patterns(self) -> list[str]:
         # Replace "all"/"global" with wildcard for area; wildcard quest_mode if "all"
@@ -155,108 +192,140 @@ class QuestTimeSeries:
         return patterns
 
     async def quest_retrieve_timeseries(self) -> Dict[str, Any]:
+        """Retrieve timeseries using chunked Lua scripts with yield points"""
         client = await redis_manager.check_redis_connection()
         if not client:
             logger.error("❌ Redis connection failed")
             return {"mode": self.mode, "data": {}}
 
-        def convert_redis_result(res):
-            if isinstance(res, list):
-                if len(res) % 2 == 0:
-                    return {res[i]: convert_redis_result(res[i+1]) for i in range(0, len(res), 2)}
-                else:
-                    return [convert_redis_result(item) for item in res]
-            return res
-
-        # accumulators to merge across multiple patterns
-        acc_sum: Dict[str, int] = {}
-        acc_grouped: Dict[str, Dict[str, int]] = {}
-        acc_surged: Dict[str, Dict[str, int]] = {}
+        total_start = time.monotonic()
 
         try:
-            start_ts = int(self.start.timestamp())
-            end_ts   = int(self.end.timestamp())
-            logger.debug(f"🔎 Quest ⏱️ Time range: start_ts={start_ts}, end_ts={end_ts}")
+            # Step 1: SCAN for all keys
+            all_keys = await self._scan_keys_by_patterns(client)
 
-            request_start = time.monotonic()
+            if not all_keys:
+                logger.info("🔎 No keys found matching patterns")
+                return {"mode": self.mode, "data": {}}
+
+            # Step 2: Load Lua script
             sha = await self._load_script(client)
 
-            for pattern in self._build_key_patterns():
+            # Step 3: Split keys into chunks
+            chunks = [all_keys[i:i+self.chunk_size] for i in range(0, len(all_keys), self.chunk_size)]
+            logger.info(f"🔎 Processing {len(all_keys)} keys in {len(chunks)} chunks of ~{self.chunk_size} keys")
+
+            # Accumulators
+            acc_sum: Dict[str, int] = {}
+            acc_grouped: Dict[str, int] = {}
+            acc_surged: Dict[str, Dict[str, int]] = {}
+
+            start_ts = int(self.start.timestamp())
+            end_ts   = int(self.end.timestamp())
+
+            # Step 4: Process chunks with sleep intervals
+            chunk_start = time.monotonic()
+            for i, chunk in enumerate(chunks):
+                chunk_iter_start = time.monotonic()
+
+                # Run Lua script on this chunk
                 raw = await client.evalsha(
                     sha,
-                    0,
-                    pattern,
+                    len(chunk),
+                    *chunk,
                     str(start_ts),
                     str(end_ts),
                     self.mode
                 )
-                data = convert_redis_result(raw)
 
-                if self.mode == "sum":
-                    # data: { full_key: count, ... }
-                    for k, v in data.items():
-                        acc_sum[k] = acc_sum.get(k, 0) + int(v)
-                elif self.mode == "grouped":
-                    # data: { full_key: { ts_bucket: count, ... }, ... }
-                    for k, groups in data.items():
-                        bucket = acc_grouped.setdefault(k, {})
-                        # groups might be list -> convert to dict
-                        if isinstance(groups, list):
-                            groups = {groups[i]: groups[i+1] for i in range(0, len(groups), 2)}
-                        for tb, cnt in groups.items():
-                            bucket[tb] = bucket.get(tb, 0) + int(cnt)
-                elif self.mode == "surged":
-                    # data: { full_key: { hour: count, ... }, ... }
-                    for k, hours in data.items():
-                        bucket = acc_surged.setdefault(k, {})
-                        if isinstance(hours, list):
-                            hours = {hours[i]: hours[i+1] for i in range(0, len(hours), 2)}
-                        for h, cnt in hours.items():
-                            bucket[h] = bucket.get(h, 0) + int(cnt)
+                chunk_data = self._convert_redis_result(raw)
+                self._merge_results(acc_sum, acc_grouped, acc_surged, chunk_data)
 
-            # Final formatting
+                chunk_iter_elapsed = time.monotonic() - chunk_iter_start
+                logger.info(f"🔎 Chunk {i+1}/{len(chunks)} processed {len(chunk)} keys in {chunk_iter_elapsed:.3f}s")
+
+                # Sleep between chunks to allow writes
+                if i < len(chunks) - 1:
+                    await asyncio.sleep(self.chunk_sleep)
+
+            chunk_elapsed = time.monotonic() - chunk_start
+            logger.info(f"🔎 Chunked Lua processing took {chunk_elapsed:.3f}s")
+
+            # Step 5: Final formatting
+            format_start = time.monotonic()
+            formatted = {}
+
             if self.mode == "sum":
+                # Prepare containers for split counts
+                quest_mode_counts = {"ar": 0, "normal": 0}
+
                 if self.area.lower() in ["all", "global"]:
                     area_totals: Dict[str, int] = {}
                     quest_grand_total = 0
+
                     for key, v in acc_sum.items():
                         parts = key.split(":")
-                        key_area = parts[3] if len(parts) > 3 else "unknown"
-                        val = int(v)
-                        area_totals[key_area] = area_totals.get(key_area, 0) + val
-                        quest_grand_total += val
+                        # Key format: ts:quests_total:{mode}:{area}:{field_details}
+                        if len(parts) > 3:
+                            q_mode = parts[2]
+                            key_area = parts[3]
+                            val = int(v)
+
+                            # Aggregate Area totals
+                            area_totals[key_area] = area_totals.get(key_area, 0) + val
+                            quest_grand_total += val
+
+                            # Aggregate Quest Mode totals
+                            if q_mode in quest_mode_counts:
+                                quest_mode_counts[q_mode] += val
+                            else:
+                                quest_mode_counts[q_mode] = quest_mode_counts.get(q_mode, 0) + val
+
                     pokestops_data = global_state.cached_pokestops or {"areas": {}, "pokestop_grand_total": 0}
                     formatted = {
                         "areas": area_totals,
                         "quest_grand_total": quest_grand_total,
                         "total pokestops": pokestops_data,
+                        "quest_mode": quest_mode_counts
                     }
                 else:
-                    total_sum = sum(int(v) for v in acc_sum.values())
-                    formatted = {"total": total_sum}
+                    # Specific Area Logic
+                    total_sum = 0
+                    for key, v in acc_sum.items():
+                        val = int(v)
+                        total_sum += val
+
+                        # Extract Mode from key
+                        parts = key.split(":")
+                        if len(parts) > 2:
+                            q_mode = parts[2]
+                            if q_mode in quest_mode_counts:
+                                quest_mode_counts[q_mode] += val
+                            else:
+                                quest_mode_counts[q_mode] = quest_mode_counts.get(q_mode, 0) + val
+
+                    formatted = {
+                        "total": total_sum,
+                        "quest_mode": quest_mode_counts
+                    }
 
             elif self.mode == "grouped":
-                formatted = {}
-                for k, groups in acc_grouped.items():
-                    ordered = dict(sorted(groups.items(), key=lambda x: int(x[0])))
-                    formatted[k] = ordered
-                formatted = dict(sorted(formatted.items(), key=lambda item: item[0]))
+                formatted = dict(sorted(acc_grouped.items(), key=lambda item: item[0]))
 
             elif self.mode == "surged":
-                formatted = {}
                 for k, hours in acc_surged.items():
                     labeled = {f"hour {int(h)}": v for h, v in hours.items()}
                     formatted[k] = dict(sorted(labeled.items(), key=lambda x: int(x[0].split()[1])))
                 formatted = dict(sorted(formatted.items(), key=lambda item: item[0]))
 
-            else:
-                formatted = {}
+            format_elapsed = time.monotonic() - format_start
+            total_elapsed = time.monotonic() - total_start
 
-            elapsed = time.monotonic() - request_start
-            logger.info(f"🔎 Quest retrieval execution took ⏱️ {elapsed:.3f} seconds")
+            logger.info(f"🔎 Final formatting took {format_elapsed:.3f}s")
+            logger.info(f"🔎 Total retrieval time: {total_elapsed:.3f}s")
 
             return {"mode": self.mode, "data": formatted}
 
         except Exception as e:
-            logger.error(f"❌ 🔎 Quest Lua script execution failed: {e}", exc_info=True)
+            logger.error(f"❌ 🔎 Quest retrieval failed: {e}", exc_info=True)
             return {"mode": self.mode, "data": {}}

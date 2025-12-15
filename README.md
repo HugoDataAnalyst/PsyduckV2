@@ -3,7 +3,8 @@
 ## Configuration
 1. Copy the [`.env.example`](./.env.example) file to `.env` and fill in the required environment variables.
 2. Copy [config/example.config.json](./config/example.config.json) to `config/config.json` and fill in the required configurations.
-3. Ensure in Golbat you have the webhook with `/webhook`.
+3. Copy [dashboard/dashboard_config.example.json](./dashboard/dashboard_config.example.json) to `dashboard/dashboard_config.json` and customize your dashboard settings (map name, navbar links, etc.).
+4. Ensure in Golbat you have the webhook with `/webhook`.
 Example:
 `127.0.0.1:5050/webhook`
 
@@ -99,6 +100,75 @@ Run the migration locally before pushing to the repository:
 
 > This command will create a new migration file in the alembic/versions/ directory.
 > Make sure to commit the migration file to the repository.
+
+## Dashboard
+
+The dashboard is a separate Dash-based analytics application that provides visual analytics for Pokemon GO events.
+
+### Running the Dashboard
+
+```bash
+# Start the dashboard (runs on port 8050 by default)
+python run_dashboard.py
+```
+
+> **Important:** The dashboard requires the main application (`psyduckv2.py`) to be running, as it fetches data from the API endpoints.
+
+### Features
+
+- **Home**: Landing page with overview statistics
+- **Pokemon**: Pokemon spawn analytics with IV distributions, timeseries charts, shiny rates, and heatmaps
+- **Raids**: Raid occurrence analytics by level and Pokemon
+- **Quests**: Quest analytics by reward type and pokestop
+- **Invasions**: Team Rocket invasion analytics by type and location
+
+### Multi-Language Support
+
+The dashboard supports multiple languages:
+- English (en)
+- Portuguese (pt)
+- German (de)
+- French (fr)
+
+Switch languages using the flag dropdown in the navbar.
+
+### Background Tasks
+
+The dashboard runs background tasks to periodically fetch and cache data from the API:
+
+- **Daily tasks** (hourly refresh): Areas, Pokestops, Pokemon, Raids, Invasions, Quests
+- **Alltime tasks** (daily refresh): Historical aggregations for all event types
+
+On startup, daily tasks run first, followed by "alltime" tasks after a 30-second delay to avoid overwhelming the API.
+
+### Dashboard Customization
+
+The dashboard can be customized via `dashboard/dashboard_config.json`:
+
+```json
+{
+  "map_name": "YourMapName",
+  "icon_url": "/assets/custom_images/your_icon.png",
+  "custom_navbar_links": [
+    {
+      "name": "API Docs",
+      "url": "https://your-api-docs-url.com/",
+      "icon": "bi bi-book-fill",
+      "external": true
+    }
+  ]
+}
+```
+
+- `map_name`: Displayed as "PsyduckV2 {map_name}" in navbar and page titles
+- `icon_url`: Custom icon displayed between "PsyduckV2" and map name (place images in `dashboard/assets/custom_images/`)
+- `custom_navbar_links`: Additional navbar links with [Bootstrap Icons](https://icons.getbootstrap.com/)
+
+**Custom Images:**
+Place your custom images in `dashboard/assets/custom_images/` (gitignored). This directory is ignored by git to keep your customizations private.
+
+**Icon Caching:**
+The dashboard automatically caches Pokemon and reward icons locally on startup for faster loading. Icons are downloaded from the WatWowMap UICONS repository and stored in `dashboard/assets/` subdirectories (gitignored). First startup may take 2-5 minutes to download all icons; subsequent starts are instant.
 
 ## API Documentation
 

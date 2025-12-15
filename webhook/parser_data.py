@@ -48,9 +48,10 @@ async def process_pokemon_data(filtered_data):
         logger.error("❌ No data provided to process_pokemon_data.")
         return None
 
-    client = await redis_manager.check_redis_connection()
+    # Use fast retry for webhook processing to avoid data loss
+    client = await redis_manager.get_connection_with_retry(max_attempts=3, delay=0.3)
     if not client:
-        logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
+        logger.error("❌ Redis is not connected after retries. Cannot process Pokémon data.")
         return None
 
     #try:
@@ -80,14 +81,14 @@ async def process_pokemon_data(filtered_data):
 
     # Execute SQL commands if Enabled
     if AppConfig.store_sql_pokemon_aggregation:
-        get_client = await redis_manager.check_redis_connection()
+        get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
         logger.debug("🔃 Processing Pokémon Aggregation...")
         await pokemon_buffer.increment_event(get_client, filtered_data)
     else:
         logger.debug("⚠️ SQL Pokémon Aggregation is disabled.")
 
     if AppConfig.store_sql_pokemon_shiny:
-        get_client = await redis_manager.check_redis_connection()
+        get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
         logger.debug("🔃 Processing Pokémon Shiny Rates...")
         await shiny_buffer.increment_event(get_client, filtered_data)
     else:
@@ -120,12 +121,13 @@ async def process_raid_data(filtered_data):
     Process the filtered Raid event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
     """
     if not filtered_data:
-        logger.error("❌ No data provided to process_pokemon_data.")
+        logger.error("❌ No data provided to process_raid_data.")
         return None
 
-    client = await redis_manager.check_redis_connection()
+    # Use fast retry for webhook processing to avoid data loss
+    client = await redis_manager.get_connection_with_retry(max_attempts=3, delay=0.3)
     if not client:
-        logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
+        logger.error("❌ Redis is not connected after retries. Cannot process Raid data.")
         return None
 
     try:
@@ -141,7 +143,7 @@ async def process_raid_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_raid_aggregation:
-            get_client = await redis_manager.check_redis_connection()
+            get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
             logger.debug("🔃 Processing Raid Aggregation...")
             await raids_buffer.increment_event(get_client, filtered_data)
         else:
@@ -171,12 +173,13 @@ async def process_quest_data(filtered_data):
     Process the filtered Quest event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
     """
     if not filtered_data:
-        logger.error("❌ No data provided to process_pokemon_data.")
+        logger.error("❌ No data provided to process_quest_data.")
         return None
 
-    client = await redis_manager.check_redis_connection()
+    # Use fast retry for webhook processing to avoid data loss
+    client = await redis_manager.get_connection_with_retry(max_attempts=3, delay=0.3)
     if not client:
-        logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
+        logger.error("❌ Redis is not connected after retries. Cannot process Quest data.")
         return None
 
     try:
@@ -192,7 +195,7 @@ async def process_quest_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_quest_aggregation:
-            get_client = await redis_manager.check_redis_connection()
+            get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
             logger.debug("🔃 Processing Quest Aggregation...")
             await quests_buffer.increment_event(get_client, filtered_data)
         else:
@@ -228,12 +231,13 @@ async def process_invasion_data(filtered_data):
     Process the filtered Invasion event by updating both the time series and the counter series in a single Redis transaction + SQL as optional.
     """
     if not filtered_data:
-        logger.error("❌ No data provided to process_pokemon_data.")
+        logger.error("❌ No data provided to process_invasion_data.")
         return None
 
-    client = await redis_manager.check_redis_connection()
+    # Use fast retry for webhook processing to avoid data loss
+    client = await redis_manager.get_connection_with_retry(max_attempts=3, delay=0.3)
     if not client:
-        logger.error("❌ Redis is not connected. Cannot process Pokémon data.")
+        logger.error("❌ Redis is not connected after retries. Cannot process Invasion data.")
         return None
 
     try:
@@ -249,7 +253,7 @@ async def process_invasion_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_invasion_aggregation:
-            get_client = await redis_manager.check_redis_connection()
+            get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
             logger.debug("🔃 Processing Invasion Aggregation...")
             await invasions_buffer.increment_event(get_client, filtered_data)
         else:
