@@ -8,19 +8,47 @@ from server_fastapi import global_state
 from utils.koji_geofences import KojiGeofences
 from my_redis.connect_redis import RedisManager
 
+# Import for multi-worker state sharing (imported lazily to avoid circular imports)
+_global_state_manager = None
+
+def _get_global_state_manager():
+    """Lazy import to avoid circular imports."""
+    global _global_state_manager
+    if _global_state_manager is None:
+        from utils.global_state_manager import GlobalStateManager
+        _global_state_manager = GlobalStateManager
+    return _global_state_manager
+
+
+def _get_per_worker_golbat_pool_size() -> int:
+    """
+    Calculate max pool size per worker for Golbat DB connections.
+    Uses a smaller pool since this is only used for periodic pokestop refreshes.
+    """
+    # Golbat pool is only used for periodic refreshes, so we need fewer connections
+    total_max = getattr(AppConfig, "golbat_db_pool_max", 20)  # Default 20 total
+    workers = max(1, getattr(AppConfig, "uvicorn_workers", 1))
+    per_worker = max(2, total_max // workers)
+    return per_worker
+
+
 async def get_golbat_mysql_pool():
     """
     Create and return an aiomysql connection pool for the Golbat DB.
+    Pool size is limited per worker to prevent connection exhaustion.
     """
+    per_worker_max = _get_per_worker_golbat_pool_size()
     pool = await aiomysql.create_pool(
         host=AppConfig.golbat_db_host,
         port=AppConfig.golbat_db_port,
         user=AppConfig.golbat_db_user,
         password=AppConfig.golbat_db_password,
         db=AppConfig.golbat_db_name,
+        minsize=0,  # Don't eagerly create connections
+        maxsize=per_worker_max,
         autocommit=True,
-        loop=asyncio.get_running_loop()
     )
+    logger.debug(f"Created Golbat DB pool (maxsize={per_worker_max})")
     return pool
 
 class GolbatSQLPokestops:
@@ -111,8 +139,17 @@ class GolbatSQLPokestops:
             else:
                 logger.error("❌ Redis not connected; could not cache pokestop counts.")
 
-            # Optionally update global_state
+            # Update legacy global_state for backward compatibility
             global_state.cached_pokestops = final_data
+
+            # Update GlobalStateManager for multi-worker support
+            # Invalidate local cache so other workers fetch fresh data on next request
+            try:
+                gsm = _get_global_state_manager()
+                gsm.invalidate_local_cache(gsm.POKESTOPS_KEY)
+                logger.debug("Invalidated GlobalStateManager pokestops cache")
+            except Exception as gsm_err:
+                logger.warning(f"Could not update GlobalStateManager: {gsm_err}")
 
             return final_data
 

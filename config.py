@@ -3,6 +3,8 @@ import sys
 import json
 import dotenv
 import urllib.parse
+
+from requests import get
 from utils.logger import logger
 from typing import List, Optional, Dict
 
@@ -134,6 +136,9 @@ pokestop_refresh_interval_seconds = config.get("golbat_pokestops", {}).get("poke
 # Log Level
 log_level = get_env_var("LOG_LEVEL", "INFO").upper()
 log_file = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
+log_level_dashboard = get_env_var("LOG_LEVEL_DASHBOARD", "INFO").upper()
+log_file_dashboard = get_env_var("LOG_FILE_DASHBOARD", "FALSE").upper() == "TRUE"
+
 
 # Koji
 koji_bearer_token = get_env_var("KOJI_TOKEN")
@@ -141,6 +146,9 @@ koji_ip = get_env_var("KOJI_IP", "127.0.0.1")
 koji_port = get_env_int("KOJI_PORT", 8080)
 koji_project_name = get_env_var("KOJI_PROJECT_NAME")
 koji_geofence_api_url = f"http://{koji_ip}:{koji_port}/api/v1/geofence/feature-collection/{koji_project_name}"
+koji_url_base = get_env_var("KOJI_URL")
+koji_url = f"{koji_url_base}/api/v1/geofence/feature-collection/{koji_project_name}" if koji_url_base else None
+
 # Extract geofence settings
 geofence_expire_cache_seconds = config.get("geofences", {}).get("expire_cache_seconds", 3600)
 geofence_refresh_cache_seconds = config.get("geofences", {}).get("refresh_cache_seconds", 3500)
@@ -162,3 +170,14 @@ allowed_ips = get_env_list("ALLOWED_IPS")
 api_header_name = get_env_var("API_HEADER_NAME")
 api_header_secret = get_env_var("API_HEADER_SECRET")
 api_secret_key = get_env_var("API_SECRET_KEY")
+api_base_url = get_env_var("API_BASE_URL")
+
+# Uvicorn Workers
+uvicorn_workers = get_env_int("UVICORN_WORKERS", 1)
+
+# DASHBOARD
+dashboard_ip = get_env_var("DASHBOARD_IP", "127.0.0.1")
+dashboard_port = get_env_int("DASHBOARD_PORT", 8050)
+dashboard_debug_mode = get_env_var("DASH_DEBUG_MODE", "FALSE").upper() == "TRUE"
+dashboard_workers = get_env_int("DASH_WORKERS", 1)
+

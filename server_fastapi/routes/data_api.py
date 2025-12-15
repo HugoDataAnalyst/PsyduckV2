@@ -8,6 +8,7 @@ from sql.utils.area_parser import resolve_area_id_by_name
 from server_fastapi import global_state
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, dependencies
 from typing import Optional
+from utils.timer import time_execution
 from my_redis.utils import filtering_keys
 from my_redis.queries.gets.pokemons.pokemon_counter_retrieval import PokemonCounterRetrieval
 from my_redis.queries.gets.raids.raid_counter_retrieval import RaidCounterRetrieval
@@ -61,6 +62,7 @@ def _to_int_list(name: str, s: Optional[set[str]]) -> Optional[List[int]]:
     tags=["Pokestops"],
     dependencies=dependencies_list
 )
+@time_execution(label="GET_CACHED_POKESTOPS")
 async def get_cached_pokestops(
     area: Optional[str] = Query("global", description="Filter pokestops by area (default: global)"),
     response_format: str = Query("json", description="Response format: json or text"),
@@ -101,6 +103,7 @@ async def get_cached_pokestops(
     tags=["Koji Geofences"],
     dependencies=dependencies_list
 )
+@time_execution(label="GET_CACHED_GEOFENCES")
 async def get_cached_geofences(
     response_format: str = Query("json", description="Response format: json or text"),
     api_secret_header: Optional[str] = secure_api.get_secret_header_param()
@@ -129,6 +132,7 @@ async def get_cached_geofences(
     tags=["Pokémon Counter Series"],
     dependencies=dependencies_list
 )
+@time_execution(label="POKEMON_GET_COUNTERSERIES")
 async def get_pokemon_counterseries(
     counter_type: str = Query(..., description="Type of counter series: totals, tth, or weather"),
     interval: str = Query(..., description="Interval: hourly or weekly for totals and tth; monthly for weather"),
@@ -164,9 +168,6 @@ async def get_pokemon_counterseries(
         raise HTTPException(status_code=400, detail="❌ Surged mode is only supported for hourly intervals.")
     if resp_fmt not in ["json", "text"]:
         raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
-    if resp_fmt not in ["json", "text"]:
-        raise HTTPException(400, "❌ Invalid response_format. Must be json or text.")
-
 
     # Parse multi-select params (None means "all")
     metrics_set     = _parse_csv_param(metric)
@@ -233,6 +234,7 @@ async def get_pokemon_counterseries(
     tags=["Raid Counter Series"],
     dependencies=dependencies_list
 )
+@time_execution(label="RAID_GET_COUNTERSERIES")
 async def get_counter_raids(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
     interval: str = Query(..., description="Interval: hourly or weekly."),
@@ -336,6 +338,7 @@ async def get_counter_raids(
     tags=["Invasion Counter Series"],
     dependencies=dependencies_list
 )
+@time_execution(label="INVASION_GET_COUNTERSERIES")
 async def get_counter_invasions(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
     interval: str = Query(..., description="Interval: hourly or weekly."),
@@ -431,6 +434,7 @@ async def get_counter_invasions(
     tags=["Quest Counter Series"],
     dependencies=dependencies_list
 )
+@time_execution(label="QUEST_GET_COUNTERSERIES")
 async def get_counter_quests(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
     interval: str = Query(..., description="Interval: hourly or weekly."),
@@ -558,6 +562,7 @@ async def get_counter_quests(
     tags=["Pokémon TimeSeries"],
     dependencies=dependencies_list
 )
+@time_execution(label="POKEMON_GET_TIMESERIES")
 async def get_pokemon_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
@@ -629,6 +634,7 @@ async def get_pokemon_timeseries(
     tags=["Pokémon TTH TimeSeries"],
     dependencies=dependencies_list
 )
+@time_execution(label="POKEMON_GET_TTH_TIMESERIES")
 async def get_pokemon_tth_timeseries(
     start_time: str = Query(..., description="Start time as ISO format or relative (e.g., '1 month')"),
     end_time: str = Query(..., description="End time as ISO format or relative (e.g., 'now')"),
@@ -695,6 +701,7 @@ async def get_pokemon_tth_timeseries(
     tags=["Raid TimeSeries"],
     dependencies=dependencies_list
 )
+@time_execution(label="RAID_GET_TIMESERIES")
 async def get_raid_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
@@ -769,6 +776,7 @@ async def get_raid_timeseries(
     tags=["Invasion TimeSeries"],
     dependencies=dependencies_list
 )
+@time_execution(label="INVASION_GET_TIMESERIES")
 async def get_invasion_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
@@ -843,6 +851,7 @@ async def get_invasion_timeseries(
     tags=["Quest TimeSeries"],
     dependencies=dependencies_list
 )
+@time_execution(label="QUEST_GET_TIMESERIES")
 async def get_quest_timeseries(
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
@@ -913,6 +922,7 @@ async def get_quest_timeseries(
     tags=["Pokémon HeatMap Data"],
     dependencies=dependencies_list
 )
+@time_execution(label="POKEMON_SQL_HEATMAP_DATA")
 async def get_pokemon_heatmap_data(
     start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
     end_time: str   = Query(..., description="ISO or 'now' / relative"),
@@ -992,6 +1002,7 @@ async def get_pokemon_heatmap_data(
     tags=["Shiny Rate Data"],
     dependencies=dependencies_list
 )
+@time_execution(label="SHINY_SQL_RATE_DATA")
 async def get_shiny_rate_data(
     start_time: str = Query(..., description="Start month as 202503 (YYYYMM or YYMM)"),
     end_time: str   = Query(..., description="End month as 202504 (YYYYMM or YYMM)"),
@@ -1060,6 +1071,7 @@ async def get_shiny_rate_data(
     tags=["Raid SQL Data"],
     dependencies=dependencies_list
 )
+@time_execution(label="RAID_SQL_DATA")
 async def get_raid_data(
     start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
     end_time: str   = Query(..., description="ISO or 'now' / relative"),
@@ -1163,6 +1175,7 @@ async def get_raid_data(
     tags=["Invasion SQL Data"],
     dependencies=dependencies_list
 )
+@time_execution(label="INVASION_SQL_DATA")
 async def get_invasion_data(
     start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
     end_time: str   = Query(..., description="ISO or 'now' / relative"),
@@ -1256,6 +1269,7 @@ async def get_invasion_data(
     tags=["Quest SQL Data"],
     dependencies=dependencies_list
 )
+@time_execution(label="QUEST_SQL_DATA")
 async def get_quest_data(
     start_time: str = Query(..., description="ISO or relative (e.g., '10 hours')"),
     end_time: str   = Query(..., description="ISO or 'now' / relative"),
@@ -1381,4 +1395,3 @@ async def get_quest_data(
         lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
                      f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
     return "\n".join(lines)
-

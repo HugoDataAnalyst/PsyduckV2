@@ -1,0 +1,12 @@
+{
+  "map_name": "YourMapName",
+  "icon_url": "",
+  "custom_navbar_links": [
+    {
+      "name": "API Docs",
+      "url": "https://docspsyduckv2.databyhugo.com/",
+      "icon": "bi bi-book-fill",
+      "external": true
+    }
+  ]
+}

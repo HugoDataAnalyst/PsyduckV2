@@ -4,6 +4,39 @@ from utils.logger import logger
 from datetime import datetime
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
 import config as AppConfig
+import asyncio
+
+
+async def _get_client_with_retry(redis_client: Redis | None, max_attempts: int = 3, delay: float = 0.3) -> Redis | None:
+    """
+    Try to get a working Redis client with retry logic.
+    First tries the provided client, then falls back to getting a fresh connection.
+    """
+    from my_redis.connect_redis import RedisManager
+    redis_manager = RedisManager()
+
+    for attempt in range(1, max_attempts + 1):
+        # Try provided client first
+        if redis_client:
+            try:
+                if await redis_client.ping():
+                    return redis_client
+            except Exception:
+                pass
+
+        # Fall back to getting a fresh connection
+        try:
+            client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
+            if client:
+                return client
+        except Exception:
+            pass
+
+        if attempt < max_attempts:
+            await asyncio.sleep(delay)
+            logger.debug(f"⏳ Buffer retry attempt {attempt}/{max_attempts}")
+
+    return None
 
 class PokemonIVRedisBuffer:
     redis_key = "buffer:pokemon_iv_events"
@@ -31,25 +64,45 @@ class PokemonIVRedisBuffer:
             # Create a composite unique key string
             unique_key = f"{spawnpoint}|{pokemon_id}|{form}|{round_iv}|{level}|{area_id}|{first_seen}"
 
+            # Get a working client with retry
+            client = await _get_client_with_retry(redis_client)
+            if not client:
+                logger.error("❌ Pokemon IV buffer: No Redis connection available after retries. Event lost.")
+                return
+
             # Persist coordinates once per spawnpoint
             if latitude is not None and longitude is not None:
                 try:
-                    await redis_client.hsetnx(cls.redis_coords_key, spawnpoint, f"{latitude},{longitude}")
+                    await client.hsetnx(cls.redis_coords_key, spawnpoint, f"{latitude},{longitude}")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to cache coords for spawnpoint {spawnpoint}: {e}")
 
-            # Append one event line
-            new_len = await redis_client.rpush(cls.redis_key, unique_key)
+            # Append one event line with retry
+            new_len = None
+            for attempt in range(3):
+                try:
+                    new_len = await client.rpush(cls.redis_key, unique_key)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        client = await _get_client_with_retry(None)
+                        if not client:
+                            logger.error(f"❌ Pokemon IV buffer: rpush failed, no client available: {e}")
+                            return
+                    else:
+                        logger.error(f"❌ Pokemon IV buffer: rpush failed after retries: {e}")
+                        return
+
             logger.debug(f"Appended IV event '{unique_key}'. List length now {new_len}.")
 
             # Check list size
-            current_len = await redis_client.llen(cls.redis_key)
+            current_len = await client.llen(cls.redis_key)
             logger.debug(f"📊 👻 Current queued pokemon events: {current_len}")
 
             # Flush if the number of unique lines exceeds the threshold
             if current_len >= cls.aggregation_threshold:
                 logger.warning(f"📊 👻 Event buffer threshold reached: {current_len}. Flushing…")
-                await cls.flush_if_ready(redis_client)
+                await cls.flush_if_ready(client)
         except Exception as e:
             logger.error(f"❌ Error incrementing aggregated event: {e}")
 
@@ -62,11 +115,17 @@ class PokemonIVRedisBuffer:
         - Uses the v2 temp-table path for fast upsert.
         - Returns the number of aggregated rows consumed by SQL (not unique keys in Redis).
         """
+        # Get a working client with retry
+        client = await _get_client_with_retry(redis_client)
+        if not client:
+            logger.error("❌ Pokemon IV flush: No Redis connection available after retries.")
+            return 0
+
         main_temp = None
         coords_temp = None
         try:
             # 0) Quick check
-            if not await redis_client.exists(cls.redis_key):
+            if not await client.exists(cls.redis_key):
                 logger.debug("📭 No aggregated IV data to flush.")
                 return 0
 
@@ -75,7 +134,7 @@ class PokemonIVRedisBuffer:
             coords_temp = cls.redis_coords_key + ":flushing"   # e.g., buffer:pokemon_iv_coords:flushing
 
             try:
-                await redis_client.rename(cls.redis_key, main_temp)
+                await client.rename(cls.redis_key, main_temp)
             except Exception as rename_err:
                 if "no such key" in str(rename_err).lower():
                     logger.debug("📭 IV list disappeared before rename. Nothing to flush.")
@@ -84,7 +143,7 @@ class PokemonIVRedisBuffer:
 
             # coords are optional
             try:
-                await redis_client.rename(cls.redis_coords_key, coords_temp)
+                await client.rename(cls.redis_coords_key, coords_temp)
             except Exception as rename_coords_err:
                 if "no such key" in str(rename_coords_err).lower():
                     coords_temp = None  # proceed without coords
@@ -92,7 +151,7 @@ class PokemonIVRedisBuffer:
                     raise
 
             # 2) Read both hashes
-            lines = await redis_client.lrange(main_temp, 0, -1)
+            lines = await client.lrange(main_temp, 0, -1)
             if not lines:
                 logger.debug("📭 Temp IV list empty after rename. Skipping")
                 return 0
@@ -102,7 +161,7 @@ class PokemonIVRedisBuffer:
             # snapshot coords (from temp hash if present)
             coords_map = {}
             if coords_temp:
-                coords_raw = await redis_client.hgetall(coords_temp)
+                coords_raw = await client.hgetall(coords_temp)
                 for k, v in coords_raw.items():
                     try:
                         sp = k.decode() if isinstance(k, (bytes, bytearray)) else k
@@ -162,13 +221,13 @@ class PokemonIVRedisBuffer:
         finally:
             # 5) Cleanup temp keys
             try:
-                if main_temp:
-                    await redis_client.delete(main_temp)
+                if main_temp and client:
+                    await client.delete(main_temp)
             except Exception:
                 pass
             try:
-                if coords_temp:
-                    await redis_client.delete(coords_temp)
+                if coords_temp and client:
+                    await client.delete(coords_temp)
             except Exception:
                 pass
 
@@ -184,18 +243,24 @@ class PokemonIVRedisBuffer:
           - upsert via v2 SQL path
         Returns number of rows consumed by SQL.
         """
+        # Get a working client with retry
+        client = await _get_client_with_retry(redis_client)
+        if not client:
+            logger.error("❌ Pokemon IV force-flush: No Redis connection available after retries.")
+            return 0
+
         main_temp = None
         coords_temp = None
         try:
             # quick existence check
-            if not await redis_client.exists(cls.redis_key):
+            if not await client.exists(cls.redis_key):
                 logger.debug("📭 No Pokémon IV data to force flush")
                 return 0
 
             # rename the list to a force temp
             main_temp = cls.redis_key + ":force_flushing"
             try:
-                await redis_client.rename(cls.redis_key, main_temp)
+                await client.rename(cls.redis_key, main_temp)
             except Exception as rename_err:
                 if "no such key" in str(rename_err).lower():
                     logger.debug("📭 IV hash disappeared before force rename. Nothing to flush.")
@@ -205,7 +270,7 @@ class PokemonIVRedisBuffer:
             # rename coords if present
             coords_temp = cls.redis_coords_key + ":force_flushing"
             try:
-                await redis_client.rename(cls.redis_coords_key, coords_temp)
+                await client.rename(cls.redis_coords_key, coords_temp)
             except Exception as rename_coords_err:
                 if "no such key" in str(rename_coords_err).lower():
                     coords_temp = None  # proceed without coords
@@ -213,7 +278,7 @@ class PokemonIVRedisBuffer:
                     raise
 
             # read data
-            lines = await redis_client.lrange(main_temp, 0, -1)
+            lines = await client.lrange(main_temp, 0, -1)
             if not lines:
                 logger.debug("📭 No Pokémon IV list data in force-flush buffer")
                 return 0
@@ -223,7 +288,7 @@ class PokemonIVRedisBuffer:
             # coords map
             coords_map = {}
             if coords_temp:
-                coords_raw = await redis_client.hgetall(coords_temp)
+                coords_raw = await client.hgetall(coords_temp)
                 for k, v in coords_raw.items():
                     try:
                         sp = k.decode() if isinstance(k, (bytes, bytearray)) else k
@@ -281,13 +346,13 @@ class PokemonIVRedisBuffer:
         finally:
             # cleanup
             try:
-                if main_temp:
-                    await redis_client.delete(main_temp)
+                if main_temp and client:
+                    await client.delete(main_temp)
             except Exception:
                 pass
             try:
-                if coords_temp:
-                    await redis_client.delete(coords_temp)
+                if coords_temp and client:
+                    await client.delete(coords_temp)
             except Exception:
                 pass
 
@@ -321,18 +386,38 @@ class ShinyRateRedisBuffer:
             # Construct a composite unique key
             unique_key = f"{username}|{pokemon_id}|{form}|{shiny}|{area_id}|{month_year}"
 
-            # Increment the count for this unique key
-            new_count = await redis_client.hincrby(cls.redis_key, unique_key, 1)
+            # Get a working client with retry
+            client = await _get_client_with_retry(redis_client)
+            if not client:
+                logger.error("❌ Shiny buffer: No Redis connection available after retries. Event lost.")
+                return
+
+            # Increment the count for this unique key with retry
+            new_count = None
+            for attempt in range(3):
+                try:
+                    new_count = await client.hincrby(cls.redis_key, unique_key, 1)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        client = await _get_client_with_retry(None)
+                        if not client:
+                            logger.error(f"❌ Shiny buffer: hincrby failed, no client available: {e}")
+                            return
+                    else:
+                        logger.error(f"❌ Shiny buffer: hincrby failed after retries: {e}")
+                        return
+
             logger.debug(f"Incremented shiny key '{unique_key}' to {new_count}.")
 
             # Check total unique keys in the hash
-            current_unique_count = await redis_client.hlen(cls.redis_key)
+            current_unique_count = await client.hlen(cls.redis_key)
             logger.debug(f"📊 🌟 Current total unique aggregated shiny keys: {current_unique_count}")
 
             # Flush if threshold is reached
             if current_unique_count >= cls.aggregation_threshold:
                 logger.warning(f"📊 🌟 Shiny aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
-                await cls.flush_if_ready(redis_client)
+                await cls.flush_if_ready(client)
         except Exception as e:
             logger.error(f"❌ Error incrementing aggregated shiny event: {e}")
 
@@ -342,16 +427,22 @@ class ShinyRateRedisBuffer:
         Flush buffered shiny aggregates into MySQL.
         Returns the number of aggregated rows consumed by SQL.
         """
+        # Get a working client with retry
+        client = await _get_client_with_retry(redis_client)
+        if not client:
+            logger.error("❌ Shiny flush: No Redis connection available after retries.")
+            return 0
+
         temp_key = None
         try:
-            if not await redis_client.exists(cls.redis_key):
+            if not await client.exists(cls.redis_key):
                 logger.debug("📭 No aggregated shiny data to flush.")
                 return 0
 
             # 1) rename to temp
             temp_key = cls.redis_key + ":flushing"
             try:
-                await redis_client.rename(cls.redis_key, temp_key)
+                await client.rename(cls.redis_key, temp_key)
             except Exception as rename_err:
                 if "no such key" in str(rename_err).lower():
                     logger.debug("📭 Shiny hash disappeared before rename. Nothing to flush.")
@@ -359,7 +450,7 @@ class ShinyRateRedisBuffer:
                 raise
 
             # 2) read
-            aggregated_data = await redis_client.hgetall(temp_key)
+            aggregated_data = await client.hgetall(temp_key)
             if not aggregated_data:
                 logger.debug("📭 No shiny data in temporary hash; skipping.")
                 return 0
@@ -411,27 +502,34 @@ class ShinyRateRedisBuffer:
         finally:
             # 5) cleanup
             try:
-                if temp_key:
-                    await redis_client.delete(temp_key)
+                if temp_key and client:
+                    await client.delete(temp_key)
             except Exception:
                 pass
 
     @classmethod
     async def force_flush(cls, redis_client: Redis):
         """Force flush all buffered shiny data regardless of thresholds."""
+        # Get a working client with retry
+        client = await _get_client_with_retry(redis_client)
+        if not client:
+            logger.error("❌ Shiny force-flush: No Redis connection available after retries.")
+            return 0
+
+        temp_key = None
         try:
-            if not await redis_client.exists(cls.redis_key):
+            if not await client.exists(cls.redis_key):
                 logger.debug("📭 No shiny data to force flush")
                 return 0
 
             # Atomically rename the buffer key
             temp_key = cls.redis_key + ":force_flushing"
-            await redis_client.rename(cls.redis_key, temp_key)
+            await client.rename(cls.redis_key, temp_key)
 
-            aggregated_data = await redis_client.hgetall(temp_key)
+            aggregated_data = await client.hgetall(temp_key)
             if not aggregated_data:
                 logger.debug("📭 No shiny data in force-flush buffer")
-                await redis_client.delete(temp_key)
+                await client.delete(temp_key)
                 return 0
 
             # Process data
@@ -457,10 +555,15 @@ class ShinyRateRedisBuffer:
                 })
 
             inserted_count = await PokemonSQLProcessor.bulk_upsert_shiny_username_rate_batch(data_batch)
-            await redis_client.delete(temp_key)
             logger.debug(f"🔚 Force-flushed {inserted_count} shiny records")
             return inserted_count
 
         except Exception as e:
             logger.error(f"❌ Shiny rate force-flush failed: {e}")
             return 0
+        finally:
+            try:
+                if temp_key and client:
+                    await client.delete(temp_key)
+            except Exception:
+                pass
