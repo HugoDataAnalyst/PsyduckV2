@@ -23,6 +23,13 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 DEFAULT_INTERVAL = 3600        # 1 hour for most tasks
 DAILY_INTERVAL = 86400         # 24 hours for alltime/historical tasks
 
+# Task categories for startup ordering
+DAILY_TASKS = ["areas", "pokestops", "pokemons_daily", "raids_daily", "invasions_daily", "quests_daily"]
+ALLTIME_TASKS = ["pokemon_alltime", "raids_alltime", "invasions_alltime", "quests_alltime"]
+
+# Delay between daily and alltime tasks on startup (seconds)
+ALLTIME_STARTUP_DELAY = 30
+
 # Map
 TASK_CONFIG = {
     # Fast refresh tasks
@@ -243,10 +250,27 @@ class BackgroundRunner:
     def _run_schedule(self):
         """
         Main loop that checks for due tasks at regular intervals.
+        On startup: runs daily tasks first, waits 1 minute, then runs alltime tasks.
         """
-        # Run all tasks immediately on start
-        logger.info("[Task] Initial run: executing all tasks...")
-        self.update_tasks_concurrently(self._get_due_tasks(force_all=True))
+        # Startup: Run daily tasks first
+        daily_tasks = [t for t in DAILY_TASKS if t in TASK_CONFIG]
+        if daily_tasks:
+            logger.info(f"[Task] Initial run: executing {len(daily_tasks)} daily tasks...")
+            self.update_tasks_concurrently(daily_tasks)
+
+        # Check if we should stop before waiting
+        if self._stop_event.is_set():
+            return
+
+        # Wait before running alltime tasks
+        alltime_tasks = [t for t in ALLTIME_TASKS if t in TASK_CONFIG]
+        if alltime_tasks:
+            logger.info(f"[Task] Waiting {ALLTIME_STARTUP_DELAY}s before running alltime tasks...")
+            if self._stop_event.wait(ALLTIME_STARTUP_DELAY):
+                return  # Stop event was set during wait
+
+            logger.info(f"[Task] Running {len(alltime_tasks)} alltime tasks...")
+            self.update_tasks_concurrently(alltime_tasks)
 
         while not self._stop_event.is_set():
             # Wait for check_interval OR until stop event is set

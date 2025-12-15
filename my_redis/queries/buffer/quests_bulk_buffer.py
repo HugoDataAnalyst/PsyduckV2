@@ -4,6 +4,39 @@ from utils.logger import logger
 from utils.safe_values import _safe_int, _norm_str, _norm_name, _valid_coords, _to_float
 from sql.tasks.quests_processor import QuestSQLProcessor
 import config as AppConfig
+import asyncio
+
+
+async def _get_client_with_retry(redis_client: Redis | None, max_attempts: int = 3, delay: float = 0.3) -> Redis | None:
+    """
+    Try to get a working Redis client with retry logic.
+    First tries the provided client, then falls back to getting a fresh connection.
+    """
+    from my_redis.connect_redis import RedisManager
+    redis_manager = RedisManager()
+
+    for attempt in range(1, max_attempts + 1):
+        # Try provided client first
+        if redis_client:
+            try:
+                if await redis_client.ping():
+                    return redis_client
+            except Exception:
+                pass
+
+        # Fall back to getting a fresh connection
+        try:
+            client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
+            if client:
+                return client
+        except Exception:
+            pass
+
+        if attempt < max_attempts:
+            await asyncio.sleep(delay)
+            logger.debug(f"⏳ Quests buffer retry attempt {attempt}/{max_attempts}")
+
+    return None
 
 
 class QuestsRedisBuffer:
@@ -77,13 +110,34 @@ class QuestsRedisBuffer:
                 f"{item_id}|{item_amt}|{poke_id}|{poke_form}"
             )
 
-            new_len = await redis_client.rpush(cls.redis_key, line)
+            # Get a working client with retry
+            client = await _get_client_with_retry(redis_client)
+            if not client:
+                logger.error("❌ Quests buffer: No Redis connection available after retries. Event lost.")
+                return
+
+            # Append with retry
+            new_len = None
+            for attempt in range(3):
+                try:
+                    new_len = await client.rpush(cls.redis_key, line)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        client = await _get_client_with_retry(None)
+                        if not client:
+                            logger.error(f"❌ Quests buffer: rpush failed, no client available: {e}")
+                            return
+                    else:
+                        logger.error(f"❌ Quests buffer: rpush failed after retries: {e}")
+                        return
+
             logger.debug(f"➕ Appended quest event. len={new_len}")
 
-            queued = await redis_client.llen(cls.redis_key)
+            queued = await client.llen(cls.redis_key)
             if queued >= cls.aggregation_threshold:
                 logger.warning(f"📊 📜 Quest buffer threshold {queued} reached. Flushing…")
-                await cls.flush_if_ready(redis_client)
+                await cls.flush_if_ready(client)
 
         except Exception as e:
             logger.error(f"❌ quests increment_event error: {e}", exc_info=True)
@@ -129,20 +183,26 @@ class QuestsRedisBuffer:
 
     @classmethod
     async def flush_if_ready(cls, redis_client: Redis) -> int:
+        # Get a working client with retry
+        client = await _get_client_with_retry(redis_client)
+        if not client:
+            logger.error("❌ Quests flush: No Redis connection available after retries.")
+            return 0
+
         temp_key = None
         try:
-            if not await redis_client.exists(cls.redis_key):
+            if not await client.exists(cls.redis_key):
                 return 0
 
             temp_key = cls.redis_key + ":flushing"
             try:
-                await redis_client.rename(cls.redis_key, temp_key)
+                await client.rename(cls.redis_key, temp_key)
             except Exception as e:
                 if "no such key" in str(e).lower():
                     return 0
                 raise
 
-            data_batch = await cls._consume_list_to_batch(redis_client, temp_key)
+            data_batch = await cls._consume_list_to_batch(client, temp_key)
             if not data_batch:
                 return 0
 
@@ -155,27 +215,33 @@ class QuestsRedisBuffer:
             return 0
         finally:
             try:
-                if temp_key:
-                    await redis_client.delete(temp_key)
+                if temp_key and client:
+                    await client.delete(temp_key)
             except Exception:
                 pass
 
     @classmethod
     async def force_flush(cls, redis_client: Redis) -> int:
+        # Get a working client with retry
+        client = await _get_client_with_retry(redis_client)
+        if not client:
+            logger.error("❌ Quests force-flush: No Redis connection available after retries.")
+            return 0
+
         temp_key = None
         try:
-            if not await redis_client.exists(cls.redis_key):
+            if not await client.exists(cls.redis_key):
                 return 0
 
             temp_key = cls.redis_key + ":force_flushing"
             try:
-                await redis_client.rename(cls.redis_key, temp_key)
+                await client.rename(cls.redis_key, temp_key)
             except Exception as e:
                 if "no such key" in str(e).lower():
                     return 0
                 raise
 
-            data_batch = await cls._consume_list_to_batch(redis_client, temp_key)
+            data_batch = await cls._consume_list_to_batch(client, temp_key)
             if not data_batch:
                 return 0
 
@@ -188,7 +254,7 @@ class QuestsRedisBuffer:
             return 0
         finally:
             try:
-                if temp_key:
-                    await redis_client.delete(temp_key)
+                if temp_key and client:
+                    await client.delete(temp_key)
             except Exception:
                 pass

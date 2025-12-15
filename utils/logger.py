@@ -6,6 +6,14 @@ from typing import TypedDict, Optional
 from loguru import logger
 
 
+def get_worker_id() -> str:
+    """
+    Get a unique worker identifier based on PID.
+    Useful for multi-worker uvicorn deployments.
+    """
+    return f"W-{os.getpid()}"
+
+
 class LoggingOptions(TypedDict, total=False):
     # formatting toggles
     show_file: bool
@@ -47,13 +55,20 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     keep_total    = int(options.get("keep_total", 5))
     compression   = options.get("compression", "gz")
 
-    # format
+    # FIX: Use the patcher to inject the worker ID dynamically.
+    # We now correctly use the get_worker_id() function we defined above.
+    def worker_id_patcher(record):
+        record["extra"]["worker_id"] = get_worker_id()
+
+    # Configure the core logger with the patcher
+    logger.configure(patcher=worker_id_patcher)
+
     log_fmt = (
         "<n><d><level>{time:YYYY-MM-DD HH:mm:ss.SSS} | "
         f"{'{file:>15.15}:' if show_file else ''}"
         f"{'{function:>15.15}' if show_function else ''}"
         f"{':{line:<4} | ' if (show_file or show_function) else ''}"
-        f"{'{process.name:>12.12} | ' if show_process else ''}"
+        f"{'{extra[worker_id]:>8.8} | ' if show_process else ''}"
         f"{'{thread.name:<11.11} | ' if show_thread else ''}"
         "{level:1.1} | </level></d></n><level>{message}</level>"
     )
@@ -165,4 +180,5 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     )
 
 
-__all__ = ["logger", "setup_logging"]
+__all__ = ["logger", "setup_logging", "get_worker_id"]
+

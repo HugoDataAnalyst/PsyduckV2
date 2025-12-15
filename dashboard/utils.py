@@ -130,29 +130,74 @@ def get_global_areas_task():
     return None
 
 
-def _fetch_single_area(endpoint, params, area_name, headers):
+def _fetch_single_area(endpoint, params, area_name, headers, max_retries=2):
     """
     Helper to fetch data for a single area.
-    Returns (area_name, data) tuple or (area_name, None) on failure.
+    Returns (area_name, data, error_reason) tuple.
+    - On success: (area_name, data, None)
+    - On failure: (area_name, None, error_reason)
+
+    Retries up to max_retries times if response is 200 but data is empty.
     """
-    try:
-        area_params = params.copy()
-        area_params["area"] = area_name
-        response = requests.get(endpoint, headers=headers, params=area_params, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict) and "data" in data:
-                return (area_name, data.get("data", {}))
-            return (area_name, data)
-    except Exception as e:
-        logger.debug(f"Error fetching {area_name}: {e}")
-    return (area_name, None)
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            area_params = params.copy()
+            area_params["area"] = area_name
+            response = requests.get(endpoint, headers=headers, params=area_params, timeout=60)
+
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict) and "data" in data:
+                    extracted_data = data.get("data", {})
+                else:
+                    extracted_data = data
+
+                # Check if data is empty - retry if we have attempts left
+                if not extracted_data:
+                    if attempt < max_retries:
+                        logger.info(f"Empty result for {area_name}, retrying ({attempt + 1}/{max_retries})...")
+                        time.sleep(0.5)  # Small delay before retry
+                        continue
+                    # Final attempt still empty - return as empty (not an error)
+                    return (area_name, None, None)
+
+                return (area_name, extracted_data, None)
+            else:
+                last_error = f"HTTP {response.status_code}"
+                if attempt < max_retries:
+                    time.sleep(0.5)
+                    continue
+                return (area_name, None, last_error)
+
+        except requests.exceptions.Timeout:
+            last_error = "Timeout (60s)"
+            if attempt < max_retries:
+                time.sleep(0.5)
+                continue
+            return (area_name, None, last_error)
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"Connection error: {e}"
+            if attempt < max_retries:
+                time.sleep(0.5)
+                continue
+            return (area_name, None, last_error)
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries:
+                time.sleep(0.5)
+                continue
+            return (area_name, None, last_error)
+
+    return (area_name, None, last_error)
 
 
-def fetch_all_areas_parallel(endpoint, params, max_workers=10):
+def fetch_all_areas_parallel(endpoint, params, max_workers=5):
     """
     Fetches data from all areas in parallel and returns a dict of {area_name: data}.
     Uses global_areas.json for the list of areas.
+    Logs failed areas with their failure reasons.
     """
     areas = load_global_areas()
     if not areas:
@@ -161,6 +206,8 @@ def fetch_all_areas_parallel(endpoint, params, max_workers=10):
 
     headers = get_api_headers()
     results = {}
+    failed_areas = []  # List of (area_name, reason) tuples
+    empty_areas = []   # NEW: Track areas that returned 200 OK but no data
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -169,11 +216,38 @@ def fetch_all_areas_parallel(endpoint, params, max_workers=10):
         }
 
         for future in as_completed(futures):
-            area_name, data = future.result()
+            area_name, data, error_reason = future.result()
             if data:
                 results[area_name] = data
+            elif error_reason:
+                failed_areas.append((area_name, error_reason))
+            else:
+                # NEW: Catch cases where data is empty/None but no error occurred
+                empty_areas.append(area_name)
+                logger.warning(f"⚠️ Area {area_name} returned empty data: {data!r}")
 
-    logger.info(f"Fetched data from {len(results)}/{len(areas)} areas")
+    # Log summary
+    success_count = len(results)
+    fail_count = len(failed_areas)
+    empty_count = len(empty_areas)
+    total = len(areas)
+
+    # Improved logging logic
+    if fail_count == 0:
+        if empty_count == 0:
+            logger.info(f"Fetched data from {success_count}/{total} areas (all active)")
+        else:
+            logger.info(f"Fetched data from {success_count}/{total} areas ({empty_count} empty, all succeeded)")
+    else:
+        logger.warning(f"Fetched data from {success_count}/{total} areas ({fail_count} failed, {empty_count} empty)")
+        # Log each failed area with its reason
+        for area_name, reason in failed_areas:
+            logger.warning(f"  ❌ {area_name}: {reason}")
+
+    # Optional: Debug log to see WHICH areas are empty
+    if empty_count > 0:
+        logger.warning(f"Empty areas: {', '.join(empty_areas)}")
+
     return results
 
 
@@ -791,7 +865,7 @@ def get_global_pokemon_task(endpoint_type="counter", params=None):
         # If area is "global", fetch from all areas in parallel
         if params.get("area") == "global":
             url = f"{API_BASE_URL}{endpoint}"
-            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=5)
         else:
             # Single area request
             url = f"{API_BASE_URL}{endpoint}"
@@ -872,7 +946,7 @@ def get_global_raids_task(endpoint_type="counter", params=None):
         # If area is "global", fetch from all areas in parallel
         if params.get("area") == "global":
             url = f"{API_BASE_URL}{endpoint}"
-            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=5)
         else:
             # Single area request
             url = f"{API_BASE_URL}{endpoint}"
@@ -959,7 +1033,7 @@ def get_global_invasions_task(endpoint_type="counter", params=None):
         # If area is "global", fetch from all areas in parallel
         if params.get("area") == "global":
             url = f"{API_BASE_URL}{endpoint}"
-            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=5)
         else:
             # Single area request
             url = f"{API_BASE_URL}{endpoint}"
@@ -1092,7 +1166,7 @@ def get_global_quests_task(endpoint_type="counter", params=None):
         # If area is "global", fetch from all areas in parallel
         if params.get("area") == "global":
             url = f"{API_BASE_URL}{endpoint}"
-            raw_data = fetch_all_areas_parallel(url, params, max_workers=10)
+            raw_data = fetch_all_areas_parallel(url, params, max_workers=5)
         else:
             # Single area request
             url = f"{API_BASE_URL}{endpoint}"
