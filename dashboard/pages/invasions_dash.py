@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_invasions_stats, get_invasion_icon_url
+from dashboard.utils import get_cached_geofences, get_invasions_stats, get_invasion_icon_url, get_invasions_daily_timeseries
 from utils.logger import logger
 import config as AppConfig
 import json
@@ -109,7 +109,7 @@ def layout(area=None, **kwargs):
                     dbc.Col([
                         dbc.Label("Data Source", id="invasions-label-data-source", className="fw-bold"),
                         html.Div([
-                            # Row 1: Stats (Live & Historical)
+                            # Row 1: Stats (Live & Historical & TimeSeries)
                             html.Div([
                                 html.Span("Stats: ", id="invasions-label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
@@ -117,6 +117,7 @@ def layout(area=None, **kwargs):
                                     options=[
                                         {"label": "Live", "value": "live"},
                                         {"label": "Historical", "value": "historical"},
+                                        {"label": "TimeSeries", "value": "timeseries"},
                                     ],
                                     value="live", inline=True, inputClassName="btn-check",
                                     labelClassName="btn btn-outline-info btn-sm",
@@ -475,6 +476,9 @@ def combine_data_sources(stats_val, sql_val):
 def toggle_source_controls(source):
     if source == "live":
         return {"display": "block"}, {"display": "none"}, {"display": "none"}, {"display": "none"}, {"display": "none"}
+    elif source == "timeseries":
+        # TimeSeries uses date picker but no interval selector
+        return {"display": "none"}, {"display": "block", "position": "relative", "zIndex": 1002}, {"display": "none"}, {"display": "none"}, {"display": "none"}
     elif source == "historical":
         return {"display": "none"}, {"display": "block", "position": "relative", "zIndex": 1002}, {"display": "block"}, {"display": "none"}, {"display": "none"}
     elif source == "sql_heatmap":
@@ -499,13 +503,23 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("Grouped (Table)", lang), "value": "grouped"},
         {"label": translate("Sum (Totals)", lang), "value": "sum"}
     ]
-    allowed_values = [o['value'] for o in full_options]
+    # TimeSeries mode only supports sum (totals per day)
+    timeseries_options = [{"label": translate("Sum (Totals)", lang), "value": "sum"}]
+
+    if source == "timeseries": allowed = timeseries_options
+    else: allowed = full_options
+
+    allowed_values = [o['value'] for o in allowed]
     if current_ui_mode in allowed_values: final_value = current_ui_mode
     elif stored_mode in allowed_values: final_value = stored_mode
     else: final_value = allowed_values[0]
 
-    # Source Options
-    stats_opts = [{"label": translate("Live", lang), "value": "live"}, {"label": translate("Historical", lang), "value": "historical"}]
+    # Source Options (with TimeSeries)
+    stats_opts = [
+        {"label": translate("Live", lang), "value": "live"},
+        {"label": translate("Historical", lang), "value": "historical"},
+        {"label": translate("TimeSeries", lang), "value": "timeseries"}
+    ]
     sql_opts = [{"label": translate("Heatmap", lang), "value": "sql_heatmap"}]
 
     # Heatmap Display Options
@@ -520,7 +534,7 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("Hourly", lang), "value": "hourly"}
     ]
 
-    return full_options, final_value, stats_opts, sql_opts, heatmap_mode_opts, interval_opts
+    return allowed, final_value, stats_opts, sql_opts, heatmap_mode_opts, interval_opts
 
 @callback(Output("invasions-mode-persistence-store", "data"), Input("invasions-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
@@ -540,11 +554,12 @@ def load_persisted_source(ts, stored_source):
     """Load persisted data source on page load."""
     if ts is not None and ts > 0:
         raise dash.exceptions.PreventUpdate
-    valid_sources = ["live", "historical", "sql_heatmap"]
-    if stored_source in valid_sources:
-        if stored_source == "sql_heatmap":
-            return stored_source, None, stored_source
+    stats_sources = ["live", "historical", "timeseries"]
+    sql_sources = ["sql_heatmap"]
+    if stored_source in stats_sources:
         return stored_source, stored_source, None
+    elif stored_source in sql_sources:
+        return stored_source, None, stored_source
     return "live", "live", None
 
 @callback(Output("invasions-heatmap-mode-store", "data"), Input("invasions-heatmap-display-mode", "value"))
@@ -786,6 +801,10 @@ def fetch_data(n, source, area, live_h, hist_start, hist_end, heatmap_start, hea
 
             return {}, {"display": "none"}, None, heatmap_data, {"display": "block"}, stats_text
 
+        elif source == "timeseries":
+            # Daily timeseries for Invasions - fetch each day's sum and build timeseries
+            logger.info(f"🔍 Fetching Invasions TimeSeries for {area}: {hist_start} to {hist_end}")
+            data = get_invasions_daily_timeseries(hist_start, hist_end, area)
         elif source == "live":
             hours = max(1, min(int(live_h or 1), 72))
             params = {"start_time": f"{hours} hours", "end_time": "now", "mode": mode, "area": area, "response_format": "json"}
@@ -794,6 +813,8 @@ def fetch_data(n, source, area, live_h, hist_start, hist_end, heatmap_start, hea
             params = {"counter_type": "totals", "interval": interval, "start_time": f"{hist_start}T00:00:00", "end_time": f"{hist_end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
             data = get_invasions_stats("counter", params)
 
+        if not data:
+            return {}, {"display": "block"}, dbc.Alert(translate("No data found for this period.", lang), color="warning", dismissable=True, duration=4000), [], {"display": "none"}, ""
         return data, {"display": "block"}, None, [], {"display": "none"}, ""
     except Exception as e:
         logger.info(f"Fetch error: {e}")
@@ -842,6 +863,82 @@ def update_visuals(data, search_term, sort, page, lang, mode, source):
         return [], html.Div(translate("View heatmap below", lang)), "", 1, {"display": "none"}
 
     if not data: return [], html.Div(), "", 1, {"display": "block"}
+
+    # Handle TimeSeries data format (dates + metrics)
+    if isinstance(data, dict) and "dates" in data and "metrics" in data:
+        dates = data.get("dates", [])
+        metrics = data.get("metrics", {})
+        raw_text = json.dumps(data, indent=2)
+
+        if not dates or not metrics:
+            return "No Data", html.Div(), raw_text, 1, {"display": "block"}
+
+        # Build total counts sidebar
+        total_val = sum(sum(v) for v in metrics.values())
+        sidebar_items = [html.H1(f"{total_val:,}", className="text-primary")]
+
+        # Add confirmed/unconfirmed metrics
+        for metric_key in ["confirmed", "unconfirmed"]:
+            if metric_key in metrics:
+                values = metrics[metric_key]
+                metric_total = sum(values)
+                if metric_key == "confirmed":
+                    color = "#28a745"
+                    icon = "bi bi-check-circle-fill"
+                    label = translate("Confirmed", lang)
+                else:
+                    color = "#dc3545"
+                    icon = "bi bi-x-circle-fill"
+                    label = translate("Unconfirmed", lang)
+
+                sidebar_items.append(html.Div([
+                    html.I(className=f"{icon} me-2", style={"fontSize": "1.2rem", "color": color}),
+                    html.Span(f"{metric_total:,}", style={"fontSize": "1.1em", "fontWeight": "bold"}),
+                    html.Span(f" {label}", style={"fontSize": "0.8em", "color": "#aaa", "marginLeft": "5px"})
+                ], className="d-flex align-items-center mb-1"))
+
+        # Create TimeSeries line chart
+        fig = go.Figure()
+
+        for metric_key in metrics.keys():
+            values = metrics[metric_key]
+            if metric_key == "confirmed":
+                color = "#28a745"
+                label = translate("Confirmed", lang)
+            elif metric_key == "unconfirmed":
+                color = "#dc3545"
+                label = translate("Unconfirmed", lang)
+            else:
+                color = None
+                label = metric_key.title()
+
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=values,
+                name=label,
+                line=dict(color=color, width=2) if color else dict(width=2),
+                marker=dict(size=6)
+            ))
+
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            title=translate("Invasions TimeSeries", lang),
+            xaxis_title=translate("Date", lang),
+            yaxis_title=translate("Count", lang),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified",
+            hoverlabel=dict(
+                bgcolor="#1a1a1a",
+                font_size=12,
+                font_color="white",
+                bordercolor="#333"
+            )
+        )
+
+        visual_content = dcc.Graph(figure=fig, id="invasions-main-graph")
+        return sidebar_items, visual_content, raw_text, 1, {"display": "block"}
 
     df = parse_data_to_df(data, mode, source, lang)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "block"}
