@@ -1466,29 +1466,92 @@ def get_global_invasions_task(endpoint_type="counter", params=None):
 
         # Background Task Aggregation
         if endpoint_type == "counter":
+            # Character ID classification for invasion breakdown
+            # Leaders: Cliff=41, Arlo=42, Sierra=43, Giovanni=44
+            GIOVANNI_IDS = {44, 524}  # Regular Giovanni and Event Giovanni
+            FEMALE_GRUNT_IDS = {5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 46, 47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69, 71, 73, 75, 77, 79, 81, 83, 85, 87, 89}
+            MALE_GRUNT_IDS = {4, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 45, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90}
+
+            def classify_character(char_id):
+                char_id = int(char_id) if char_id else 0
+                if char_id == 0:
+                    return 'unset'
+                if char_id in GIOVANNI_IDS:
+                    return 'giovanni'
+                if char_id == 41 or char_id == 527:  # Cliff and Event Cliff
+                    return 'cliff'
+                if char_id == 42 or char_id == 526:  # Arlo and Event Arlo
+                    return 'arlo'
+                if char_id == 43 or char_id == 525:  # Sierra and Event Sierra
+                    return 'sierra'
+                if char_id in FEMALE_GRUNT_IDS:
+                    return 'female'
+                if char_id in MALE_GRUNT_IDS:
+                    return 'male'
+                return 'unset'
+
             total_invasions = 0
-            confirmed_count = 0
-            unconfirmed_count = 0
+            category_counts = {
+                'male': 0,
+                'female': 0,
+                'cliff': 0,
+                'arlo': 0,
+                'sierra': 0,
+                'giovanni': 0,
+                'unset': 0
+            }
+
+            # Check if grouped mode (has character breakdown)
+            is_grouped = params.get('mode') == 'grouped' if params else False
 
             for area_name, content in raw_data.items():
                 if not isinstance(content, dict):
                     continue
-                # Handle nested data structure - fetch_all_areas_parallel already extracts "data"
+                # Handle nested data structure
                 stats = content.get('data', content)
                 if not stats:
                     continue
 
-                total_invasions += stats.get('total', 0)
-                confirmed_data = stats.get('confirmed', {})
-                if isinstance(confirmed_data, dict):
-                    confirmed_count += confirmed_data.get('1', 0)
-                    unconfirmed_count += confirmed_data.get('0', 0)
+                if is_grouped:
+                    # Process display_type+character breakdown
+                    char_data = stats.get('display_type+character', {})
+                    if not char_data:
+                        char_data = stats.get('grunt', {})
+                        if char_data:
+                            char_data = {f"1:{k}": v for k, v in char_data.items()}
+
+                    for key_str, count in char_data.items():
+                        if not isinstance(count, (int, float)):
+                            continue
+                        parts = str(key_str).split(':')
+                        if len(parts) >= 2:
+                            try:
+                                char_id = int(parts[1])
+                            except ValueError:
+                                char_id = 0
+                        else:
+                            try:
+                                char_id = int(key_str)
+                            except ValueError:
+                                char_id = 0
+
+                        category = classify_character(char_id)
+                        category_counts[category] += int(count)
+                        total_invasions += int(count)
+                else:
+                    # Fallback to sum mode (just total)
+                    total_invasions += stats.get('total', 0)
 
             final_data = {
                 "total": total_invasions,
                 "stats": {
-                    "confirmed": confirmed_count,
-                    "unconfirmed": unconfirmed_count
+                    "male": category_counts['male'],
+                    "female": category_counts['female'],
+                    "cliff": category_counts['cliff'],
+                    "arlo": category_counts['arlo'],
+                    "sierra": category_counts['sierra'],
+                    "giovanni": category_counts['giovanni'],
+                    "unset": category_counts['unset']
                 },
                 "last_updated": time.time()
             }
@@ -1541,10 +1604,98 @@ def get_global_pokestops_task(params=None):
         logger.error(f"Error in get_global_pokestops_task: {e}")
         return None
 
+def _extract_quest_rewards_from_data(raw_data, is_grouped):
+    """
+    Helper function to extract reward breakdown from quest data.
+    Uses reward_type which contains the canonical count per reward type.
+    """
+    rewards = defaultdict(int)
+
+    for area_name, content in raw_data.items():
+        if not isinstance(content, dict):
+            continue
+        stats = content.get('data', content)
+        if not stats:
+            continue
+
+        if is_grouped:
+            # Grouped mode: iterate through date buckets
+            for key, value in stats.items():
+                if not isinstance(value, dict):
+                    continue
+                # Use reward_type for breakdown (type 2=item, 3=stardust, 7=pokemon, 12=mega, etc.)
+                if 'reward_type' in value:
+                    for r_type, count in value['reward_type'].items():
+                        if isinstance(count, (int, float)) and count > 0:
+                            r_type_int = int(r_type) if str(r_type).isdigit() else 0
+                            if r_type_int == 2:
+                                rewards['item'] += int(count)
+                            elif r_type_int == 3:
+                                rewards['stardust'] += int(count)
+                            elif r_type_int == 7:
+                                rewards['pokemon'] += int(count)
+                            elif r_type_int == 12:
+                                rewards['mega'] += int(count)
+                            elif r_type_int == 4:
+                                rewards['candy'] += int(count)
+                            elif r_type_int == 1:
+                                rewards['xp'] += int(count)
+        else:
+            # Sum mode: reward_type directly in stats
+            if 'reward_type' in stats:
+                for r_type, count in stats['reward_type'].items():
+                    if isinstance(count, (int, float)) and count > 0:
+                        r_type_int = int(r_type) if str(r_type).isdigit() else 0
+                        if r_type_int == 2:
+                            rewards['item'] += int(count)
+                        elif r_type_int == 3:
+                            rewards['stardust'] += int(count)
+                        elif r_type_int == 7:
+                            rewards['pokemon'] += int(count)
+                        elif r_type_int == 12:
+                            rewards['mega'] += int(count)
+                        elif r_type_int == 4:
+                            rewards['candy'] += int(count)
+                        elif r_type_int == 1:
+                            rewards['xp'] += int(count)
+
+    return dict(rewards)
+
+
+def _get_quest_total_from_data(raw_data, is_grouped):
+    """
+    Helper function to get total quest count from data.
+    """
+    total = 0
+    for area_name, content in raw_data.items():
+        if not isinstance(content, dict):
+            continue
+        stats = content.get('data', content)
+        if not stats:
+            continue
+
+        if is_grouped:
+            for key, value in stats.items():
+                if not isinstance(value, dict):
+                    continue
+                if 'total' in value:
+                    total += int(value['total'])
+        else:
+            if 'total' in stats:
+                total += int(stats['total'])
+
+    return total
+
+
 def get_global_quests_task(endpoint_type="counter", params=None):
     """
     Hybrid Function: Background Task (defaults) OR Generic Fetcher.
     When area is "global", fetches data from all areas in parallel and aggregates.
+
+    For background task mode (grouped), makes TWO separate queries:
+    - with_ar=true to get AR quest rewards
+    - with_ar=false to get Normal quest rewards
+    This allows proper reward breakdown per quest type.
     """
 
     if params is None:
@@ -1553,7 +1704,7 @@ def get_global_quests_task(endpoint_type="counter", params=None):
             "interval": "hourly",
             "start_time": "24 hours",
             "end_time": "now",
-            "mode": "sum",
+            "mode": "grouped",
             "response_format": "json",
             "area": "global",
             "with_ar": "all", "ar_type": "all", "reward_ar_type": "all",
@@ -1573,23 +1724,67 @@ def get_global_quests_task(endpoint_type="counter", params=None):
     elif endpoint_type == "quest_sql_data":
         endpoint = "/api/sql/get_quest_data"
     else:
-        # Default standard timeseries
         endpoint = "/api/redis/get_quest_timeseries"
 
     try:
-        # If area is "global", fetch from all areas in parallel
+        is_grouped = params.get('mode') == 'grouped' if params else False
+        url = f"{API_BASE_URL}{endpoint}"
+
+        # Background Task Aggregation - make separate queries for AR and Normal
+        if endpoint_type == "counter" and params.get("area") == "global":
+            # Query 1: AR quests only (with_ar=true)
+            ar_params = params.copy()
+            ar_params["with_ar"] = "true"
+            ar_data = fetch_all_areas_parallel(url, ar_params, max_workers=5)
+
+            # Query 2: Normal quests only (with_ar=false)
+            normal_params = params.copy()
+            normal_params["with_ar"] = "false"
+            normal_data = fetch_all_areas_parallel(url, normal_params, max_workers=5)
+
+            # Extract totals and rewards from each
+            ar_total = _get_quest_total_from_data(ar_data, is_grouped) if ar_data else 0
+            normal_total = _get_quest_total_from_data(normal_data, is_grouped) if normal_data else 0
+
+            ar_rewards = _extract_quest_rewards_from_data(ar_data, is_grouped) if ar_data else {}
+            normal_rewards = _extract_quest_rewards_from_data(normal_data, is_grouped) if normal_data else {}
+
+            # Retrieve Total Pokestops from cached file
+            total_pokestops = 0
+            try:
+                with open('dashboard/data/global_pokestops.json', 'r') as f:
+                    cached_stops_data = json.load(f)
+                    total_pokestops = cached_stops_data.get('total', 0)
+            except FileNotFoundError:
+                logger.warning("global_pokestops.json not found, defaulting stops to 0")
+            except Exception as e:
+                logger.error(f"Error reading global_pokestops.json: {e}")
+
+            # Build final data structure with separate rewards per quest type
+            final_data = {
+                "total_pokestops": total_pokestops,
+                "quests": {
+                    "ar": {
+                        "total": ar_total,
+                        "rewards": ar_rewards
+                    },
+                    "normal": {
+                        "total": normal_total,
+                        "rewards": normal_rewards
+                    }
+                },
+                "last_updated": time.time()
+            }
+            return final_data
+
+        # Non-global or non-counter: single query
         if params.get("area") == "global":
-            url = f"{API_BASE_URL}{endpoint}"
             raw_data = fetch_all_areas_parallel(url, params, max_workers=5)
         else:
-            # Single area request
-            url = f"{API_BASE_URL}{endpoint}"
             response = requests.get(url, headers=get_api_headers(), params=params)
-
             if response.status_code != 200:
                 logger.info(f"Error fetching quests: HTTP {response.status_code}")
                 return None
-
             raw_data = response.json()
             if isinstance(raw_data, dict) and "data" in raw_data:
                 raw_data = raw_data.get("data", {})
@@ -1597,49 +1792,6 @@ def get_global_quests_task(endpoint_type="counter", params=None):
         if not raw_data:
             return None
 
-        # Background Task Aggregation
-        if endpoint_type == "counter":
-            total_ar_quests = 0
-            total_normal_quests = 0
-
-            # 1. Calculate Quest Stats from API response
-            for area_name, content in raw_data.items():
-                if not isinstance(content, dict):
-                    continue
-                # Handle nested data structure - fetch_all_areas_parallel already extracts "data"
-                stats = content.get('data', content)
-                if not stats:
-                    continue
-
-                # Note: We skip 'total' here as we want the pokestop count from the file
-                quest_modes = stats.get('quest_mode', {})
-                if isinstance(quest_modes, dict):
-                    total_ar_quests += quest_modes.get('ar', 0)
-                    total_normal_quests += quest_modes.get('normal', 0)
-
-            # 2. Retrieve Total Pokestops from cached file
-            total_pokestops = 0
-            try:
-                with open('dashboard/data/global_pokestops.json', 'r') as f:
-                    cached_stops_data = json.load(f)
-                    # Support both direct 'total' or nested structure if file format varies
-                    total_pokestops = cached_stops_data.get('total', 0)
-            except FileNotFoundError:
-                logger.warning("global_pokestops.json not found, defaulting stops to 0")
-            except Exception as e:
-                logger.error(f"Error reading global_pokestops.json: {e}")
-
-            final_data = {
-                "total_pokestops": total_pokestops,
-                "quests": {
-                    "ar": total_ar_quests,
-                    "normal": total_normal_quests
-                },
-                "last_updated": time.time()
-            }
-            return final_data
-
-        # Generic Return
         return raw_data
 
     except Exception as e:
