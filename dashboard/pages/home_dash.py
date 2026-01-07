@@ -71,7 +71,22 @@ ICONS = {
     "pokemon": f"{icon_base_url}/misc/pokemon.webp",
     "raid": f"{icon_base_url}/misc/raid2.webp",
     "invasion": f"{icon_base_url}/misc/invasion.webp",
-    "quest": f"{icon_base_url}/misc/quest.webp"
+    "quest": f"{icon_base_url}/misc/quest.webp",
+    # Invasion character icons
+    "grunt_male": f"{icon_base_url}/invasion/4.webp",
+    "grunt_female": f"{icon_base_url}/invasion/5.webp",
+    "cliff": f"{icon_base_url}/invasion/41.webp",
+    "arlo": f"{icon_base_url}/invasion/42.webp",
+    "sierra": f"{icon_base_url}/invasion/43.webp",
+    "giovanni": f"{icon_base_url}/invasion/44.webp",
+    "unset": f"{icon_base_url}/invasion/0.webp",
+    # Quest reward icons
+    "stardust": f"{icon_base_url}/reward/stardust/0.webp",
+    "item": f"{icon_base_url}/reward/item/0.webp",
+    "mega": f"{icon_base_url}/reward/mega_resource/0.webp",
+    "candy": f"{icon_base_url}/reward/candy/1.webp",
+    "xp": f"{icon_base_url}/reward/experience/0.webp",
+    "encounter": f"{icon_base_url}/misc/pokemon.webp"
 }
 
 # HELPERS
@@ -89,7 +104,18 @@ def create_time_toggle(id_name):
         #style={"marginLeft": "auto"}
     )
 
-def create_mini_stat(count, label, color, icon_url=None, icon_class=None):
+def create_mini_stat(count, label, color, icon_url=None, icon_class=None, sub_items=None):
+    """
+    Create a mini stat card with optional sub-items breakdown.
+
+    Args:
+        count: Main count to display
+        label: Label for the stat
+        color: Color for the count text
+        icon_url: URL for icon image
+        icon_class: Bootstrap icon class
+        sub_items: Optional list of dicts with {'icon', 'count', 'label'} for breakdown
+    """
     if icon_url:
         icon = html.Img(src=icon_url, style={"height": "24px", "width": "24px", "marginRight": "8px"})
     elif icon_class:
@@ -97,13 +123,29 @@ def create_mini_stat(count, label, color, icon_url=None, icon_class=None):
     else:
         icon = None
 
-    return html.Div([
+    main_content = [
         html.Div(icon, className="d-flex align-items-center"),
         html.Div([
             html.Div(f"{count:,}", className="fw-bold", style={"color": color, "fontSize": "1.1rem"}),
             html.Div(label, className="text-muted", style={"fontSize": "0.7rem", "textTransform": "uppercase"})
         ])
-    ], className="d-flex align-items-center bg-dark rounded p-2 px-3", style={"border": "1px solid #333", "flex": "1 1 40%"})
+    ]
+
+    # Add sub-items if provided
+    if sub_items:
+        sub_content = []
+        for item in sub_items:
+            if item.get('count', 0) > 0:
+                sub_content.append(
+                    html.Span([
+                        html.Img(src=item['icon'], style={"height": "14px", "width": "14px", "marginRight": "2px", "verticalAlign": "middle"}) if item.get('icon') else None,
+                        html.Span(f"{item['count']:,}", style={"fontSize": "0.65rem", "color": "#aaa"})
+                    ], style={"marginRight": "6px"})
+                )
+        if sub_content:
+            main_content.append(html.Div(sub_content, className="d-flex flex-wrap mt-1", style={"marginLeft": "32px"}))
+
+    return html.Div(main_content, className="d-flex flex-column bg-dark rounded p-2 px-3", style={"border": "1px solid #333", "flex": "1 1 40%"})
 
 def get_total_header(count, title):
     return html.Div([
@@ -337,11 +379,47 @@ def update_invasions(n, toggle_val, lang):
             with open(file_path, 'r') as f:
                 data = json.load(f)
             stats = data.get('stats', {})
-            content = [
-                get_total_header(data.get('total', 0), translate("Total Invasions", lang)),
-                create_mini_stat(stats.get('confirmed', 0), translate("Confirmed", lang), "#28a745", icon_class="bi bi-check-circle-fill"),
-                create_mini_stat(stats.get('unconfirmed', 0), translate("Unconfirmed", lang), "#dc3545", icon_class="bi bi-x-circle-fill"),
-            ]
+
+            # Build content with new breakdown categories
+            content = [get_total_header(data.get('total', 0), translate("Total Invasions", lang))]
+
+            # Male & Female Grunts
+            male_count = stats.get('male', 0)
+            female_count = stats.get('female', 0)
+            if male_count > 0:
+                content.append(create_mini_stat(male_count, translate("Male", lang), "#3498db", icon_url=ICONS['grunt_male']))
+            if female_count > 0:
+                content.append(create_mini_stat(female_count, translate("Female", lang), "#e91e63", icon_url=ICONS['grunt_female']))
+
+            # Leaders (Cliff, Arlo, Sierra)
+            cliff_count = stats.get('cliff', 0)
+            arlo_count = stats.get('arlo', 0)
+            sierra_count = stats.get('sierra', 0)
+            if cliff_count > 0:
+                content.append(create_mini_stat(cliff_count, "Cliff", "#d32f2f", icon_url=ICONS['cliff']))
+            if arlo_count > 0:
+                content.append(create_mini_stat(arlo_count, "Arlo", "#f57c00", icon_url=ICONS['arlo']))
+            if sierra_count > 0:
+                content.append(create_mini_stat(sierra_count, "Sierra", "#7b1fa2", icon_url=ICONS['sierra']))
+
+            # Giovanni
+            giovanni_count = stats.get('giovanni', 0)
+            if giovanni_count > 0:
+                content.append(create_mini_stat(giovanni_count, "Giovanni", "#212121", icon_url=ICONS['giovanni']))
+
+            # Unset (if any)
+            unset_count = stats.get('unset', 0)
+            if unset_count > 0:
+                content.append(create_mini_stat(unset_count, translate("Unknown", lang), "#6c757d", icon_url=ICONS['unset']))
+
+            # Fallback for old data format (confirmed/unconfirmed)
+            if not any([male_count, female_count, cliff_count, arlo_count, sierra_count, giovanni_count]):
+                confirmed = stats.get('confirmed', 0)
+                unconfirmed = stats.get('unconfirmed', 0)
+                if confirmed > 0 or unconfirmed > 0:
+                    content.append(create_mini_stat(confirmed, translate("Confirmed", lang), "#28a745", icon_class="bi bi-check-circle-fill"))
+                    content.append(create_mini_stat(unconfirmed, translate("Unconfirmed", lang), "#dc3545", icon_class="bi bi-x-circle-fill"))
+
         except Exception as e:
             print(f"Error invasions: {e}")
 
@@ -367,11 +445,92 @@ def update_quests(n, toggle_val, lang):
             with open(file_path, 'r') as f:
                 data = json.load(f)
             quests = data.get('quests', {})
-            content = [
-                get_total_header(data.get('total_pokestops', 0), translate("Total PokéStops", lang)),
-                create_mini_stat(quests.get('ar', 0), translate("AR Quests", lang), "#17a2b8", icon_url=ICONS['ar_quest']),
-                create_mini_stat(quests.get('normal', 0), translate("Normal", lang), "#e0e0e0", icon_url=ICONS['normal_quest']),
-            ]
+
+            # New format: quests.ar and quests.normal are dicts with 'total' and 'rewards'
+            ar_data = quests.get('ar', {})
+            normal_data = quests.get('normal', {})
+
+            if isinstance(ar_data, dict):
+                ar_total = ar_data.get('total', 0)
+                ar_rewards = ar_data.get('rewards', {})
+            else:
+                ar_total = int(ar_data) if ar_data else 0
+                ar_rewards = {}
+
+            if isinstance(normal_data, dict):
+                normal_total = normal_data.get('total', 0)
+                normal_rewards = normal_data.get('rewards', {})
+            else:
+                normal_total = int(normal_data) if normal_data else 0
+                normal_rewards = {}
+
+            total_stops = data.get('total_stops', data.get('total_pokestops', ar_total + normal_total))
+
+            content = [get_total_header(total_stops, translate("Total PokéStops", lang))]
+
+            # Helper to build reward list items
+            def build_reward_rows(rewards):
+                rows = []
+                reward_order = ['pokemon', 'item', 'stardust', 'mega', 'candy', 'xp']
+                reward_icons = {
+                    'pokemon': ICONS['encounter'],
+                    'item': ICONS['item'],
+                    'stardust': ICONS['stardust'],
+                    'mega': ICONS['mega'],
+                    'candy': ICONS['candy'],
+                    'xp': ICONS['xp']
+                }
+                reward_labels = {
+                    'pokemon': 'Pokemon',
+                    'item': 'Item',
+                    'stardust': 'Stardust',
+                    'mega': 'Mega',
+                    'candy': 'Candy',
+                    'xp': 'XP'
+                }
+                for key in reward_order:
+                    count = rewards.get(key, 0)
+                    if count > 0:
+                        rows.append(html.Div([
+                            html.Img(src=reward_icons[key], style={"height": "16px", "width": "16px", "marginRight": "6px"}),
+                            html.Span(f"{count:,}", style={"fontWeight": "bold", "marginRight": "4px"}),
+                            html.Span(reward_labels[key], className="text-muted", style={"fontSize": "0.75rem"})
+                        ], className="d-flex align-items-center", style={"marginBottom": "2px"}))
+                return rows
+
+            # Build AR Quest Section
+            ar_reward_rows = build_reward_rows(ar_rewards)
+            ar_section = html.Div([
+                # Header with icon, total, and label
+                html.Div([
+                    html.Img(src=ICONS['ar_quest'], style={"height": "24px", "width": "24px", "marginRight": "8px"}),
+                    html.Div([
+                        html.Div(f"{ar_total:,}", className="fw-bold", style={"color": "#17a2b8", "fontSize": "1.1rem"}),
+                        html.Div(translate("AR Quests", lang), className="text-muted", style={"fontSize": "0.7rem", "textTransform": "uppercase"})
+                    ])
+                ], className="d-flex align-items-center mb-2"),
+                # Reward breakdown list
+                html.Div(ar_reward_rows, style={"marginLeft": "32px"}) if ar_reward_rows else None
+            ], className="bg-dark rounded p-2 px-3", style={"border": "1px solid #333", "flex": "1 1 45%", "minWidth": "140px"})
+
+            # Build Normal Quest Section
+            normal_reward_rows = build_reward_rows(normal_rewards)
+            normal_section = html.Div([
+                # Header with icon, total, and label
+                html.Div([
+                    html.Img(src=ICONS['normal_quest'], style={"height": "24px", "width": "24px", "marginRight": "8px"}),
+                    html.Div([
+                        html.Div(f"{normal_total:,}", className="fw-bold", style={"color": "#e0e0e0", "fontSize": "1.1rem"}),
+                        html.Div(translate("Normal", lang), className="text-muted", style={"fontSize": "0.7rem", "textTransform": "uppercase"})
+                    ])
+                ], className="d-flex align-items-center mb-2"),
+                # Reward breakdown list
+                html.Div(normal_reward_rows, style={"marginLeft": "32px"}) if normal_reward_rows else None
+            ], className="bg-dark rounded p-2 px-3", style={"border": "1px solid #333", "flex": "1 1 45%", "minWidth": "140px"})
+
+            content.append(ar_section)
+            content.append(normal_section)
+
         except Exception as e:
             print(f"Error quests: {e}")
 
