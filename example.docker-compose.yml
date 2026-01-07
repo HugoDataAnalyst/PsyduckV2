@@ -19,6 +19,25 @@ services:
     volumes:
       - ./data:/app/data
 
+  psyduckv2_dashboard:
+    container_name: psyduckv2_dashboard
+    build: .
+    restart: always
+    depends_on:
+      - psyduckv2_app
+    env_file:
+      - .env
+    environment:
+      DB_HOST: psyduckv2_db
+      REDIS_HOST: psyduckv2_redis
+      REDIS_PORT: 6379
+    command: python run_dashboard.py
+    #ports:
+    #  - "8050:8050"
+    volumes:
+      - ./data:/app/data
+      - ./dashboard/data:/app/dashboard/data
+
   psyduckv2_db:
     container_name: psyduckv2_db
     image: mysql:8.0.35
