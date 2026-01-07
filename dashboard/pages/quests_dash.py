@@ -228,12 +228,16 @@ def layout(area=None, **kwargs):
                     # Mode
                     dbc.Col([
                         dbc.Label("📊 View Mode", id="quests-label-view-mode"),
-                        dcc.Dropdown(
-                            id="quests-mode-selector",
-                            options=[],
-                            value=None,
-                            clearable=False,
-                            className="text-dark"
+                        html.Div(
+                            dbc.RadioItems(
+                                id="quests-mode-selector",
+                                options=[],
+                                value=None,
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-primary",
+                                labelCheckedClassName="active"
+                            ), className="btn-group", style={"width": "100%", "gap": "0"}
                         )
                     ], width=6, md=3),
 

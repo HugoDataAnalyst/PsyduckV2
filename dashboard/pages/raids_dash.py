@@ -270,12 +270,16 @@ def layout(area=None, **kwargs):
                     # Mode
                     dbc.Col([
                         dbc.Label("📊 View Mode", id="raids-label-view-mode"),
-                        dcc.Dropdown(
-                            id="raids-mode-selector",
-                            options=[],
-                            value=None,
-                            clearable=False,
-                            className="text-dark"
+                        html.Div(
+                            dbc.RadioItems(
+                                id="raids-mode-selector",
+                                options=[],
+                                value=None,
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-primary",
+                                labelCheckedClassName="active"
+                            ), className="btn-group", style={"width": "100%", "gap": "0"}
                         )
                     ], width=6, md=3),
 
@@ -961,8 +965,10 @@ def update_visuals(data, search_term, sort, page, lang, mode, source):
         if not dates or not metrics:
             return "No Data", html.Div(), raw_text, 1, {"display": "block"}
 
-        # Build total counts sidebar
-        total_val = sum(sum(v) for v in metrics.values())
+        # Build total counts sidebar - exclude "total" key since it's redundant with the sum
+        # Only show level breakdowns in sidebar
+        level_metrics = {k: v for k, v in metrics.items() if k.startswith("level_")}
+        total_val = sum(sum(v) for v in level_metrics.values())
         sidebar_items = [html.H1(f"{total_val:,}", className="text-primary")]
 
         # Sort raid levels numerically
@@ -973,21 +979,16 @@ def update_visuals(data, search_term, sort, page, lang, mode, source):
                     return (0, int(level_str.replace("level_", "")))
                 except ValueError:
                     return (1, level_str)
-            if level_str == "total":
-                return (-1, 0)
             return (2, level_str)
 
-        sorted_metrics = sorted(metrics.keys(), key=raid_level_sort_key)
+        sorted_metrics = sorted(level_metrics.keys(), key=raid_level_sort_key)
 
         for metric_key in sorted_metrics:
-            values = metrics[metric_key]
+            values = level_metrics[metric_key]
             metric_total = sum(values)
             # Extract level number for display
-            if metric_key.startswith("level_"):
-                level_num = metric_key.replace("level_", "")
-                label, color, icon_url = get_raid_info(level_num, lang)
-            else:
-                label, color, icon_url = get_raid_info(metric_key, lang)
+            level_num = metric_key.replace("level_", "")
+            label, color, icon_url = get_raid_info(level_num, lang)
 
             sidebar_items.append(html.Div([
                 html.Img(src=icon_url, style={"width": "28px", "marginRight": "8px", "verticalAlign": "middle"}),
@@ -995,16 +996,13 @@ def update_visuals(data, search_term, sort, page, lang, mode, source):
                 html.Span(f" {label}", style={"fontSize": "0.8em", "color": "#aaa", "marginLeft": "5px"})
             ], className="d-flex align-items-center mb-1"))
 
-        # Create TimeSeries line chart
+        # Create TimeSeries line chart - also exclude "total" from chart
         fig = go.Figure()
 
         for metric_key in sorted_metrics:
-            values = metrics[metric_key]
-            if metric_key.startswith("level_"):
-                level_num = metric_key.replace("level_", "")
-                label, color, _ = get_raid_info(level_num, lang)
-            else:
-                label, color, _ = get_raid_info(metric_key, lang)
+            values = level_metrics[metric_key]
+            level_num = metric_key.replace("level_", "")
+            label, color, _ = get_raid_info(level_num, lang)
 
             fig.add_trace(go.Scatter(
                 x=dates,
