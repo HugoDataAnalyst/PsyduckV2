@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_raids_stats, get_pokemon_icon_url, REMOTE_ROOT_URL
+from dashboard.utils import get_cached_geofences, get_raids_stats, get_pokemon_icon_url, get_raids_daily_timeseries, REMOTE_ROOT_URL
 from utils.logger import logger
 import config as AppConfig
 import json
@@ -208,7 +208,7 @@ def layout(area=None, **kwargs):
                     dbc.Col([
                         dbc.Label("Data Source", id="raids-label-data-source", className="fw-bold"),
                         html.Div([
-                            # Row 1: Stats (Live & Historical)
+                            # Row 1: Stats (Live & Historical & TimeSeries)
                             html.Div([
                                 html.Span("Stats: ", id="raids-label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
@@ -216,6 +216,7 @@ def layout(area=None, **kwargs):
                                     options=[
                                         {"label": "Live", "value": "live"},
                                         {"label": "Historical", "value": "historical"},
+                                        {"label": "TimeSeries", "value": "timeseries"},
                                     ],
                                     value="live", inline=True, inputClassName="btn-check",
                                     labelClassName="btn btn-outline-info btn-sm",
@@ -269,12 +270,16 @@ def layout(area=None, **kwargs):
                     # Mode
                     dbc.Col([
                         dbc.Label("📊 View Mode", id="raids-label-view-mode"),
-                        dcc.Dropdown(
-                            id="raids-mode-selector",
-                            options=[],
-                            value=None,
-                            clearable=False,
-                            className="text-dark"
+                        html.Div(
+                            dbc.RadioItems(
+                                id="raids-mode-selector",
+                                options=[],
+                                value=None,
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-primary",
+                                labelCheckedClassName="active"
+                            ), className="btn-group", style={"width": "100%", "gap": "0"}
                         )
                     ], width=6, md=3),
 
@@ -558,6 +563,9 @@ def toggle_source_controls(source):
     elif source == "sql_heatmap":
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         heat_s = {"display": "block"}
+    elif source == "timeseries":
+        # TimeSeries uses date picker but no interval selector
+        hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
     elif source == "historical":
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         int_s = {"display": "block"}
@@ -578,9 +586,12 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("Grouped (Table)", lang), "value": "grouped"},
         {"label": translate("Sum (Totals)", lang), "value": "sum"},
     ]
+    # TimeSeries mode only supports sum (totals per day)
+    timeseries_options = [{"label": translate("Sum (Totals)", lang), "value": "sum"}]
     heatmap_options = [{"label": translate("Map View", lang), "value": "map"}]
 
-    if source == "sql_heatmap": allowed = heatmap_options
+    if source == "timeseries": allowed = timeseries_options
+    elif source == "sql_heatmap": allowed = heatmap_options
     else: allowed = full_options
 
     allowed_values = [o['value'] for o in allowed]
@@ -588,8 +599,12 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
     elif stored_mode in allowed_values: final_value = stored_mode
     else: final_value = allowed_values[0]
 
-    # Translate Source Selectors
-    source_opts = [{"label": translate("Live", lang), "value": "live"}, {"label": translate("Historical", lang), "value": "historical"}]
+    # Translate Source Selectors (with TimeSeries option)
+    source_opts = [
+        {"label": translate("Live", lang), "value": "live"},
+        {"label": translate("Historical", lang), "value": "historical"},
+        {"label": translate("TimeSeries", lang), "value": "timeseries"}
+    ]
     sql_opts = [{"label": translate("Heatmap", lang), "value": "sql_heatmap"}]
 
     # Translate Heatmap Mode Options
@@ -625,7 +640,7 @@ def load_persisted_source(ts, stored_source):
     if ts is not None and ts > 0:
         raise dash.exceptions.PreventUpdate
 
-    stats_sources = ["live", "historical"]
+    stats_sources = ["live", "historical", "timeseries"]
     sql_sources = ["sql_heatmap"]
 
     if stored_source in stats_sources:
@@ -881,6 +896,10 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, lang):
             logger.info(f"✅ Raid Heatmap: {len(heatmap_list)} data points, {unique_gyms} gyms, {total_raids} raids")
             return {}, {"display": "none"}, heatmap_list, {"display": "block"}, stats_text, None
 
+        elif source == "timeseries":
+            # Daily timeseries for Raids - fetch each day's sum and build timeseries
+            logger.info(f"🔍 Fetching Raids TimeSeries for {area}: {start} to {end}")
+            data = get_raids_daily_timeseries(start, end, area)
         elif source == "live":
             hours = max(1, min(int(live_h or 1), 72))
             params = {"start_time": f"{hours} hours", "end_time": "now", "mode": mode, "area": area, "response_format": "json"}
@@ -889,6 +908,8 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, lang):
             params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
             data = get_raids_stats("counter", params)
 
+        if not data:
+            return {}, {"display": "block"}, [], {"display": "none"}, "", dbc.Alert(translate("No data found for this period.", lang), color="warning", dismissable=True, duration=4000)
         return data, {"display": "block"}, [], {"display": "none"}, "", None
     except Exception as e:
         logger.info(f"Fetch error: {e}")
@@ -934,6 +955,82 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 def update_visuals(data, search_term, sort, page, lang, mode, source):
     lang = lang or "en"
     if not data: return [], html.Div(), "", 1, {"display": "block"}
+
+    # Handle TimeSeries data format (dates + metrics)
+    if isinstance(data, dict) and "dates" in data and "metrics" in data:
+        dates = data.get("dates", [])
+        metrics = data.get("metrics", {})
+        raw_text = json.dumps(data, indent=2)
+
+        if not dates or not metrics:
+            return "No Data", html.Div(), raw_text, 1, {"display": "block"}
+
+        # Build total counts sidebar - exclude "total" key since it's redundant with the sum
+        # Only show level breakdowns in sidebar
+        level_metrics = {k: v for k, v in metrics.items() if k.startswith("level_")}
+        total_val = sum(sum(v) for v in level_metrics.values())
+        sidebar_items = [html.H1(f"{total_val:,}", className="text-primary")]
+
+        # Sort raid levels numerically
+        def raid_level_sort_key(level_str):
+            # level_1, level_3, etc -> extract number
+            if level_str.startswith("level_"):
+                try:
+                    return (0, int(level_str.replace("level_", "")))
+                except ValueError:
+                    return (1, level_str)
+            return (2, level_str)
+
+        sorted_metrics = sorted(level_metrics.keys(), key=raid_level_sort_key)
+
+        for metric_key in sorted_metrics:
+            values = level_metrics[metric_key]
+            metric_total = sum(values)
+            # Extract level number for display
+            level_num = metric_key.replace("level_", "")
+            label, color, icon_url = get_raid_info(level_num, lang)
+
+            sidebar_items.append(html.Div([
+                html.Img(src=icon_url, style={"width": "28px", "marginRight": "8px", "verticalAlign": "middle"}),
+                html.Span(f"{metric_total:,}", style={"fontSize": "1.1em", "fontWeight": "bold", "color": color}),
+                html.Span(f" {label}", style={"fontSize": "0.8em", "color": "#aaa", "marginLeft": "5px"})
+            ], className="d-flex align-items-center mb-1"))
+
+        # Create TimeSeries line chart - also exclude "total" from chart
+        fig = go.Figure()
+
+        for metric_key in sorted_metrics:
+            values = level_metrics[metric_key]
+            level_num = metric_key.replace("level_", "")
+            label, color, _ = get_raid_info(level_num, lang)
+
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=values,
+                name=label,
+                line=dict(color=color, width=2),
+                marker=dict(size=6)
+            ))
+
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            title=translate("Raids TimeSeries", lang),
+            xaxis_title=translate("Date", lang),
+            yaxis_title=translate("Count", lang),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified",
+            hoverlabel=dict(
+                bgcolor="#1a1a1a",
+                font_size=12,
+                font_color="white",
+                bordercolor="#333"
+            )
+        )
+
+        visual_content = dcc.Graph(figure=fig, id="raids-main-graph")
+        return sidebar_items, visual_content, raw_text, 1, {"display": "block"}
 
     df = parse_data_to_df(data, mode, source, lang)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "block"}

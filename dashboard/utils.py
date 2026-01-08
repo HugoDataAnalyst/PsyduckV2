@@ -287,6 +287,420 @@ def get_pokemon_stats(endpoint_type="counter", params=None):
     return {}
 
 
+def get_pokemon_daily_timeseries(start_date, end_date, area, counter_type="totals"):
+    """
+    Fetch daily sum data for a date range and build a timeseries.
+
+    For each day in the range, queries the counterseries API with mode=sum
+    to get the totals for that day. Returns a dict suitable for timeseries visualization.
+
+    Args:
+        start_date: Start date string (YYYY-MM-DD)
+        end_date: End date string (YYYY-MM-DD)
+        area: Area name to query
+        counter_type: "totals" for stats, "tth" for TTH data
+
+    Returns:
+        dict: {
+            "dates": ["2024-01-01", "2024-01-02", ...],
+            "metrics": {
+                "total": [1000, 1200, ...],
+                "iv100": [50, 60, ...],
+                ...
+            }
+        }
+        For TTH: metrics are the TTH buckets like "0_5", "5_10", etc.
+    """
+    from datetime import datetime, timedelta
+
+    # Parse dates
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        logger.error(f"Invalid date format: {start_date} or {end_date}")
+        return {}
+
+    # Limit to reasonable range (max 90 days)
+    max_days = 90
+    delta = (end - start).days
+    if delta > max_days:
+        logger.warning(f"Date range too large ({delta} days), limiting to {max_days} days")
+        start = end - timedelta(days=max_days)
+        delta = max_days
+
+    if delta < 0:
+        logger.error("Start date is after end date")
+        return {}
+
+    dates = []
+    daily_data = []
+
+    # Fetch data for each day
+    current = start
+    while current <= end:
+        date_str = current.strftime("%Y-%m-%d")
+        dates.append(date_str)
+
+        params = {
+            "counter_type": counter_type,
+            "interval": "hourly",
+            "start_time": f"{date_str}T00:00:00",
+            "end_time": f"{date_str}T23:59:59",
+            "mode": "sum",
+            "area": area,
+            "response_format": "json"
+        }
+
+        data = get_pokemon_stats("counter", params)
+
+        # Handle area-wrapped response
+        if isinstance(data, dict):
+            # Check if response is wrapped by area name
+            if area in data:
+                data = data[area]
+            # Handle nested "data" key
+            if isinstance(data, dict) and "data" in data:
+                data = data["data"]
+
+        daily_data.append(data if isinstance(data, dict) else {})
+        current += timedelta(days=1)
+
+    # Build timeseries structure
+    # Collect all unique metrics across all days
+    all_metrics = set()
+    for day_data in daily_data:
+        if isinstance(day_data, dict):
+            all_metrics.update(day_data.keys())
+
+    # Remove non-metric keys
+    all_metrics.discard("mode")
+    all_metrics.discard("area")
+
+    # Build metrics dict with values for each day
+    metrics = {}
+    for metric in all_metrics:
+        metrics[metric] = []
+        for day_data in daily_data:
+            value = day_data.get(metric, 0) if isinstance(day_data, dict) else 0
+            # Handle nested structures
+            if isinstance(value, dict):
+                value = sum(value.values()) if value else 0
+            metrics[metric].append(value)
+
+    result = {
+        "dates": dates,
+        "metrics": metrics,
+        "source_type": "timeseries_stats" if counter_type == "totals" else "timeseries_tth"
+    }
+
+    logger.info(f"Built daily timeseries: {len(dates)} days, {len(metrics)} metrics")
+    return result
+
+
+def get_raids_daily_timeseries(start_date, end_date, area):
+    """
+    Fetch daily sum data for raids and build a timeseries.
+
+    Args:
+        start_date: Start date string (YYYY-MM-DD)
+        end_date: End date string (YYYY-MM-DD)
+        area: Area name to query
+
+    Returns:
+        dict: {
+            "dates": ["2024-01-01", ...],
+            "metrics": {
+                "total": [100, 120, ...],
+                "level_1": [10, 12, ...],
+                "level_3": [20, 25, ...],
+                ...
+            },
+            "source_type": "timeseries_raids"
+        }
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        logger.error(f"Invalid date format: {start_date} or {end_date}")
+        return {}
+
+    max_days = 90
+    delta = (end - start).days
+    if delta > max_days:
+        logger.warning(f"Date range too large ({delta} days), limiting to {max_days} days")
+        start = end - timedelta(days=max_days)
+    if delta < 0:
+        logger.error("Start date is after end date")
+        return {}
+
+    dates = []
+    daily_data = []
+
+    current = start
+    while current <= end:
+        date_str = current.strftime("%Y-%m-%d")
+        dates.append(date_str)
+
+        params = {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": f"{date_str}T00:00:00",
+            "end_time": f"{date_str}T23:59:59",
+            "mode": "sum",
+            "area": area,
+            "response_format": "json"
+        }
+
+        data = get_raids_stats("counter", params)
+
+        # Handle area-wrapped response
+        if isinstance(data, dict):
+            if area in data:
+                data = data[area]
+            if isinstance(data, dict) and "data" in data:
+                data = data["data"]
+
+        daily_data.append(data if isinstance(data, dict) else {})
+        current += timedelta(days=1)
+
+    # Build metrics from raid data structure
+    # Raw format: {"total": X, "raid_level": {"1": Y, "3": Z, ...}}
+    metrics = {"total": []}
+
+    # Collect all raid levels across all days
+    all_levels = set()
+    for day_data in daily_data:
+        if isinstance(day_data, dict) and "raid_level" in day_data:
+            all_levels.update(day_data["raid_level"].keys())
+
+    # Initialize level metrics
+    for level in sorted(all_levels, key=lambda x: int(x)):
+        metrics[f"level_{level}"] = []
+
+    # Populate metrics
+    for day_data in daily_data:
+        if isinstance(day_data, dict):
+            metrics["total"].append(day_data.get("total", 0))
+            raid_levels = day_data.get("raid_level", {})
+            for level in all_levels:
+                metrics[f"level_{level}"].append(raid_levels.get(level, 0))
+        else:
+            metrics["total"].append(0)
+            for level in all_levels:
+                metrics[f"level_{level}"].append(0)
+
+    result = {
+        "dates": dates,
+        "metrics": metrics,
+        "source_type": "timeseries_raids"
+    }
+
+    logger.info(f"Built raids daily timeseries: {len(dates)} days, {len(metrics)} metrics")
+    return result
+
+
+def get_invasions_daily_timeseries(start_date, end_date, area):
+    """
+    Fetch daily sum data for invasions and build a timeseries.
+
+    Args:
+        start_date: Start date string (YYYY-MM-DD)
+        end_date: End date string (YYYY-MM-DD)
+        area: Area name to query
+
+    Returns:
+        dict: {
+            "dates": ["2024-01-01", ...],
+            "metrics": {
+                "total": [100, 120, ...],
+                "confirmed": [80, 90, ...],
+                "unconfirmed": [20, 30, ...],
+            },
+            "source_type": "timeseries_invasions"
+        }
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        logger.error(f"Invalid date format: {start_date} or {end_date}")
+        return {}
+
+    max_days = 90
+    delta = (end - start).days
+    if delta > max_days:
+        logger.warning(f"Date range too large ({delta} days), limiting to {max_days} days")
+        start = end - timedelta(days=max_days)
+    if delta < 0:
+        logger.error("Start date is after end date")
+        return {}
+
+    dates = []
+    daily_data = []
+
+    current = start
+    while current <= end:
+        date_str = current.strftime("%Y-%m-%d")
+        dates.append(date_str)
+
+        params = {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": f"{date_str}T00:00:00",
+            "end_time": f"{date_str}T23:59:59",
+            "mode": "sum",
+            "area": area,
+            "response_format": "json"
+        }
+
+        data = get_invasions_stats("counter", params)
+
+        # Handle area-wrapped response
+        if isinstance(data, dict):
+            if area in data:
+                data = data[area]
+            if isinstance(data, dict) and "data" in data:
+                data = data["data"]
+
+        daily_data.append(data if isinstance(data, dict) else {})
+        current += timedelta(days=1)
+
+    # Build metrics from invasion data structure
+    # Raw format: {"total": X, "confirmed": {"0": Y, "1": Z}}
+    # 0 = unconfirmed, 1 = confirmed
+    metrics = {"total": [], "confirmed": [], "unconfirmed": []}
+
+    for day_data in daily_data:
+        if isinstance(day_data, dict):
+            metrics["total"].append(day_data.get("total", 0))
+            confirmed_data = day_data.get("confirmed", {})
+            metrics["confirmed"].append(confirmed_data.get("1", 0))
+            metrics["unconfirmed"].append(confirmed_data.get("0", 0))
+        else:
+            metrics["total"].append(0)
+            metrics["confirmed"].append(0)
+            metrics["unconfirmed"].append(0)
+
+    result = {
+        "dates": dates,
+        "metrics": metrics,
+        "source_type": "timeseries_invasions"
+    }
+
+    logger.info(f"Built invasions daily timeseries: {len(dates)} days, {len(metrics)} metrics")
+    return result
+
+
+def get_quests_daily_timeseries(start_date, end_date, area):
+    """
+    Fetch daily sum data for quests and build a timeseries.
+
+    Args:
+        start_date: Start date string (YYYY-MM-DD)
+        end_date: End date string (YYYY-MM-DD)
+        area: Area name to query
+
+    Returns:
+        dict: {
+            "dates": ["2024-01-01", ...],
+            "metrics": {
+                "total": [100, 120, ...],
+                "ar": [80, 90, ...],
+                "normal": [20, 30, ...],
+            },
+            "source_type": "timeseries_quests"
+        }
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        logger.error(f"Invalid date format: {start_date} or {end_date}")
+        return {}
+
+    max_days = 90
+    delta = (end - start).days
+    if delta > max_days:
+        logger.warning(f"Date range too large ({delta} days), limiting to {max_days} days")
+        start = end - timedelta(days=max_days)
+    if delta < 0:
+        logger.error("Start date is after end date")
+        return {}
+
+    dates = []
+    daily_data = []
+
+    current = start
+    while current <= end:
+        date_str = current.strftime("%Y-%m-%d")
+        dates.append(date_str)
+
+        params = {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": f"{date_str}T00:00:00",
+            "end_time": f"{date_str}T23:59:59",
+            "mode": "sum",
+            "area": area,
+            "response_format": "json"
+        }
+
+        data = get_quests_stats("counter", params)
+
+        # Handle area-wrapped response
+        if isinstance(data, dict):
+            if area in data:
+                data = data[area]
+            if isinstance(data, dict) and "data" in data:
+                data = data["data"]
+
+        daily_data.append(data if isinstance(data, dict) else {})
+        current += timedelta(days=1)
+
+    # Build metrics from quest data structure
+    # Raw format: {"total": X, "quest_mode": {"ar": Y, "normal": Z}}
+    metrics = {"total": []}
+
+    # Collect all quest modes across all days
+    all_modes = set()
+    for day_data in daily_data:
+        if isinstance(day_data, dict) and "quest_mode" in day_data:
+            all_modes.update(day_data["quest_mode"].keys())
+
+    # Initialize mode metrics
+    for mode in sorted(all_modes):
+        metrics[mode] = []
+
+    # Populate metrics
+    for day_data in daily_data:
+        if isinstance(day_data, dict):
+            metrics["total"].append(day_data.get("total", 0))
+            quest_modes = day_data.get("quest_mode", {})
+            for mode in all_modes:
+                metrics[mode].append(quest_modes.get(mode, 0))
+        else:
+            metrics["total"].append(0)
+            for mode in all_modes:
+                metrics[mode].append(0)
+
+    result = {
+        "dates": dates,
+        "metrics": metrics,
+        "source_type": "timeseries_quests"
+    }
+
+    logger.info(f"Built quests daily timeseries: {len(dates)} days, {len(metrics)} metrics")
+    return result
+
+
 def get_raids_stats(endpoint_type="counter", params=None):
     """
     Generic fetcher for raids stats.

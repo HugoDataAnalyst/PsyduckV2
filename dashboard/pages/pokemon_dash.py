@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_pokemon_stats, get_pokemon_icon_url
+from dashboard.utils import get_cached_geofences, get_pokemon_stats, get_pokemon_icon_url, get_pokemon_daily_timeseries
 from utils.logger import logger
 import config as AppConfig
 import json
@@ -245,7 +245,7 @@ def layout(area=None, **kwargs):
                     dbc.Col([
                         dbc.Label("Data Source", id="label-data-source", className="fw-bold"),
                         html.Div([
-                            # Row 1: Stats Live & Historical
+                            # Row 1: Stats Live & Historical & TimeSeries
                             html.Div([
                                 html.Span("Stats: ", id="label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
@@ -253,13 +253,14 @@ def layout(area=None, **kwargs):
                                     options=[
                                         {"label": "Live", "value": "live"},
                                         {"label": "Historical", "value": "historical"},
+                                        {"label": "TimeSeries", "value": "timeseries_stats"},
                                     ],
                                     value="live", inline=True, inputClassName="btn-check",
                                     labelClassName="btn btn-outline-info btn-sm",
                                     labelCheckedClassName="active"
                                 ),
                             ], className="d-flex align-items-center mb-1"),
-                            # Row 2: TTH Live & Historical
+                            # Row 2: TTH Live & Historical & TimeSeries
                             html.Div([
                                 html.Span("TTH: ", id="label-tth", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
@@ -267,6 +268,7 @@ def layout(area=None, **kwargs):
                                     options=[
                                         {"label": "Live", "value": "live_tth"},
                                         {"label": "Historical", "value": "historical_tth"},
+                                        {"label": "TimeSeries", "value": "timeseries_tth"},
                                     ],
                                     value=None, inline=True, inputClassName="btn-check",
                                     labelClassName="btn btn-outline-warning btn-sm",
@@ -789,6 +791,9 @@ def toggle_source_controls(source):
         btn_s = {"display": "block"}
     elif source == "sql_shiny":
         shiny_s = {"display": "block"}
+    elif source and "timeseries_" in source:
+        # TimeSeries sources use date picker but no interval selector
+        hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
     elif source:
         hist_s = {"display": "block", "position": "relative", "zIndex": 1002}
         int_s = {"display": "block"}
@@ -815,19 +820,30 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("Surged (Hourly)", lang), "value": "surged"},
         {"label": translate("Sum (Totals)", lang), "value": "sum"}
     ]
+    # TimeSeries mode only supports sum (totals per day)
+    timeseries_options = [{"label": translate("Sum (Totals)", lang), "value": "sum"}]
     heatmap_options = [{"label": translate("Map View", lang), "value": "map"}]
     shiny_options = [{"label": translate("Grouped (Table)", lang), "value": "grouped"}]
 
-    if source and "tth" in source: allowed = tth_options
+    if source and "timeseries_" in source: allowed = timeseries_options
+    elif source and "tth" in source: allowed = tth_options
     elif source == "sql_heatmap": allowed = heatmap_options
     elif source == "sql_shiny": allowed = shiny_options
     else: allowed = full_options
     allowed_vals = [o['value'] for o in allowed]
     final_val = current_ui_mode if current_ui_mode in allowed_vals else (stored_mode if stored_mode in allowed_vals else allowed_vals[0])
 
-    # Translate Source Selectors
-    source_opts = [{"label": translate("Live", lang), "value": "live"}, {"label": translate("Historical", lang), "value": "historical"}]
-    tth_opts = [{"label": translate("Live", lang), "value": "live_tth"}, {"label": translate("Historical", lang), "value": "historical_tth"}]
+    # Translate Source Selectors (with TimeSeries option)
+    source_opts = [
+        {"label": translate("Live", lang), "value": "live"},
+        {"label": translate("Historical", lang), "value": "historical"},
+        {"label": translate("TimeSeries", lang), "value": "timeseries_stats"}
+    ]
+    tth_opts = [
+        {"label": translate("Live", lang), "value": "live_tth"},
+        {"label": translate("Historical", lang), "value": "historical_tth"},
+        {"label": translate("TimeSeries", lang), "value": "timeseries_tth"}
+    ]
     sql_opts = [{"label": translate("Heatmap", lang), "value": "sql_heatmap"}, {"label": translate("Shiny Odds", lang), "value": "sql_shiny"}]
 
     heatmap_mode_opts = [
@@ -865,8 +881,8 @@ def load_persisted_source(ts, stored_source):
     if ts is not None and ts > 0:
         raise dash.exceptions.PreventUpdate
 
-    stats_sources = ["live", "historical"]
-    tth_sources = ["live_tth", "historical_tth"]
+    stats_sources = ["live", "historical", "timeseries_stats"]
+    tth_sources = ["live_tth", "historical_tth", "timeseries_tth"]
     sql_sources = ["sql_heatmap", "sql_shiny"]
 
     if stored_source in stats_sources:
@@ -1224,6 +1240,14 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
 
             return {}, {"display": "block"}, safe_data, None
 
+        elif source == "timeseries_stats":
+            # Daily timeseries for Stats - fetch each day's sum and build timeseries
+            logger.info(f"🔍 Fetching Stats TimeSeries for {area}: {start} to {end}")
+            data = get_pokemon_daily_timeseries(start, end, area, counter_type="totals")
+        elif source == "timeseries_tth":
+            # Daily timeseries for TTH - fetch each day's sum and build timeseries
+            logger.info(f"🔍 Fetching TTH TimeSeries for {area}: {start} to {end}")
+            data = get_pokemon_daily_timeseries(start, end, area, counter_type="tth")
         elif "tth" in source:
             if "live" in source:
                 hours = max(1, min(int(live_h or 1), MAX_RETENTION_HOURS))
@@ -1597,6 +1621,147 @@ def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, sour
         return total_div, visual_content, raw_text, total_pages_val, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
     if not data: return [], html.Div(), "", 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+
+    # Handle TimeSeries data format (dates + metrics)
+    if isinstance(data, dict) and "dates" in data and "metrics" in data:
+        dates = data.get("dates", [])
+        metrics = data.get("metrics", {})
+        source_type = data.get("source_type", "timeseries_stats")
+        raw_text = json.dumps(data, indent=2)
+        is_tth = source_type == "timeseries_tth"
+
+        if not dates or not metrics:
+            return "No Data", html.Div(), raw_text, 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+
+        # Build total counts sidebar
+        icon_base_url = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+        metric_icons = {
+            "iv0": "/assets/images/0iv.png", "iv100": "/assets/images/100iv.png",
+            "pvp_little": f"{icon_base_url}/misc/500.webp", "pvp_great": f"{icon_base_url}/misc/1500.webp",
+            "pvp_ultra": f"{icon_base_url}/misc/2500.webp", "shiny": f"{icon_base_url}/misc/sparkles.webp"
+        }
+
+        # Calculate totals for sidebar
+        # For TTH: sum all bucket values (no "total" metric exists)
+        # For Stats: use "total" metric if exists, otherwise sum all
+        if "total" in metrics:
+            total_val = sum(metrics.get("total", []))
+        else:
+            # Sum all metric values (used for TTH)
+            total_val = sum(sum(v) for v in metrics.values())
+
+        total_div = [html.H1(f"{total_val:,}", className="text-primary")]
+        total_div.append(html.Div(f"{len(dates)} " + translate("Days", lang), className="text-muted mb-2"))
+
+        # Sort function for TTH buckets (by bucket start value, not by totals)
+        def bucket_sort_key(item):
+            m_key = item[0]
+            tth_match = re.match(r"^(\d+)_(\d+)$", m_key)
+            if tth_match:
+                return (0, int(tth_match.group(1)))
+            # Stats metrics: total first, then alphabetically
+            if m_key == "total":
+                return (1, 0, "")
+            return (1, 1, m_key)
+
+        # Add metric totals to sidebar (sorted by bucket order for TTH, by value for Stats)
+        if is_tth:
+            sorted_items = sorted(metrics.items(), key=bucket_sort_key)
+        else:
+            sorted_items = sorted(metrics.items(), key=lambda x: -sum(x[1]))
+
+        for m_key, values in sorted_items:
+            if m_key == "total":
+                continue
+            total = sum(values)
+            if total <= 0:
+                continue
+            m_lower = m_key.lower()
+            if m_lower in metric_icons:
+                total_div.append(html.Div([
+                    html.Img(src=metric_icons[m_lower], style={"width": "28px", "marginRight": "10px", "verticalAlign": "middle"}),
+                    html.Span(f"{total:,}", style={"fontWeight": "bold"})
+                ], className="d-flex align-items-center mb-1"))
+            else:
+                total_div.append(html.Div(f"{m_key}: {total:,}", className="text-muted small"))
+
+        # Build line chart
+        fig = go.Figure()
+
+        # Color mapping for metrics
+        metric_colors = {
+            "total": "#17a2b8",
+            "iv0": "#28a745",
+            "iv100": "#dc3545",
+            "pvp_little": "#e83e8c",
+            "pvp_great": "#007bff",
+            "pvp_ultra": "#343a40",
+            "shiny": "#ffc107",
+        }
+
+        # TTH bucket colors (gradient from blue to red)
+        def get_tth_color(bucket):
+            tth_match = re.match(r"^(\d+)_(\d+)$", bucket)
+            if tth_match:
+                start_val = int(tth_match.group(1))
+                if start_val < 30:
+                    # Blue gradient - more visible colors
+                    intensity = 0.5 + 0.5 * (start_val / 30)
+                    return f"rgba(30, 144, 255, {intensity:.2f})"  # Dodger blue
+                else:
+                    # Red gradient - more visible colors
+                    intensity = 0.5 + 0.5 * ((start_val - 30) / 30)
+                    return f"rgba(255, 99, 71, {intensity:.2f})"  # Tomato red
+            return "#6c757d"
+
+        # Sort metrics for chart legend (by bucket order for TTH)
+        def metric_sort_key(m):
+            tth_match = re.match(r"^(\d+)_(\d+)$", m)
+            if tth_match:
+                return (0, int(tth_match.group(1)))
+            if m == "total":
+                return (1, 0, m)
+            return (1, 1, m)
+
+        sorted_metrics = sorted(metrics.keys(), key=metric_sort_key)
+
+        for m_key in sorted_metrics:
+            values = metrics[m_key]
+            color = metric_colors.get(m_key.lower(), get_tth_color(m_key))
+
+            # Translate metric label
+            label = translate(m_key.replace("_", " ").title(), lang) if not re.match(r"^\d+_\d+$", m_key) else m_key
+
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=values,
+                mode='lines+markers',
+                name=label,
+                line=dict(color=color, width=2),
+                marker=dict(size=6)
+            ))
+
+        title_key = "Stats TimeSeries" if source_type == "timeseries_stats" else "TTH TimeSeries"
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            title=translate(title_key, lang),
+            xaxis_title=translate("Date", lang),
+            yaxis_title=translate("Count", lang),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified",
+            hoverlabel=dict(
+                bgcolor="#1a1a1a",
+                font_size=12,
+                font_color="white",
+                bordercolor="#333"
+            )
+        )
+
+        visual_content = dcc.Graph(figure=fig, id="main-graph")
+        return total_div, visual_content, raw_text, 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+
     df = parse_data_to_df(data, mode, source, lang)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 

@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_quests_stats, get_quest_icon_url, get_reward_icon_url
+from dashboard.utils import get_cached_geofences, get_quests_stats, get_quest_icon_url, get_reward_icon_url, get_quests_daily_timeseries
 from utils.logger import logger
 import config as AppConfig
 import json
@@ -174,7 +174,7 @@ def layout(area=None, **kwargs):
                     dbc.Col([
                         dbc.Label("Data Source", id="quests-label-data-source", className="fw-bold"),
                         html.Div([
-                            # Stats Live & Historical
+                            # Stats Live & Historical & TimeSeries
                             html.Div([
                                 html.Span("Stats: ", id="quests-label-stats", className="text-muted small me-2", style={"minWidth": "45px"}),
                                 dbc.RadioItems(
@@ -182,6 +182,7 @@ def layout(area=None, **kwargs):
                                     options=[
                                         {"label": "Live", "value": "live"},
                                         {"label": "Historical", "value": "historical"},
+                                        {"label": "TimeSeries", "value": "timeseries"},
                                     ],
                                     value="live", inline=True, inputClassName="btn-check",
                                     labelClassName="btn btn-outline-info btn-sm",
@@ -227,12 +228,16 @@ def layout(area=None, **kwargs):
                     # Mode
                     dbc.Col([
                         dbc.Label("📊 View Mode", id="quests-label-view-mode"),
-                        dcc.Dropdown(
-                            id="quests-mode-selector",
-                            options=[],
-                            value=None,
-                            clearable=False,
-                            className="text-dark"
+                        html.Div(
+                            dbc.RadioItems(
+                                id="quests-mode-selector",
+                                options=[],
+                                value=None,
+                                inline=True,
+                                inputClassName="btn-check",
+                                labelClassName="btn btn-outline-primary",
+                                labelCheckedClassName="active"
+                            ), className="btn-group", style={"width": "100%", "gap": "0"}
                         )
                     ], width=6, md=3),
 
@@ -568,6 +573,9 @@ def parse_data_to_df(data, mode, source, lang="en", area=None):
 )
 def toggle_source(source):
     if source == "live": return {"display": "block"}, {"display": "none"}, {"display": "none"}
+    elif source == "timeseries":
+        # TimeSeries uses date picker but no interval selector
+        return {"display": "none"}, {"display": "block", "zIndex": 1002, "position": "relative"}, {"display": "none"}
     return {"display": "none"}, {"display": "block", "zIndex": 1002, "position": "relative"}, {"display": "block"}
 
 @callback(
@@ -579,10 +587,17 @@ def toggle_source(source):
 def restrict_modes(source, lang, stored_mode, current_ui_mode):
     lang = lang or "en"
     # Define View Mode Options (Translated)
-    mode_opts = [
+    full_mode_opts = [
         {"label": translate("Grouped (Table)", lang), "value": "grouped"},
         {"label": translate("Sum (Totals)", lang), "value": "sum"}
     ]
+    # TimeSeries mode only supports sum (totals per day)
+    timeseries_mode_opts = [{"label": translate("Sum (Totals)", lang), "value": "sum"}]
+
+    if source == "timeseries":
+        mode_opts = timeseries_mode_opts
+    else:
+        mode_opts = full_mode_opts
 
     # Logic to preserve selected mode
     allowed_values = [o['value'] for o in mode_opts]
@@ -591,12 +606,13 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
     elif stored_mode in allowed_values:
         final_mode = stored_mode
     else:
-        final_mode = "grouped"
+        final_mode = allowed_values[0]
 
-    # Define Data Source Options (Translated) <--- New Logic
+    # Define Data Source Options (Translated) with TimeSeries
     source_opts = [
         {"label": translate("Live", lang), "value": "live"},
-        {"label": translate("Historical", lang), "value": "historical"}
+        {"label": translate("Historical", lang), "value": "historical"},
+        {"label": translate("TimeSeries", lang), "value": "timeseries"}
     ]
 
     # Interval Options
@@ -622,7 +638,7 @@ def load_persisted_source(ts, stored_source):
     """Load persisted data source on page load."""
     if ts is not None and ts > 0:
         raise dash.exceptions.PreventUpdate
-    valid_sources = ["live", "historical"]
+    valid_sources = ["live", "historical", "timeseries"]
     if stored_source in valid_sources:
         return stored_source
     return "live"
@@ -683,13 +699,19 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, lang):
         return {}, {"display": "none"}, alert
 
     try:
-        if source == "live":
+        if source == "timeseries":
+            # Daily timeseries for Quests - fetch each day's sum and build timeseries
+            logger.info(f"🔍 Fetching Quests TimeSeries for {area}: {start} to {end}")
+            data = get_quests_daily_timeseries(start, end, area)
+        elif source == "live":
             params = {"start_time": f"{live_h} hours", "end_time": "now", "mode": mode, "area": area, "response_format": "json"}
             data = get_quests_stats("timeseries", params)
         else:
             params = {"counter_type": "totals", "interval": interval, "start_time": f"{start}T00:00:00", "end_time": f"{end}T23:59:59", "mode": mode, "area": area, "response_format": "json"}
             data = get_quests_stats("counter", params)
 
+        if not data:
+            return {}, {"display": "block"}, dbc.Alert(translate("No data found for this period.", lang), color="warning", dismissable=True, duration=4000)
         return data, {"display": "block"}, None
     except Exception as e:
         logger.error(f"Quest Fetch Error: {e}")
@@ -742,6 +764,85 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 def update_visuals(data, search_term, sort, page, lang, mode, source, selected_area):
     lang = lang or "en"
     if not data: return "No Data", html.Div(), "", 1
+
+    # Handle TimeSeries data format (dates + metrics)
+    if isinstance(data, dict) and "dates" in data and "metrics" in data:
+        dates = data.get("dates", [])
+        metrics = data.get("metrics", {})
+        raw_text = json.dumps(data, indent=2)
+
+        if not dates or not metrics:
+            return "No Data", html.Div(), raw_text, 1
+
+        # Build total counts sidebar
+        total_val = sum(sum(v) for v in metrics.values())
+        sidebar_items = [html.H1(f"{total_val:,}", className="text-primary")]
+
+        # Add AR/Normal metrics with icons
+        ar_icon = get_reward_icon_url("pokestop/0_ar.webp")
+        normal_icon = get_reward_icon_url("pokestop/0.webp")
+
+        for metric_key in ["ar", "normal"]:
+            if metric_key in metrics:
+                values = metrics[metric_key]
+                metric_total = sum(values)
+                if metric_key == "ar":
+                    icon = ar_icon
+                    label = translate("AR Quests", lang)
+                    color = "#17a2b8"
+                else:
+                    icon = normal_icon
+                    label = translate("Normal Quests", lang)
+                    color = "#6c757d"
+
+                sidebar_items.append(html.Div([
+                    html.Img(src=icon, style={"width": "28px", "marginRight": "8px", "verticalAlign": "middle"}),
+                    html.Span(f"{metric_total:,}", style={"fontSize": "1.1em", "fontWeight": "bold", "color": color}),
+                    html.Span(f" {label}", style={"fontSize": "0.8em", "color": "#aaa", "marginLeft": "5px"})
+                ], className="d-flex align-items-center mb-1"))
+
+        # Create TimeSeries line chart
+        fig = go.Figure()
+
+        for metric_key in metrics.keys():
+            values = metrics[metric_key]
+            if metric_key == "ar":
+                color = "#17a2b8"
+                label = translate("AR Quests", lang)
+            elif metric_key == "normal":
+                color = "#6c757d"
+                label = translate("Normal Quests", lang)
+            else:
+                color = None
+                label = metric_key.title()
+
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=values,
+                name=label,
+                line=dict(color=color, width=2) if color else dict(width=2),
+                marker=dict(size=6)
+            ))
+
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            title=translate("Quests TimeSeries", lang),
+            xaxis_title=translate("Date", lang),
+            yaxis_title=translate("Count", lang),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified",
+            hoverlabel=dict(
+                bgcolor="#1a1a1a",
+                font_size=12,
+                font_color="white",
+                bordercolor="#333"
+            )
+        )
+
+        visual_content = dcc.Graph(figure=fig, id="quests-main-graph")
+        return sidebar_items, visual_content, raw_text, 1
 
     df = parse_data_to_df(data, mode, source, lang=lang, area=selected_area)
     if df.empty: return "No Data", html.Div(), json.dumps(data, indent=2), 1
