@@ -56,11 +56,39 @@ TASK_CONFIG = {
     "invasions_daily": {
         "func": get_global_invasions_task,
         "file": os.path.join(DATA_DIR, 'global_invasions.json'),
+        "params": {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": "24 hours",
+            "end_time": "now",
+            "mode": "grouped",
+            "response_format": "json",
+            "area": "global",
+            "display_type": "all",
+            "character": "all",
+            "grunt": "all",
+            "confirmed": "all"
+        },
         "task_interval": DEFAULT_INTERVAL
     },
     "quests_daily": {
         "func": get_global_quests_task,
         "file": os.path.join(DATA_DIR, 'global_quests.json'),
+        "params": {
+            "counter_type": "totals",
+            "interval": "hourly",
+            "start_time": "24 hours",
+            "end_time": "now",
+            "mode": "grouped",
+            "response_format": "json",
+            "area": "global",
+            "with_ar": "all", "ar_type": "all", "reward_ar_type": "all",
+            "reward_ar_item_id": "all", "reward_ar_item_amount": "all",
+            "reward_ar_poke_id": "all", "reward_ar_poke_form": "all",
+            "normal_type": "all", "reward_normal_type": "all",
+            "reward_normal_item_id": "all", "reward_normal_item_amount": "all",
+            "reward_normal_poke_id": "all", "reward_normal_poke_form": "all"
+        },
         "task_interval": DEFAULT_INTERVAL
     },
     # Slow refresh tasks
@@ -106,7 +134,7 @@ TASK_CONFIG = {
             "interval": "hourly",
             "start_time": "26280 hours",
             "end_time": "now",
-            "mode": "sum",
+            "mode": "grouped",
             "response_format": "json",
             "area": "global",
             "display_type": "all",
@@ -124,7 +152,7 @@ TASK_CONFIG = {
             "interval": "hourly",
             "start_time": "26280 hours",
             "end_time": "now",
-            "mode": "sum",
+            "mode": "grouped",
             "response_format": "json",
             "area": "global",
             "with_ar": "all", "ar_type": "all", "reward_ar_type": "all",
