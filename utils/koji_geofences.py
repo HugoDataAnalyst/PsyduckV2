@@ -264,6 +264,41 @@ class KojiGeofences:
             data = await cls._read_cached()
         return data
 
+    @classmethod
+    async def get_fresh_geofences(cls):
+        """
+        Always fetch fresh geofences from Koji API on startup.
+        Falls back to Redis cache if Koji fetch fails.
+
+        This ensures new areas added to Koji are immediately detected
+        on application restart, rather than waiting for cache expiry.
+
+        Returns:
+            list: Geofences list, or None if both Koji and cache fail.
+        """
+        logger.info("🔄 Fetching fresh geofences from Koji API...")
+
+        # Try to fetch fresh data from Koji
+        try:
+            ok = await cls.cache_koji_geofences()
+            if ok:
+                data = await cls._read_cached()
+                if data:
+                    logger.success(f"✅ Fresh geofences loaded from Koji: {len(data)} areas")
+                    return data
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to fetch fresh geofences from Koji: {e}")
+
+        # Fallback to Redis cache if Koji fails
+        logger.warning("⚠️ Falling back to Redis cached geofences...")
+        data = await cls._read_cached()
+        if data:
+            logger.info(f"📦 Using cached geofences: {len(data)} areas")
+            return data
+
+        logger.error("❌ No geofences available from Koji or cache")
+        return None
+
     # Refresh loop
 
     async def refresh_geofences(self):

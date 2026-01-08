@@ -144,9 +144,10 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"[{worker_id}] [LEADER] This worker is the leader - starting background services")
 
-        # Initialize Koji geofences and cache in Redis
+        # Initialize Koji geofences - always fetch fresh from Koji on startup
+        # This ensures new areas added to Koji are immediately detected
         koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
-        geofences = await retry_call(koji_instance.get_cached_geofences)
+        geofences = await retry_call(koji_instance.get_fresh_geofences)
         if not geofences:
             logger.error("⚠️ No geofences available at startup. Exiting application.")
             raise Exception("❌ No geofences available at startup, stopping application.")
