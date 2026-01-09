@@ -949,11 +949,91 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 # Visuals Update
 @callback(
     [Output("raids-total-counts-display", "children"), Output("raids-main-visual-container", "children"), Output("raids-raw-data-display", "children"), Output("raids-total-pages-store", "data"), Output("raids-main-visual-container", "style")],
-    [Input("raids-raw-data-store", "data"), Input("raids-search-input", "value"), Input("raids-table-sort-store", "data"), Input("raids-table-page-store", "data"), Input("language-store", "data")],
+    [Input("raids-raw-data-store", "data"), Input("raids-search-input", "value"), Input("raids-table-sort-store", "data"), Input("raids-table-page-store", "data"), Input("raids-heatmap-data-store", "data"), Input("language-store", "data")],
     [State("raids-mode-selector", "value"), State("raids-combined-source-store", "data")]
 )
-def update_visuals(data, search_term, sort, page, lang, mode, source):
+def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, source):
     lang = lang or "en"
+
+    # Handle SQL Heatmap data - aggregate for sidebar
+    if source == "sql_heatmap":
+        raw_text = json.dumps(heatmap_data, indent=2) if heatmap_data else "{}"
+
+        if not heatmap_data:
+            total_div = [html.H1("0", className="text-primary"), html.Div(translate("Total Raids", lang), className="text-muted")]
+            return total_div, html.Div(), raw_text, 1, {"display": "none"}
+
+        # Aggregate heatmap data for sidebar
+        heatmap_df = pd.DataFrame(heatmap_data)
+
+        # Total raids (sum of all counts)
+        total_raids = int(heatmap_df['count'].sum()) if 'count' in heatmap_df.columns else len(heatmap_data)
+
+        # Count by raid level
+        level_counts = {}
+        if 'raid_level' in heatmap_df.columns:
+            level_agg = heatmap_df.groupby('raid_level')['count'].sum()
+            level_counts = {str(k): int(v) for k, v in level_agg.items()}
+
+        # Count unique gyms
+        unique_gyms = heatmap_df['gym_name'].nunique() if 'gym_name' in heatmap_df.columns else 0
+
+        # Count by Pokemon (top 10)
+        pokemon_counts = pd.DataFrame()
+        if 'raid_pokemon' in heatmap_df.columns and 'count' in heatmap_df.columns:
+            pokemon_counts = heatmap_df.groupby(['raid_pokemon', 'raid_form'])['count'].sum().reset_index()
+            pokemon_counts = pokemon_counts.sort_values('count', ascending=False).head(10)
+
+        # Build sidebar
+        total_div = [
+            html.H1(f"{total_raids:,}", className="text-primary"),
+            html.Div(translate("Total Raids", lang), className="text-muted mb-3")
+        ]
+
+        # Add unique gyms count
+        total_div.append(html.Div([
+            html.I(className="bi bi-geo-alt-fill me-2", style={"fontSize": "1.2rem", "color": "#28a745"}),
+            html.Span(f"{unique_gyms:,} ", style={"fontWeight": "bold"}),
+            html.Span(translate("Gyms", lang), className="text-muted")
+        ], className="d-flex align-items-center mb-2"))
+
+        # Add raid level breakdown
+        if level_counts:
+            total_div.append(html.Hr(style={"borderColor": "#444"}))
+            total_div.append(html.Div(translate("By Level", lang), className="text-muted small mb-2"))
+
+            # Sort by level number
+            sorted_levels = sorted(level_counts.keys(), key=lambda x: int(x) if x.isdigit() else 999)
+            for level in sorted_levels:
+                count = level_counts[level]
+                if count > 0:
+                    label, color, icon_url = get_raid_info(level, lang)
+                    total_div.append(html.Div([
+                        html.Img(src=icon_url, style={"width": "24px", "height": "24px", "marginRight": "8px"}),
+                        html.Span(f"{count:,}", style={"fontWeight": "bold", "marginRight": "6px", "color": color}),
+                        html.Span(label, className="text-muted", style={"fontSize": "0.85rem"})
+                    ], className="d-flex align-items-center mb-1"))
+
+        # Add top Pokemon breakdown
+        if not pokemon_counts.empty:
+            total_div.append(html.Hr(style={"borderColor": "#444"}))
+            total_div.append(html.Div(translate("Top Pokemon", lang), className="text-muted small mb-2"))
+
+            for _, row in pokemon_counts.iterrows():
+                pid = int(row['raid_pokemon'])
+                form = int(row['raid_form']) if row['raid_form'] else 0
+                count = int(row['count'])
+                name_display = resolve_pokemon_name(pid, form, lang)
+                icon_url = get_pokemon_icon_url(pid, form)
+
+                total_div.append(html.Div([
+                    html.Img(src=icon_url, style={"width": "24px", "height": "24px", "marginRight": "8px"}),
+                    html.Span(f"{count:,}", style={"fontWeight": "bold", "marginRight": "6px", "minWidth": "50px"}),
+                    html.Span(name_display, className="text-muted", style={"fontSize": "0.85rem", "overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"})
+                ], className="d-flex align-items-center mb-1"))
+
+        return total_div, html.Div(), raw_text, 1, {"display": "none"}
+
     if not data: return [], html.Div(), "", 1, {"display": "block"}
 
     # Handle TimeSeries data format (dates + metrics)
