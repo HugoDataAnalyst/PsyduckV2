@@ -1469,9 +1469,69 @@ def reset_hidden_pokemon_on_new_data(heatmap_data):
 def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, source):
     lang = lang or "en"
     if source == "sql_heatmap":
-        count = len(heatmap_data) if heatmap_data else 0
-        raw_text = json.dumps(heatmap_data, indent=2)
-        total_div = [html.H1(f"{count:,} Spawns", className="text-primary")]
+        raw_text = json.dumps(heatmap_data, indent=2) if heatmap_data else "{}"
+
+        if not heatmap_data:
+            total_div = [html.H1("0", className="text-primary"), html.Div(translate("Total Spawns", lang), className="text-muted")]
+            return total_div, html.Div(), raw_text, 1, {"height": "600px", "width": "100%", "display": "block"}, {"display": "none"}, {"display": "block", "float": "right"}, {"display": "block"}
+
+        # Aggregate heatmap data for sidebar
+        heatmap_df = pd.DataFrame(heatmap_data)
+
+        # Total spawns (sum of all counts)
+        total_spawns = int(heatmap_df['count'].sum()) if 'count' in heatmap_df.columns else len(heatmap_data)
+
+        # Group by pokemon_id and form to get top Pokemon
+        if 'pokemon_id' in heatmap_df.columns and 'count' in heatmap_df.columns:
+            pokemon_counts = heatmap_df.groupby(['pokemon_id', 'form'])['count'].sum().reset_index()
+            pokemon_counts = pokemon_counts.sort_values('count', ascending=False).head(10)
+        else:
+            pokemon_counts = pd.DataFrame()
+
+        # Build sidebar
+        total_div = [
+            html.H1(f"{total_spawns:,}", className="text-primary"),
+            html.Div(translate("Total Spawns", lang), className="text-muted mb-3")
+        ]
+
+        # Add unique Pokemon count
+        unique_pokemon = len(heatmap_df.groupby(['pokemon_id', 'form'])) if 'pokemon_id' in heatmap_df.columns else 0
+        total_div.append(html.Div([
+            html.I(className="bi bi-collection-fill me-2", style={"fontSize": "1.2rem", "color": "#17a2b8"}),
+            html.Span(f"{unique_pokemon:,} ", style={"fontWeight": "bold"}),
+            html.Span(translate("Unique Pokemon", lang), className="text-muted")
+        ], className="d-flex align-items-center mb-2"))
+
+        # Add unique spawn points count
+        unique_spawns = heatmap_df['latitude'].nunique() if 'latitude' in heatmap_df.columns else 0
+        total_div.append(html.Div([
+            html.I(className="bi bi-geo-alt-fill me-2", style={"fontSize": "1.2rem", "color": "#28a745"}),
+            html.Span(f"{unique_spawns:,} ", style={"fontWeight": "bold"}),
+            html.Span(translate("Spawn Points", lang), className="text-muted")
+        ], className="d-flex align-items-center mb-3"))
+
+        # Add top Pokemon breakdown
+        if not pokemon_counts.empty:
+            total_div.append(html.Hr(style={"borderColor": "#444"}))
+            total_div.append(html.Div(translate("Top Pokemon", lang), className="text-muted small mb-2"))
+
+            for _, row in pokemon_counts.iterrows():
+                pid = int(row['pokemon_id'])
+                form = int(row['form']) if row['form'] else 0
+                count = int(row['count'])
+                species_name, form_name = resolve_pokemon_name_parts(pid, form, lang)
+                icon_url = get_pokemon_icon_url(pid, form)
+
+                name_display = species_name
+                if form_name:
+                    name_display = f"{species_name} ({form_name})"
+
+                total_div.append(html.Div([
+                    html.Img(src=icon_url, style={"width": "24px", "height": "24px", "marginRight": "8px"}),
+                    html.Span(f"{count:,}", style={"fontWeight": "bold", "marginRight": "6px", "minWidth": "50px"}),
+                    html.Span(name_display, className="text-muted", style={"fontSize": "0.85rem", "overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"})
+                ], className="d-flex align-items-center mb-1"))
+
         return total_div, html.Div(), raw_text, 1, {"height": "600px", "width": "100%", "display": "block"}, {"display": "none"}, {"display": "block", "float": "right"}, {"display": "block"}
 
     # Handle Shiny Odds data

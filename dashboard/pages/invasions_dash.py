@@ -864,13 +864,90 @@ def update_pagination(first, prev, next, last, rows, goto, state, total_pages):
 # Visuals Update
 @callback(
     [Output("invasions-total-counts-display", "children"), Output("invasions-main-visual-container", "children"), Output("invasions-raw-data-display", "children"), Output("invasions-total-pages-store", "data"), Output("invasions-main-visual-container", "style")],
-    [Input("invasions-raw-data-store", "data"), Input("invasions-search-input", "value"), Input("invasions-table-sort-store", "data"), Input("invasions-table-page-store", "data"), Input("language-store", "data")],
+    [Input("invasions-raw-data-store", "data"), Input("invasions-search-input", "value"), Input("invasions-table-sort-store", "data"), Input("invasions-table-page-store", "data"), Input("invasions-heatmap-data-store", "data"), Input("language-store", "data")],
     [State("invasions-mode-selector", "value"), State("invasions-combined-source-store", "data")]
 )
-def update_visuals(data, search_term, sort, page, lang, mode, source):
+def update_visuals(data, search_term, sort, page, heatmap_data, lang, mode, source):
     lang = lang or "en"
     if source == "sql_heatmap":
-        return [], html.Div(translate("View heatmap below", lang)), "", 1, {"display": "none"}
+        raw_text = json.dumps(heatmap_data, indent=2) if heatmap_data else "{}"
+
+        if not heatmap_data:
+            total_div = [html.H1("0", className="text-primary"), html.Div(translate("Total Invasions", lang), className="text-muted")]
+            return total_div, html.Div(), raw_text, 1, {"display": "none"}
+
+        # Aggregate heatmap data for sidebar
+        heatmap_df = pd.DataFrame(heatmap_data)
+
+        # Total invasions (sum of all counts)
+        total_invasions = int(heatmap_df['count'].sum()) if 'count' in heatmap_df.columns else len(heatmap_data)
+
+        # Count unique pokestops
+        unique_stops = heatmap_df['pokestop_name'].nunique() if 'pokestop_name' in heatmap_df.columns else 0
+
+        # Character ID classification
+        GIOVANNI_IDS = {44, 524}
+        FEMALE_GRUNT_IDS = {5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 46, 47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69, 71, 73, 75, 77, 79, 81, 83, 85, 87, 89}
+        MALE_GRUNT_IDS = {4, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 45, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90}
+
+        def classify_character(char_id):
+            char_id = int(char_id) if char_id else 0
+            if char_id == 0: return 'unset'
+            if char_id in GIOVANNI_IDS: return 'giovanni'
+            if char_id == 41 or char_id == 527: return 'cliff'
+            if char_id == 42 or char_id == 526: return 'arlo'
+            if char_id == 43 or char_id == 525: return 'sierra'
+            if char_id in FEMALE_GRUNT_IDS: return 'female'
+            if char_id in MALE_GRUNT_IDS: return 'male'
+            return 'unset'
+
+        # Aggregate by character type
+        category_counts = {'male': 0, 'female': 0, 'cliff': 0, 'arlo': 0, 'sierra': 0, 'giovanni': 0, 'unset': 0}
+        if 'character' in heatmap_df.columns:
+            for _, row in heatmap_df.iterrows():
+                char_id = row.get('character', 0)
+                count = int(row.get('count', 1))
+                category = classify_character(char_id)
+                category_counts[category] += count
+
+        # Build sidebar
+        icon_base_url = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
+        total_div = [
+            html.H1(f"{total_invasions:,}", className="text-primary"),
+            html.Div(translate("Total Invasions", lang), className="text-muted mb-3")
+        ]
+
+        # Add unique pokestops count
+        total_div.append(html.Div([
+            html.I(className="bi bi-geo-alt-fill me-2", style={"fontSize": "1.2rem", "color": "#28a745"}),
+            html.Span(f"{unique_stops:,} ", style={"fontWeight": "bold"}),
+            html.Span(translate("PokéStops", lang), className="text-muted")
+        ], className="d-flex align-items-center mb-3"))
+
+        # Add character breakdown
+        total_div.append(html.Hr(style={"borderColor": "#444"}))
+        total_div.append(html.Div(translate("By Character", lang), className="text-muted small mb-2"))
+
+        char_display = [
+            ('male', translate("Male Grunts", lang), f"{icon_base_url}/invasion/4.webp", "#3498db"),
+            ('female', translate("Female Grunts", lang), f"{icon_base_url}/invasion/5.webp", "#e91e63"),
+            ('cliff', "Cliff", f"{icon_base_url}/invasion/41.webp", "#d32f2f"),
+            ('arlo', "Arlo", f"{icon_base_url}/invasion/42.webp", "#f57c00"),
+            ('sierra', "Sierra", f"{icon_base_url}/invasion/43.webp", "#7b1fa2"),
+            ('giovanni', "Giovanni", f"{icon_base_url}/invasion/44.webp", "#212121"),
+            ('unset', translate("Unknown", lang), f"{icon_base_url}/invasion/0.webp", "#6c757d"),
+        ]
+
+        for cat_key, label, icon_url, color in char_display:
+            count = category_counts.get(cat_key, 0)
+            if count > 0:
+                total_div.append(html.Div([
+                    html.Img(src=icon_url, style={"width": "24px", "height": "24px", "marginRight": "8px"}),
+                    html.Span(f"{count:,}", style={"fontWeight": "bold", "marginRight": "6px", "color": color}),
+                    html.Span(label, className="text-muted", style={"fontSize": "0.85rem"})
+                ], className="d-flex align-items-center mb-1"))
+
+        return total_div, html.Div(), raw_text, 1, {"display": "none"}
 
     if not data: return [], html.Div(), "", 1, {"display": "block"}
 
