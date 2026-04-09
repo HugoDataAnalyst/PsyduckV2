@@ -135,7 +135,7 @@ async def get_cached_geofences(
 @time_execution(label="POKEMON_GET_COUNTERSERIES")
 async def get_pokemon_counterseries(
     counter_type: str = Query(..., description="Type of counter series: totals, tth, or weather"),
-    interval: str = Query(..., description="Interval: hourly or weekly for totals and tth; monthly for weather"),
+    interval: str = Query(..., description="Interval: hourly, daily or weekly for totals and tth; monthly for weather"),
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
@@ -239,7 +239,7 @@ async def get_pokemon_counterseries(
 @time_execution(label="RAID_GET_COUNTERSERIES")
 async def get_counter_raids(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
-    interval: str = Query(..., description="Interval: hourly or weekly."),
+    interval: str = Query(..., description="Interval: hourly, daily or weekly."),
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
@@ -344,7 +344,7 @@ async def get_counter_raids(
 @time_execution(label="INVASION_GET_COUNTERSERIES")
 async def get_counter_invasions(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
-    interval: str = Query(..., description="Interval: hourly or weekly."),
+    interval: str = Query(..., description="Interval: hourly, daily or weekly."),
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
@@ -441,7 +441,7 @@ async def get_counter_invasions(
 @time_execution(label="QUEST_GET_COUNTERSERIES")
 async def get_counter_quests(
     counter_type: str = Query("totals", description="Type of counter series: totals"),
-    interval: str = Query(..., description="Interval: hourly or weekly."),
+    interval: str = Query(..., description="Interval: hourly, daily or weekly."),
     start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
     end_time: str = Query(..., description="End time as ISO format (e.g., 2023-03-15T23:59:59) or relative (e.g., 'now')"),
     mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' or (for hourly only) 'surged'."),
