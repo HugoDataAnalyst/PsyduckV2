@@ -11,6 +11,7 @@ from my_redis.connect_redis import RedisManager
 from server_fastapi.utils import details, secure_api
 from fastapi.openapi.docs import get_swagger_ui_html
 from utils.logger import setup_logging, logger
+from utils.timer import time_execution
 from utils.koji_geofences import KojiGeofences
 from utils.leader_election import LeaderElection
 from utils.global_state_manager import GlobalStateManager
