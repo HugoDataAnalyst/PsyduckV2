@@ -498,7 +498,7 @@ def toggle_source_controls(source):
 @callback(
     [Output("invasions-mode-selector", "options"), Output("invasions-mode-selector", "value"),
      Output("invasions-stats-source-selector", "options"), Output("invasions-sql-source-selector", "options"),
-     Output("invasions-heatmap-display-mode", "options"), Output("invasions-interval-selector", "options")],
+     Output("invasions-heatmap-display-mode", "options")],
     [Input("invasions-combined-source-store", "data"), Input("language-store", "data"),
      Input("invasions-interval-selector", "value")],
     [State("invasions-mode-persistence-store", "data"), State("invasions-mode-selector", "value")]
@@ -507,7 +507,7 @@ def restrict_modes(source, lang, interval, stored_mode, current_ui_mode):
     lang = lang or "en"
     if source == "sql_heatmap":
         heatmap_opts = [{"label": translate("Map View", lang), "value": "map"}]
-        return heatmap_opts, "map", dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        return heatmap_opts, "map", dash.no_update, dash.no_update, dash.no_update
 
     full_options = [
         {"label": translate("Surged (Hourly)", lang), "value": "surged"},
@@ -544,13 +544,15 @@ def restrict_modes(source, lang, interval, stored_mode, current_ui_mode):
         {"label": translate("Grid Overlay", lang), "value": "grid"}
     ]
 
-    # Interval Options
-    interval_opts = [
+    return allowed, final_value, stats_opts, sql_opts, heatmap_mode_opts
+
+@callback(Output("invasions-interval-selector", "options"), Input("language-store", "data"))
+def update_interval_options(lang):
+    lang = lang or "en"
+    return [
         {"label": translate("Hourly", lang), "value": "hourly"},
         {"label": translate("Daily", lang),  "value": "daily"},
     ]
-
-    return allowed, final_value, stats_opts, sql_opts, heatmap_mode_opts, interval_opts
 
 @callback(Output("invasions-mode-persistence-store", "data"), Input("invasions-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val

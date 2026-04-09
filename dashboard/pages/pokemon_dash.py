@@ -803,7 +803,7 @@ def toggle_source_controls(source):
 @callback(
     [Output("mode-selector", "options"), Output("mode-selector", "value"),
      Output("data-source-selector", "options"), Output("data-source-tth-selector", "options"), Output("data-source-sql-selector", "options"),
-     Output("heatmap-display-mode", "options"), Output("interval-selector", "options")],
+     Output("heatmap-display-mode", "options")],
     [Input("combined-source-store", "data"), Input("language-store", "data"),
      Input("interval-selector", "value")],
     [State("mode-persistence-store", "data"), State("mode-selector", "value")]
@@ -858,13 +858,15 @@ def restrict_modes(source, lang, interval, stored_mode, current_ui_mode):
         {"label": translate("Grid Overlay", lang), "value": "grid"}
     ]
 
-    # Interval Options
-    interval_opts = [
+    return allowed, final_val, source_opts, tth_opts, sql_opts, heatmap_mode_opts
+
+@callback(Output("interval-selector", "options"), Input("language-store", "data"))
+def update_interval_options(lang):
+    lang = lang or "en"
+    return [
         {"label": translate("Hourly", lang), "value": "hourly"},
         {"label": translate("Daily", lang),  "value": "daily"},
     ]
-
-    return allowed, final_val, source_opts, tth_opts, sql_opts, heatmap_mode_opts, interval_opts
 
 @callback(Output("mode-persistence-store", "data"), Input("mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val

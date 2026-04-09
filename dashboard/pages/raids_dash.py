@@ -575,7 +575,7 @@ def toggle_source_controls(source):
 @callback(
     [Output("raids-mode-selector", "options"), Output("raids-mode-selector", "value"),
      Output("raids-data-source-selector", "options"), Output("raids-data-source-sql-selector", "options"),
-     Output("raids-heatmap-display-mode", "options"), Output("raids-interval-selector", "options")],
+     Output("raids-heatmap-display-mode", "options")],
     [Input("raids-combined-source-store", "data"), Input("language-store", "data"),
      Input("raids-interval-selector", "value")],
     [State("raids-mode-persistence-store", "data"), State("raids-mode-selector", "value")]
@@ -619,13 +619,15 @@ def restrict_modes(source, lang, interval, stored_mode, current_ui_mode):
         {"label": translate("Grid Overlay", lang), "value": "grid"}
     ]
 
-    # Interval Options
-    interval_opts = [
+    return allowed, final_value, source_opts, sql_opts, heatmap_mode_opts
+
+@callback(Output("raids-interval-selector", "options"), Input("language-store", "data"))
+def update_interval_options(lang):
+    lang = lang or "en"
+    return [
         {"label": translate("Hourly", lang), "value": "hourly"},
         {"label": translate("Daily", lang),  "value": "daily"},
     ]
-
-    return allowed, final_value, source_opts, sql_opts, heatmap_mode_opts, interval_opts
 
 @callback(Output("raids-mode-persistence-store", "data"), Input("raids-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
