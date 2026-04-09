@@ -101,6 +101,49 @@ class InvasionCounterRetrieval(CounterTransformer):
             final_data = filtered_data
         return {"mode": self.mode, "data": final_data}
 
+    async def invasion_retrieve_totals_daily(self) -> dict:
+        """
+        Retrieve daily invasion totals.
+        Key format: "counter:invasion_daily:{area}:{YYYYMMDD}"
+        """
+        client = await redis_manager.check_redis_connection()
+        if not client:
+            logger.error("❌ Retrieval pool connection not available")
+            return {"mode": self.mode, "data": {}}
+
+        time_format = "%Y%m%d"
+        pattern = "counter:invasion_daily:*" if self.area.lower() in ["global", "all"] \
+                  else f"counter:invasion_daily:{self.area}:*"
+
+        keys = await client.keys(pattern)
+        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        if not keys:
+            return {"mode": self.mode, "data": {}}
+
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+
+        if self.mode == "grouped" and isinstance(raw_aggregated, dict):
+            first_val = next(iter(raw_aggregated.values()), None)
+            if isinstance(first_val, dict):
+                flat = {}
+                for _, inner in raw_aggregated.items():
+                    for field, value in inner.items():
+                        flat[field] = flat.get(field, 0) + value
+                raw_aggregated = flat
+
+        filtered_data = self._filter_aggregated_invasions(raw_aggregated)
+
+        if self.mode == "sum":
+            logger.debug("▶️ Transforming daily 🕴️ invasion_totals SUM")
+            final_data = self.transform_invasion_totals_sum(filtered_data)
+        elif self.mode == "grouped":
+            logger.debug("▶️ Transforming daily 🕴️ invasion_totals GROUPED")
+            final_data = self.transform_invasion_totals_grouped(filtered_data)
+        else:
+            logger.debug("❌ Else Block daily 🕴️ invasion_totals")
+            final_data = filtered_data
+        return {"mode": self.mode, "data": final_data}
+
     async def invasion_retrieve_totals_hourly(self) -> dict:
         """
         Retrieve hourly invasion totals.
