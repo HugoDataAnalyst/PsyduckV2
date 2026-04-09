@@ -576,10 +576,11 @@ def toggle_source_controls(source):
     [Output("raids-mode-selector", "options"), Output("raids-mode-selector", "value"),
      Output("raids-data-source-selector", "options"), Output("raids-data-source-sql-selector", "options"),
      Output("raids-heatmap-display-mode", "options"), Output("raids-interval-selector", "options")],
-    [Input("raids-combined-source-store", "data"), Input("language-store", "data")],
+    [Input("raids-combined-source-store", "data"), Input("language-store", "data"),
+     Input("raids-interval-selector", "value")],
     [State("raids-mode-persistence-store", "data"), State("raids-mode-selector", "value")]
 )
-def restrict_modes(source, lang, stored_mode, current_ui_mode):
+def restrict_modes(source, lang, interval, stored_mode, current_ui_mode):
     lang = lang or "en"
     full_options = [
         {"label": translate("Surged (Hourly)", lang), "value": "surged"},
@@ -593,6 +594,10 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
     if source == "timeseries": allowed = timeseries_options
     elif source == "sql_heatmap": allowed = heatmap_options
     else: allowed = full_options
+
+    # Surged requires hourly keys — suppress when daily is selected
+    if interval == "daily":
+        allowed = [o for o in allowed if o["value"] != "surged"]
 
     allowed_values = [o['value'] for o in allowed]
     if current_ui_mode in allowed_values: final_value = current_ui_mode
@@ -616,7 +621,8 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
 
     # Interval Options
     interval_opts = [
-        {"label": translate("Hourly", lang), "value": "hourly"}
+        {"label": translate("Hourly", lang), "value": "hourly"},
+        {"label": translate("Daily", lang),  "value": "daily"},
     ]
 
     return allowed, final_value, source_opts, sql_opts, heatmap_mode_opts, interval_opts
