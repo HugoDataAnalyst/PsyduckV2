@@ -191,9 +191,9 @@ async def lifespan(app: FastAPI):
                     worker_id,
                 )
                 with time_execution(label="Redis → MySQL initial seed: counters"):
-                    c = await backup_counters(client)
+                    c = await backup_counters(client, yield_between_chunks=False)
                 with time_execution(label="Redis → MySQL initial seed: timeseries"):
-                    t = await backup_timeseries(client)
+                    t = await backup_timeseries(client, yield_between_chunks=False)
 
                 if c == 0 and t == 0:
                     # Redis was also empty — genuine fresh install, nothing to seed
@@ -360,8 +360,11 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"[{worker_id}] [FOLLOWER] This worker is a follower - waiting for leader state")
 
-        # Wait for leader to populate global state in Redis
-        state_available = await GlobalStateManager.wait_for_state(timeout=30.0)
+        # Wait for leader to populate global state in Redis.
+        # When REDIS_MYSQL_BACKUPS is enabled, the leader may spend several minutes
+        # backing up / restoring data before it sets geofences — give it extra time.
+        follower_timeout = 600.0 if AppConfig.redis_mysql_backups else 30.0
+        state_available = await GlobalStateManager.wait_for_state(timeout=follower_timeout)
         if not state_available:
             logger.error("❌ Timeout waiting for leader to populate state. Exiting.")
             raise Exception("❌ Timeout waiting for leader state, stopping application.")
