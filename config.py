@@ -119,6 +119,13 @@ raid_timeseries_retention_ms     = retention_ms(config.get("retention_hours", {}
 invasion_timeseries_retention_ms = retention_ms(config.get("retention_hours", {}).get("timeseries_invasion", 72))
 quests_timeseries_retention_ms   = retention_ms(config.get("retention_hours", {}).get("timeseries_quest", 72))
 
+# Counter hourly retention (hours; 0 = disabled — no cleanup, no backup filtering)
+counter_pokemon_hourly_retention_hours     = int(config.get("retention_hours", {}).get("counter_pokemon_hourly",     168))
+counter_tth_pokemon_hourly_retention_hours = int(config.get("retention_hours", {}).get("counter_tth_pokemon_hourly", 168))
+counter_raid_hourly_retention_hours        = int(config.get("retention_hours", {}).get("counter_raid_hourly",        168))
+counter_invasion_hourly_retention_hours    = int(config.get("retention_hours", {}).get("counter_invasion_hourly",    168))
+counter_quest_hourly_retention_hours       = int(config.get("retention_hours", {}).get("counter_quest_hourly",       168))
+
 #Store in Redis
 store_pokemon_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemon_timeseries', True)).upper() == "TRUE"
 store_pokemon_tth_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemon_tth_timeseries', True)).upper() == "TRUE"
