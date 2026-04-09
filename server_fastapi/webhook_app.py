@@ -25,7 +25,7 @@ from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
 from sql.tasks.quest_stops_flusher import QuestsBufferFlusher
 from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
-from my_redis.utils.mysql_backup import restore_counters, restore_timeseries, _patch_redis_conf
+from my_redis.utils.mysql_backup import restore_counters, restore_timeseries
 from my_redis.utils.emergency_backup import register_emergency_backup
 from my_redis.utils.redis_backup_service import RedisBackupService
 from tzlocal import get_localzone
@@ -157,14 +157,12 @@ async def lifespan(app: FastAPI):
                 await client.config_rewrite()
                 logger.success(f"[{worker_id}] redis.conf updated via CONFIG REWRITE")
             except Exception as rewrite_err:
-                logger.warning(f"[{worker_id}] CONFIG REWRITE failed ({rewrite_err})")
-                if AppConfig.redis_conf_path:
-                    _patch_redis_conf(AppConfig.redis_conf_path)
-                else:
-                    logger.warning(
-                        f"[{worker_id}] redis_conf_path not set — manually add "
-                        "'save \"\"' and 'appendonly no' to redis.conf to persist across restarts"
-                    )
+                logger.warning(
+                    "[{}] CONFIG REWRITE failed ({}) — persistence is disabled for this session "
+                    "but will return after a Redis restart. To make it permanent, run manually: "
+                    "sudo redis-cli -a PASSWORD CONFIG REWRITE",
+                    worker_id, rewrite_err,
+                )
             logger.info(f"[{worker_id}] Restoring Redis from MySQL backup...")
             await restore_counters(client)
             await restore_timeseries(client)

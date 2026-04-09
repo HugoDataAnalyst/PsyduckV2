@@ -20,8 +20,7 @@
         "store_invasions_timeseries": true,
         "store_quests_timeseries": true,
         "REDIS_MYSQL_BACKUPS": false,
-        "backup_interval_seconds": 3600,
-        "redis_conf_path": ""
+        "backup_interval_seconds": 3600
     },
     "REDIS": {
         "redis_connections": 600
