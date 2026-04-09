@@ -86,7 +86,27 @@ def _is_counter_key_recent(key: str, now: datetime) -> bool:
         except ValueError:
             return True
 
-    # Daily (8-digit YYYYMMDD) and monthly (6-digit YYYYMM) — always keep
+    # 8-digit suffix: could be a *_daily key (apply retention) or *_total/*_weather_iv (always keep)
+    if len(date_str) == 8 and date_str.isdigit():
+        _daily_retention: dict[str, int] = {
+            "pokemon_daily":     AppConfig.counter_pokemon_daily_retention_days,
+            "tth_pokemon_daily": AppConfig.counter_tth_pokemon_daily_retention_days,
+            "raid_daily":        AppConfig.counter_raid_daily_retention_days,
+            "invasion_daily":    AppConfig.counter_invasion_daily_retention_days,
+            "quest_daily":       AppConfig.counter_quest_daily_retention_days,
+        }
+        if key_type in _daily_retention:
+            retention_days = _daily_retention[key_type]
+            if retention_days == 0:
+                return True
+            try:
+                return datetime.strptime(date_str, "%Y%m%d") >= now - timedelta(days=retention_days)
+            except ValueError:
+                return True
+        # weekly totals (pokemon_total, raid_total, etc.) and weather — always keep
+        return True
+
+    # Monthly (6-digit YYYYMM) — always keep
     return True
 
 
