@@ -158,8 +158,8 @@ async def get_pokemon_counterseries(
     resp_fmt = response_format.lower()
     if counter_type not in ["totals", "tth", "weather"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals, tth, or weather.")
-    if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
-        raise HTTPException(status_code=400, detail="❌ For totals and tth, interval must be hourly or weekly.")
+    if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly", "daily"]:
+        raise HTTPException(status_code=400, detail="❌ For totals and tth, interval must be hourly, weekly, or daily.")
     if counter_type == "weather" and interval != "monthly":
         raise HTTPException(status_code=400, detail="❌ For weather, interval must be monthly.")
     if mode not in ["sum", "grouped", "surged"]:
@@ -196,8 +196,10 @@ async def get_pokemon_counterseries(
         return {
             ("totals", "hourly"): obj.retrieve_totals_hourly,
             ("totals", "weekly"): obj.retrieve_totals_weekly,
+            ("totals", "daily"):  obj.retrieve_totals_daily,
             ("tth", "hourly"): obj.retrieve_tth_hourly,
             ("tth", "weekly"): obj.retrieve_tth_weekly,
+            ("tth", "daily"):  obj.retrieve_tth_daily,
             ("weather", "monthly"): obj.retrieve_weather_monthly,
         }.get((counter_type, interval))
 
@@ -262,8 +264,8 @@ async def get_counter_raids(
 
     if counter_type not in ["totals"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals.")
-    if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
-        raise HTTPException(status_code=400, detail="❌ Interval must be hourly or weekly.")
+    if counter_type in ["totals"] and interval not in ["hourly", "weekly", "daily"]:
+        raise HTTPException(status_code=400, detail="❌ Interval must be hourly, weekly, or daily.")
     if mode not in ["sum", "grouped", "surged"]:
         raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be one of 'sum', 'grouped', or 'surged'.")
     if mode == "surged" and interval != "hourly":
@@ -301,6 +303,7 @@ async def get_counter_raids(
         return {
             ("totals", "hourly"): obj.raid_retrieve_totals_hourly,
             ("totals", "weekly"): obj.raid_retrieve_totals_weekly,
+            ("totals", "daily"):  obj.raid_retrieve_totals_daily,
         }.get((counter_type, interval))
 
     # Run per-area
@@ -364,8 +367,8 @@ async def get_counter_invasions(
 
     if counter_type not in ["totals"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals.")
-    if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
-        raise HTTPException(status_code=400, detail="❌ Interval must be hourly or weekly.")
+    if counter_type in ["totals"] and interval not in ["hourly", "weekly", "daily"]:
+        raise HTTPException(status_code=400, detail="❌ Interval must be hourly, weekly, or daily.")
     if mode not in ["sum", "grouped", "surged"]:
         raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be one of 'sum', 'grouped', or 'surged'.")
     if mode == "surged" and interval != "hourly":
@@ -399,6 +402,7 @@ async def get_counter_invasions(
         return {
             ("totals", "hourly"): obj.invasion_retrieve_totals_hourly,
             ("totals", "weekly"): obj.invasion_retrieve_totals_weekly,
+            ("totals", "daily"):  obj.invasion_retrieve_totals_daily,
         }.get((counter_type, interval))
 
     # Per-area execution (keeps your per-area offset semantics)
@@ -469,8 +473,8 @@ async def get_counter_quests(
 
     if counter_type not in ["totals"]:
         raise HTTPException(status_code=400, detail="❌ Invalid counter_type. Must be totals.")
-    if counter_type in ["totals", "tth"] and interval not in ["hourly", "weekly"]:
-        raise HTTPException(status_code=400, detail="❌ Interval must be hourly or weekly.")
+    if counter_type in ["totals"] and interval not in ["hourly", "weekly", "daily"]:
+        raise HTTPException(status_code=400, detail="❌ Interval must be hourly, weekly, or daily.")
     if mode not in ["sum", "grouped", "surged"]:
         raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be one of 'sum', 'grouped', or 'surged'.")
     if mode == "surged" and interval != "hourly":
@@ -518,6 +522,7 @@ async def get_counter_quests(
         return {
             ("totals", "hourly"): obj.quest_retrieve_totals_hourly,
             ("totals", "weekly"): obj.quest_retrieve_totals_weekly,
+            ("totals", "daily"):  obj.quest_retrieve_totals_daily,
         }.get((counter_type, interval))
 
     # Per-area run
