@@ -10,7 +10,7 @@ import asyncio
 import time
 
 from my_redis.connect_redis import RedisManager
-from my_redis.utils.mysql_backup import backup_all
+from my_redis.utils.mysql_backup import backup_all, cleanup_mysql_backup
 from utils.logger import logger
 
 
@@ -37,6 +37,7 @@ class RedisBackupService:
                     continue
 
                 t0 = time.perf_counter()
+                await cleanup_mysql_backup(self._interval)
                 await backup_all(client)
                 logger.success(
                     "✅ Redis backup cycle complete in {:.2f}s", time.perf_counter() - t0
@@ -68,6 +69,7 @@ class RedisBackupService:
             if client:
                 t0 = time.perf_counter()
                 logger.info("🔚 Final Redis backup on shutdown...")
+                await cleanup_mysql_backup(self._interval)
                 await backup_all(client)
                 logger.success(
                     "✅ Final Redis backup complete in {:.2f}s", time.perf_counter() - t0
