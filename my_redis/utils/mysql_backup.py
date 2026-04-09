@@ -19,7 +19,7 @@ import json
 from datetime import datetime, timedelta, timezone
 import config as AppConfig
 from utils.logger import logger
-from sql.connect_db import executemany, fetch_all, fetch_val
+from sql.connect_db import execute, executemany, fetch_all, fetch_val
 
 # ── Key patterns to back up ───────────────────────────────────────────────────
 
@@ -265,6 +265,117 @@ async def backup_all(client, *, yield_between_chunks: bool = True) -> None:
         backup_timeseries(client, yield_between_chunks=yield_between_chunks),
     )
     logger.info("Redis → MySQL backup complete: {} counter keys, {} timeseries keys", c, t)
+
+
+# ── MySQL backup cleanup ──────────────────────────────────────────────────────
+
+async def _cleanup_counter_backup() -> int:
+    """
+    Delete stale rows from redis_counter_backup using pure SQL date parsing.
+    Uses STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), fmt) to extract the
+    date suffix from the key name server-side — no Python row fetching needed.
+    Returns total rows deleted.
+    """
+    total = 0
+
+    hourly: list[tuple[str, int]] = [
+        ("counter:pokemon_hourly:%",     AppConfig.counter_pokemon_hourly_retention_hours),
+        ("counter:tth_pokemon_hourly:%", AppConfig.counter_tth_pokemon_hourly_retention_hours),
+        ("counter:raid_hourly:%",        AppConfig.counter_raid_hourly_retention_hours),
+        ("counter:invasion_hourly:%",    AppConfig.counter_invasion_hourly_retention_hours),
+        ("counter:quest_hourly:%",       AppConfig.counter_quest_hourly_retention_hours),
+    ]
+    daily: list[tuple[str, int]] = [
+        ("counter:pokemon_daily:%",     AppConfig.counter_pokemon_daily_retention_days),
+        ("counter:tth_pokemon_daily:%", AppConfig.counter_tth_pokemon_daily_retention_days),
+        ("counter:raid_daily:%",        AppConfig.counter_raid_daily_retention_days),
+        ("counter:invasion_daily:%",    AppConfig.counter_invasion_daily_retention_days),
+        ("counter:quest_daily:%",       AppConfig.counter_quest_daily_retention_days),
+    ]
+
+    for prefix, hours in hourly:
+        if hours == 0:
+            continue
+        result = await execute(
+            """
+            DELETE FROM redis_counter_backup
+            WHERE redis_key LIKE %s
+              AND STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), '%%Y%%m%%d%%H')
+                  < NOW() - INTERVAL %s HOUR
+            """,
+            (prefix, hours),
+        )
+        total += result.rowcount or 0
+
+    for prefix, days in daily:
+        if days == 0:
+            continue
+        result = await execute(
+            """
+            DELETE FROM redis_counter_backup
+            WHERE redis_key LIKE %s
+              AND STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), '%%Y%%m%%d')
+                  < NOW() - INTERVAL %s DAY
+            """,
+            (prefix, days),
+        )
+        total += result.rowcount or 0
+
+    logger.debug("MySQL counter backup cleanup: {} rows deleted", total)
+    return total
+
+
+async def _cleanup_timeseries_backup(backup_interval_sec: int) -> int:
+    """
+    Delete stale rows from redis_timeseries_backup using backed_up_at as a
+    liveness proxy: active Redis keys are refreshed every backup cycle, so a
+    row that hasn't been updated in retention + buffer hours is safe to remove.
+
+    buffer = 2 * backup_interval_hours + 1  (prevents false positives during
+    slow or back-to-back cycles).
+    Returns total rows deleted.
+    """
+    total = 0
+    buffer_hours = (2 * backup_interval_sec // 3600) + 1
+
+    ts_types: list[tuple[str, int]] = [
+        ("ts:pokemon:%",      AppConfig.timeseries_pokemon_retention_ms     // 3_600_000),
+        ("ts:tth_pokemon:%",  AppConfig.tth_timeseries_retention_ms         // 3_600_000),
+        ("ts:raids_total:%",  AppConfig.raid_timeseries_retention_ms        // 3_600_000),
+        ("ts:invasion:%",     AppConfig.invasion_timeseries_retention_ms    // 3_600_000),
+        ("ts:quests_total:%", AppConfig.quests_timeseries_retention_ms      // 3_600_000),
+    ]
+
+    for prefix, retention_hours in ts_types:
+        if retention_hours == 0:
+            continue
+        threshold = retention_hours + buffer_hours
+        result = await execute(
+            """
+            DELETE FROM redis_timeseries_backup
+            WHERE redis_key LIKE %s
+              AND backed_up_at < NOW() - INTERVAL %s HOUR
+            """,
+            (prefix, threshold),
+        )
+        total += result.rowcount or 0
+
+    logger.debug("MySQL timeseries backup cleanup: {} rows deleted", total)
+    return total
+
+
+async def cleanup_mysql_backup(backup_interval_sec: int = 3600) -> tuple[int, int]:
+    """
+    Delete stale rows from both backup tables before a backup cycle.
+    Should be called immediately before backup_all() so tables stay compact
+    and always mirror the current Redis retention windows.
+
+    Returns (counter_rows_deleted, timeseries_rows_deleted).
+    """
+    c = await _cleanup_counter_backup()
+    t = await _cleanup_timeseries_backup(backup_interval_sec)
+    logger.info("MySQL backup cleanup: {} counter + {} timeseries rows deleted", c, t)
+    return c, t
 
 
 # ── Restore ───────────────────────────────────────────────────────────────────
