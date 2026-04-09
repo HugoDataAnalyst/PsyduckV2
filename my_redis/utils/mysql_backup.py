@@ -189,9 +189,11 @@ async def backup_timeseries(client, *, yield_between_chunks: bool = True) -> int
 
 
 async def backup_all(client, *, yield_between_chunks: bool = True) -> None:
-    """Back up all counter and timeseries keys. Called by service loop and on shutdown."""
-    c = await backup_counters(client, yield_between_chunks=yield_between_chunks)
-    t = await backup_timeseries(client, yield_between_chunks=yield_between_chunks)
+    """Back up all counter and timeseries keys concurrently. Called by service loop and on shutdown."""
+    c, t = await asyncio.gather(
+        backup_counters(client, yield_between_chunks=yield_between_chunks),
+        backup_timeseries(client, yield_between_chunks=yield_between_chunks),
+    )
     logger.info("Redis → MySQL backup complete: {} counter keys, {} timeseries keys", c, t)
 
 
