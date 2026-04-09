@@ -6,8 +6,15 @@ persistence disabled (REDIS_MYSQL_BACKUPS = true in config.json).
 
 Buffer keys (buffer:*) are intentionally excluded — they are transient
 staging data that is always flushed to MySQL before being discarded.
+
+Performance:
+    HGETALL calls are pipelined in chunks of _CHUNK_SIZE, so we send
+    one round trip per chunk instead of one per key.  HSET restores are
+    pipelined the same way.  asyncio.sleep(0) is inserted between chunks
+    during periodic backups so webhook coroutines keep running.
 """
 
+import asyncio
 import json
 from utils.logger import logger
 from sql.connect_db import executemany, fetch_all, fetch_val
@@ -24,7 +31,7 @@ TIMESERIES_PATTERNS: list[str] = [
     "ts:quests_total:*",
 ]
 
-_CHUNK_SIZE = 500   # rows per executemany batch
+_CHUNK_SIZE = 500   # keys per pipeline batch / rows per executemany batch
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -43,15 +50,26 @@ async def _scan_keys(client, patterns: list[str]) -> list[str]:
     return found
 
 
-async def _hgetall_str(client, key: str) -> dict[str, str] | None:
-    """Return HGETALL result as {str: str}, or None if the key is empty/missing."""
-    raw = await client.hgetall(key)
-    if not raw:
-        return None
-    return {
-        (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
-        for k, v in raw.items()
-    }
+async def _hgetall_pipeline(client, keys: list[str]) -> list[dict[str, str] | None]:
+    """
+    Pipeline HGETALL for a batch of keys in a single round trip.
+    Returns a list parallel to `keys`; entry is None when the key is empty/missing.
+    """
+    pipe = client.pipeline(transaction=False)
+    for key in keys:
+        pipe.hgetall(key)
+    results = await pipe.execute()
+
+    decoded: list[dict[str, str] | None] = []
+    for raw in results:
+        if not raw:
+            decoded.append(None)
+            continue
+        decoded.append({
+            (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+            for k, v in raw.items()
+        })
+    return decoded
 
 
 # ── Backup ────────────────────────────────────────────────────────────────────
@@ -75,26 +93,17 @@ async def check_backup_counts() -> tuple[int, int] | None:
         return None
 
 
-async def backup_counters(client) -> int:
+async def backup_counters(client, *, yield_between_chunks: bool = True) -> int:
     """
-    SCAN counter:* → HGETALL → upsert into redis_counter_backup.
+    SCAN counter:* → pipelined HGETALL → upsert into redis_counter_backup.
     Returns number of keys backed up.
+
+    yield_between_chunks: set False during startup seeding (we want to finish
+    fast); leave True for periodic background backups so webhooks keep flowing.
     """
     keys = await _scan_keys(client, COUNTER_PATTERNS)
     if not keys:
         logger.debug("Redis backup: no counter keys found")
-        return 0
-
-    batch: list[tuple[str, str]] = []
-    skipped = 0
-    for key in keys:
-        data = await _hgetall_str(client, key)
-        if data is None:
-            skipped += 1
-            continue
-        batch.append((key, json.dumps(data)))
-
-    if not batch:
         return 0
 
     sql = """
@@ -104,33 +113,43 @@ async def backup_counters(client) -> int:
             hash_data    = VALUES(hash_data),
             backed_up_at = CURRENT_TIMESTAMP
     """
-    for i in range(0, len(batch), _CHUNK_SIZE):
-        await executemany(sql, batch[i:i + _CHUNK_SIZE])
 
-    logger.debug("Redis backup: {} counter keys saved ({} empty skipped)", len(batch), skipped)
-    return len(batch)
+    backed_up = 0
+    skipped   = 0
+
+    for i in range(0, len(keys), _CHUNK_SIZE):
+        chunk_keys = keys[i:i + _CHUNK_SIZE]
+        results    = await _hgetall_pipeline(client, chunk_keys)
+
+        rows: list[tuple[str, str]] = []
+        for key, data in zip(chunk_keys, results):
+            if data is None:
+                skipped += 1
+            else:
+                rows.append((key, json.dumps(data)))
+
+        if rows:
+            await executemany(sql, rows)
+            backed_up += len(rows)
+
+        if yield_between_chunks:
+            await asyncio.sleep(0)   # yield to event loop between chunks
+
+    logger.debug(
+        "Redis backup: {} counter keys saved ({} empty skipped)",
+        backed_up, skipped,
+    )
+    return backed_up
 
 
-async def backup_timeseries(client) -> int:
+async def backup_timeseries(client, *, yield_between_chunks: bool = True) -> int:
     """
-    SCAN ts:* patterns → HGETALL → upsert into redis_timeseries_backup.
+    SCAN ts:* patterns → pipelined HGETALL → upsert into redis_timeseries_backup.
     Returns number of keys backed up.
     """
     keys = await _scan_keys(client, TIMESERIES_PATTERNS)
     if not keys:
         logger.debug("Redis backup: no timeseries keys found")
-        return 0
-
-    batch: list[tuple[str, str]] = []
-    skipped = 0
-    for key in keys:
-        data = await _hgetall_str(client, key)
-        if data is None:
-            skipped += 1
-            continue
-        batch.append((key, json.dumps(data)))
-
-    if not batch:
         return 0
 
     sql = """
@@ -140,17 +159,39 @@ async def backup_timeseries(client) -> int:
             hash_data    = VALUES(hash_data),
             backed_up_at = CURRENT_TIMESTAMP
     """
-    for i in range(0, len(batch), _CHUNK_SIZE):
-        await executemany(sql, batch[i:i + _CHUNK_SIZE])
 
-    logger.debug("Redis backup: {} timeseries keys saved ({} empty skipped)", len(batch), skipped)
-    return len(batch)
+    backed_up = 0
+    skipped   = 0
+
+    for i in range(0, len(keys), _CHUNK_SIZE):
+        chunk_keys = keys[i:i + _CHUNK_SIZE]
+        results    = await _hgetall_pipeline(client, chunk_keys)
+
+        rows: list[tuple[str, str]] = []
+        for key, data in zip(chunk_keys, results):
+            if data is None:
+                skipped += 1
+            else:
+                rows.append((key, json.dumps(data)))
+
+        if rows:
+            await executemany(sql, rows)
+            backed_up += len(rows)
+
+        if yield_between_chunks:
+            await asyncio.sleep(0)
+
+    logger.debug(
+        "Redis backup: {} timeseries keys saved ({} empty skipped)",
+        backed_up, skipped,
+    )
+    return backed_up
 
 
-async def backup_all(client) -> None:
+async def backup_all(client, *, yield_between_chunks: bool = True) -> None:
     """Back up all counter and timeseries keys. Called by service loop and on shutdown."""
-    c = await backup_counters(client)
-    t = await backup_timeseries(client)
+    c = await backup_counters(client, yield_between_chunks=yield_between_chunks)
+    t = await backup_timeseries(client, yield_between_chunks=yield_between_chunks)
     logger.info("Redis → MySQL backup complete: {} counter keys, {} timeseries keys", c, t)
 
 
@@ -158,7 +199,7 @@ async def backup_all(client) -> None:
 
 async def restore_counters(client) -> int:
     """
-    Load all rows from redis_counter_backup → HSET into Redis.
+    Load all rows from redis_counter_backup → pipelined HSET into Redis.
     Returns number of keys restored.
     """
     rows = await fetch_all("SELECT redis_key, hash_data FROM redis_counter_backup", ())
@@ -169,14 +210,15 @@ async def restore_counters(client) -> int:
     restored = 0
     for i in range(0, len(rows), _CHUNK_SIZE):
         chunk = rows[i:i + _CHUNK_SIZE]
+        pipe  = client.pipeline(transaction=False)
         for row in chunk:
-            key = row["redis_key"]
             data = row["hash_data"]
             if isinstance(data, str):
                 data = json.loads(data)
             if data:
-                await client.hset(key, mapping=data)
+                pipe.hset(row["redis_key"], mapping=data)
                 restored += 1
+        await pipe.execute()
 
     logger.info("Redis restore: {} counter keys restored from MySQL", restored)
     return restored
@@ -184,7 +226,7 @@ async def restore_counters(client) -> int:
 
 async def restore_timeseries(client) -> int:
     """
-    Load all rows from redis_timeseries_backup → HSET into Redis.
+    Load all rows from redis_timeseries_backup → pipelined HSET into Redis.
     Returns number of keys restored.
     """
     rows = await fetch_all("SELECT redis_key, hash_data FROM redis_timeseries_backup", ())
@@ -195,15 +237,15 @@ async def restore_timeseries(client) -> int:
     restored = 0
     for i in range(0, len(rows), _CHUNK_SIZE):
         chunk = rows[i:i + _CHUNK_SIZE]
+        pipe  = client.pipeline(transaction=False)
         for row in chunk:
-            key = row["redis_key"]
             data = row["hash_data"]
             if isinstance(data, str):
                 data = json.loads(data)
             if data:
-                await client.hset(key, mapping=data)
+                pipe.hset(row["redis_key"], mapping=data)
                 restored += 1
+        await pipe.execute()
 
     logger.info("Redis restore: {} timeseries keys restored from MySQL", restored)
     return restored
-
