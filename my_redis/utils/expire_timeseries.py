@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import time
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 from my_redis.connect_redis import RedisManager
 from utils.logger import logger
@@ -81,6 +82,16 @@ def is_noscript_error(e: Exception) -> bool:
     )
     s_up = s.upper()
     return any(n.upper() in s_up for n in needles)
+
+def get_counter_hourly_retention_mapping() -> Dict[str, int]:
+    """Counter hourly retention in hours. 0 = cleanup disabled for that type."""
+    return {
+        "counter:pokemon_hourly:*":     AppConfig.counter_pokemon_hourly_retention_hours,
+        "counter:tth_pokemon_hourly:*": AppConfig.counter_tth_pokemon_hourly_retention_hours,
+        "counter:raid_hourly:*":        AppConfig.counter_raid_hourly_retention_hours,
+        "counter:invasion_hourly:*":    AppConfig.counter_invasion_hourly_retention_hours,
+        "counter:quest_hourly:*":       AppConfig.counter_quest_hourly_retention_hours,
+    }
 
 def get_retention_mapping() -> Dict[str, int]:
     """Timeseries retention (in seconds)."""
@@ -174,6 +185,62 @@ async def _clean_keys_chunk(client, keys: list[str], cutoff: int) -> Tuple[int, 
             return int(removed or 0), int(emptied or 0)
         raise
 
+async def cleanup_counter_hourly_for_pattern(client, pattern: str, retention_hours: int) -> int:
+    """
+    SCAN counter:*_hourly:* keys, parse the YYYYMMDDHH suffix from each key name,
+    and pipeline-DEL keys older than retention_hours.
+
+    Unlike the timeseries Lua cleanup (which removes old fields within a hash),
+    this deletes entire keys — the date is in the key name, not the field names.
+
+    Returns the number of keys deleted. 0 retention_hours = disabled.
+    """
+    if retention_hours == 0:
+        logger.debug(f"♻️ Counter hourly cleanup disabled for {pattern} (retention=0)")
+        return 0
+
+    cutoff  = datetime.utcnow() - timedelta(hours=retention_hours)
+    deleted = 0
+    cursor  = 0
+
+    while True:
+        cursor, keys = await client.scan(cursor, match=pattern, count=SCAN_COUNT_DEFAULT)
+
+        to_delete = []
+        for key in keys:
+            key_str  = key.decode() if isinstance(key, bytes) else key
+            date_str = key_str.rsplit(":", 1)[-1]
+            if len(date_str) == 10 and date_str.isdigit():
+                try:
+                    if datetime.strptime(date_str, "%Y%m%d%H") < cutoff:
+                        to_delete.append(key)
+                except ValueError:
+                    pass
+
+        if to_delete:
+            for i in range(0, len(to_delete), HDEL_BATCH_DEFAULT):
+                batch = to_delete[i:i + HDEL_BATCH_DEFAULT]
+                await client.delete(*batch)
+                deleted += len(batch)
+
+        await asyncio.sleep(0)   # yield between scan pages
+
+        if cursor == 0:
+            break
+
+    logger.info(f"♻️ Counter hourly cleanup {pattern}: {deleted} keys deleted")
+    return deleted
+
+
+async def cleanup_all_counter_hourly(client) -> int:
+    """Iterate the counter hourly retention mapping and clean all enabled patterns."""
+    total = 0
+    for pattern, retention_hours in get_counter_hourly_retention_mapping().items():
+        total += await cleanup_counter_hourly_for_pattern(client, pattern, retention_hours)
+        await asyncio.sleep(0.1)   # small yield between patterns
+    return total
+
+
 async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> None:
     """Cleanup timeseries for a pattern using chunked Lua approach (non-blocking)"""
     client = await _client()
@@ -245,11 +312,16 @@ async def cleanup_timeseries() -> None:
 
     try:
         total_start = time.time()
+
+        # ── Timeseries cleanup (field-level Lua script) ───────────────────────
         for pattern, retention in get_retention_mapping().items():
             logger.info(f"▶️ Pattern: {pattern}, retention: {retention}s ({retention/3600:.1f}h)")
             await cleanup_timeseries_for_pattern(pattern, retention)
-            # Small yield between patterns
             await asyncio.sleep(0.1)
+
+        # ── Counter hourly cleanup (whole-key DEL by key-name date suffix) ────
+        total_counter_deleted = await cleanup_all_counter_hourly(client)
+        logger.info(f"♻️ Counter hourly cleanup total: {total_counter_deleted} keys deleted")
 
         total_duration = time.time() - total_start
         logger.success(f"✅ Cleanup pass finished in ⏱️ {total_duration:.2f}s")

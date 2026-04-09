@@ -16,6 +16,8 @@ Performance:
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
+import config as AppConfig
 from utils.logger import logger
 from sql.connect_db import executemany, fetch_all, fetch_val
 
@@ -48,6 +50,44 @@ async def _scan_keys(client, patterns: list[str]) -> list[str]:
             if cursor == 0:
                 break
     return found
+
+
+def _is_counter_key_recent(key: str, now: datetime) -> bool:
+    """
+    Returns True if this counter key should be included in the backup.
+
+    - Hourly keys (YYYYMMDDHH suffix): filtered per-type using AppConfig retention values.
+      0 = disabled = always include.
+    - Daily (YYYYMMDD) and monthly (YYYYMM) keys: always included — only ~11K total,
+      no filtering needed.
+    - Unrecognised format: always included (safe default).
+    """
+    parts = key.split(":")
+    if len(parts) < 4:
+        return True
+
+    key_type = parts[1]   # e.g. "pokemon_hourly", "raid_total", "pokemon_weather_iv"
+    date_str = parts[-1]
+
+    # Hourly keys have a 10-digit YYYYMMDDHH suffix
+    if len(date_str) == 10 and date_str.isdigit():
+        _retention_map: dict[str, int] = {
+            "pokemon_hourly":     AppConfig.counter_pokemon_hourly_retention_hours,
+            "tth_pokemon_hourly": AppConfig.counter_tth_pokemon_hourly_retention_hours,
+            "raid_hourly":        AppConfig.counter_raid_hourly_retention_hours,
+            "invasion_hourly":    AppConfig.counter_invasion_hourly_retention_hours,
+            "quest_hourly":       AppConfig.counter_quest_hourly_retention_hours,
+        }
+        retention_hours = _retention_map.get(key_type, 168)
+        if retention_hours == 0:
+            return True   # 0 = keep all for this type
+        try:
+            return datetime.strptime(date_str, "%Y%m%d%H") >= now - timedelta(hours=retention_hours)
+        except ValueError:
+            return True
+
+    # Daily (8-digit YYYYMMDD) and monthly (6-digit YYYYMM) — always keep
+    return True
 
 
 async def _hgetall_pipeline(client, keys: list[str]) -> list[dict[str, str] | None]:
@@ -101,9 +141,19 @@ async def backup_counters(client, *, yield_between_chunks: bool = True) -> int:
     yield_between_chunks: set False during startup seeding (we want to finish
     fast); leave True for periodic background backups so webhooks keep flowing.
     """
-    keys = await _scan_keys(client, COUNTER_PATTERNS)
-    if not keys:
+    all_keys = await _scan_keys(client, COUNTER_PATTERNS)
+    if not all_keys:
         logger.debug("Redis backup: no counter keys found")
+        return 0
+
+    now  = datetime.now(timezone.utc).replace(tzinfo=None)
+    keys = [k for k in all_keys if _is_counter_key_recent(k, now)]
+    logger.debug(
+        "Redis backup: {} counter keys total, {} within retention ({} outside window skipped)",
+        len(all_keys), len(keys), len(all_keys) - len(keys),
+    )
+
+    if not keys:
         return 0
 
     sql = """
