@@ -25,6 +25,9 @@ from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
 from sql.tasks.quest_stops_flusher import QuestsBufferFlusher
 from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
+from my_redis.utils.mysql_backup import restore_counters, restore_timeseries, _patch_redis_conf
+from my_redis.utils.emergency_backup import register_emergency_backup
+from my_redis.utils.redis_backup_service import RedisBackupService
 from tzlocal import get_localzone
 from datetime import datetime, timedelta
 from utils.supersivor import Service, start_services, stop_services
@@ -144,6 +147,30 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"[{worker_id}] [LEADER] This worker is the leader - starting background services")
 
+        # Redis in-memory mode: disable persistence, restore from MySQL
+        if AppConfig.redis_mysql_backups:
+            client = await redis_manager.check_redis_connection()
+            await client.config_set("save", "")
+            await client.config_set("appendonly", "no")
+            logger.info(f"[{worker_id}] Redis persistence disabled (REDIS_MYSQL_BACKUPS=true)")
+            try:
+                await client.config_rewrite()
+                logger.success(f"[{worker_id}] redis.conf updated via CONFIG REWRITE")
+            except Exception as rewrite_err:
+                logger.warning(f"[{worker_id}] CONFIG REWRITE failed ({rewrite_err})")
+                if AppConfig.redis_conf_path:
+                    _patch_redis_conf(AppConfig.redis_conf_path)
+                else:
+                    logger.warning(
+                        f"[{worker_id}] redis_conf_path not set — manually add "
+                        "'save \"\"' and 'appendonly no' to redis.conf to persist across restarts"
+                    )
+            logger.info(f"[{worker_id}] Restoring Redis from MySQL backup...")
+            await restore_counters(client)
+            await restore_timeseries(client)
+            logger.success(f"[{worker_id}] Redis restore complete")
+            register_emergency_backup(redis_manager)
+
         # Initialize Koji geofences - always fetch fresh from Koji on startup
         # This ensures new areas added to Koji are immediately detected
         koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
@@ -233,6 +260,8 @@ async def lifespan(app: FastAPI):
 
         # Register all services leader only
 
+        redis_backup_svc = RedisBackupService(redis_manager, AppConfig.redis_backup_interval)
+
         services = [
             # Pokemon IV daily
             Service("partitions:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
@@ -263,6 +292,9 @@ async def lifespan(app: FastAPI):
                     invasions_buffer_flusher.start, invasions_buffer_flusher.stop),
             # Partition Cleaner
             Service("partitions:cleaner", True, partition_cleaner.start, partition_cleaner.stop),
+            # Redis MySQL Backup
+            Service("redis:mysql_backup", AppConfig.redis_mysql_backups,
+                    redis_backup_svc.start, redis_backup_svc.stop),
         ]
 
         await start_services(services)
