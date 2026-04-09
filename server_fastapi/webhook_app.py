@@ -363,7 +363,7 @@ async def lifespan(app: FastAPI):
         # Wait for leader to populate global state in Redis.
         # When REDIS_MYSQL_BACKUPS is enabled, the leader may spend several minutes
         # backing up / restoring data before it sets geofences — give it extra time.
-        follower_timeout = 600.0 if AppConfig.redis_mysql_backups else 30.0
+        follower_timeout = float(AppConfig.redis_restore_timeout) if AppConfig.redis_mysql_backups else 30.0
         state_available = await GlobalStateManager.wait_for_state(timeout=follower_timeout)
         if not state_available:
             logger.error("❌ Timeout waiting for leader to populate state. Exiting.")
