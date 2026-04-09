@@ -18,7 +18,10 @@
         "store_pokemon_tth_timeseries": true,
         "store_raids_timeseries": true,
         "store_invasions_timeseries": true,
-        "store_quests_timeseries": true
+        "store_quests_timeseries": true,
+        "REDIS_MYSQL_BACKUPS": false,
+        "backup_interval_seconds": 3600,
+        "redis_conf_path": ""
     },
     "REDIS": {
         "redis_connections": 600
