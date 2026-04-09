@@ -55,7 +55,9 @@
         "counter_tth_pokemon_hourly": 168,
         "counter_raid_hourly": 168,
         "counter_invasion_hourly": 168,
-        "counter_quest_hourly": 168,
+        "counter_quest_hourly": 168
+    },
+    "retention_days": {
         "counter_pokemon_daily": 30,
         "counter_tth_pokemon_daily": 30,
         "counter_raid_daily": 30,
