@@ -138,6 +138,37 @@ class QuestCounterRetrieval(CounterTransformer):
             final_data = raw_aggregated
         return {"mode": self.mode, "data": final_data}
 
+    async def quest_retrieve_totals_daily(self) -> dict:
+        """
+        Retrieve daily quest totals.
+        Key format: "counter:quest_daily:{area}:{YYYYMMDD}"
+        """
+        client = await redis_manager.check_redis_connection()
+        if not client:
+            logger.error("❌ Retrieval pool connection not available")
+            return {"mode": self.mode, "data": {}}
+
+        time_format = "%Y%m%d"
+        if self.area.lower() in ["global", "all"]:
+            pattern = "counter:quest_daily:*"
+        else:
+            pattern = f"counter:quest_daily:{self.area}:*"
+        keys = await client.keys(pattern)
+        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        if not keys:
+            return {"mode": self.mode, "data": {}}
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        if self.mode == "sum":
+            logger.debug("▶️ Transforming daily 🔎 quest_totals SUM")
+            final_data = self.transform_quest_totals_new_sum(raw_aggregated)
+        elif self.mode in ["grouped", "surged"]:
+            logger.debug("▶️ Transforming daily 🔎 quest_totals GROUPED/SURGED")
+            final_data = self.transform_quest_totals_sum(raw_aggregated, self.mode, filter_func=self.filter_quest_field)
+        else:
+            logger.debug("❌ Else Block daily 🔎 quest_totals")
+            final_data = raw_aggregated
+        return {"mode": self.mode, "data": final_data}
+
     async def quest_retrieve_totals_hourly(self) -> dict:
         """
         Retrieve hourly quest totals.
