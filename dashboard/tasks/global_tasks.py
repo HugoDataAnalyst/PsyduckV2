@@ -30,6 +30,19 @@ ALLTIME_TASKS = ["pokemon_alltime", "raids_alltime", "invasions_alltime", "quest
 # Delay between daily and alltime tasks on startup (seconds)
 ALLTIME_STARTUP_DELAY = 30
 
+# Start date for all-time queries — read from dashboard_config.json
+def _load_alltime_start_date() -> str:
+    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'dashboard_config.json')
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f).get("alltime_start_date", "2025-01-01")
+    except Exception:
+        pass
+    return "2025-01-01"
+
+ALLTIME_START_DATE = _load_alltime_start_date()
+
 # Map
 TASK_CONFIG = {
     # Fast refresh tasks
@@ -98,10 +111,10 @@ TASK_CONFIG = {
         "params": {
             "counter_type": "totals",
             "area": "global",
-            "start_time": "26280 hours",
+            "start_time": f"{ALLTIME_START_DATE}T00:00:00",
             "end_time": "now",
             "mode": "sum",
-            "interval": "hourly",
+            "interval": "daily",
             "metric": "all",
             "pokemon_id": "all",
             "form_id": "all",
@@ -115,10 +128,10 @@ TASK_CONFIG = {
         "params": {
             "counter_type": "totals",
             "area": "global",
-            "start_time": "26280 hours",
+            "start_time": f"{ALLTIME_START_DATE}T00:00:00",
             "end_time": "now",
             "mode": "sum",
-            "interval": "hourly",
+            "interval": "daily",
             "raid_pokemon": "all",
             "raid_form": "all",
             "raid_level": "all",
@@ -131,8 +144,8 @@ TASK_CONFIG = {
         "file": os.path.join(DATA_DIR, 'global_invasions_alltime.json'),
         "params": {
             "counter_type": "totals",
-            "interval": "hourly",
-            "start_time": "26280 hours",
+            "interval": "daily",
+            "start_time": f"{ALLTIME_START_DATE}T00:00:00",
             "end_time": "now",
             "mode": "grouped",
             "response_format": "json",
@@ -149,8 +162,8 @@ TASK_CONFIG = {
         "file": os.path.join(DATA_DIR, 'global_quests_alltime.json'),
         "params": {
             "counter_type": "totals",
-            "interval": "hourly",
-            "start_time": "26280 hours",
+            "interval": "daily",
+            "start_time": f"{ALLTIME_START_DATE}T00:00:00",
             "end_time": "now",
             "mode": "grouped",
             "response_format": "json",
