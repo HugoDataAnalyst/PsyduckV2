@@ -10,7 +10,7 @@ staging data that is always flushed to MySQL before being discarded.
 
 import json
 from utils.logger import logger
-from sql.connect_db import executemany, fetch_all
+from sql.connect_db import executemany, fetch_all, fetch_val
 
 # ── Key patterns to back up ───────────────────────────────────────────────────
 
@@ -55,6 +55,25 @@ async def _hgetall_str(client, key: str) -> dict[str, str] | None:
 
 
 # ── Backup ────────────────────────────────────────────────────────────────────
+
+async def check_backup_counts() -> tuple[int, int] | None:
+    """
+    Returns (counter_rows, timeseries_rows) on a successful MySQL query.
+    Returns None on ANY error (connection failure, missing table, etc.).
+
+    Used at startup to decide the restore strategy:
+      None     → MySQL unreachable/broken  — skip restore, do not touch MySQL
+      (0, 0)   → tables empty             — seed MySQL from Redis, no restore needed
+      (n, m)   → tables have data         — restore from MySQL into Redis
+    """
+    try:
+        counter_rows = await fetch_val("SELECT COUNT(*) FROM redis_counter_backup")
+        ts_rows      = await fetch_val("SELECT COUNT(*) FROM redis_timeseries_backup")
+        return (int(counter_rows or 0), int(ts_rows or 0))
+    except Exception as e:
+        logger.error("Failed to check MySQL backup table counts: {}", e)
+        return None
+
 
 async def backup_counters(client) -> int:
     """

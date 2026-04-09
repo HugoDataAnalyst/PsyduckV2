@@ -25,7 +25,13 @@ from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
 from sql.tasks.quest_stops_flusher import QuestsBufferFlusher
 from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
-from my_redis.utils.mysql_backup import restore_counters, restore_timeseries
+from my_redis.utils.mysql_backup import (
+    check_backup_counts,
+    backup_counters,
+    backup_timeseries,
+    restore_counters,
+    restore_timeseries,
+)
 from my_redis.utils.emergency_backup import register_emergency_backup
 from my_redis.utils.redis_backup_service import RedisBackupService
 from tzlocal import get_localzone
@@ -163,10 +169,60 @@ async def lifespan(app: FastAPI):
                     "sudo redis-cli -a PASSWORD CONFIG REWRITE",
                     worker_id, rewrite_err,
                 )
-            logger.info(f"[{worker_id}] Restoring Redis from MySQL backup...")
-            await restore_counters(client)
-            await restore_timeseries(client)
-            logger.success(f"[{worker_id}] Redis restore complete")
+            # Smart restore: check MySQL counts first before touching anything
+            logger.info(f"[{worker_id}] Checking MySQL backup tables...")
+            counts = await check_backup_counts()
+
+            if counts is None:
+                # MySQL query failed — do NOT run backup (risk of nuking valid data)
+                logger.error(
+                    "[{}] ❌ MySQL backup table check failed — skipping restore. "
+                    "Redis will use whatever data is currently in memory. "
+                    "Resolve the MySQL issue and restart.",
+                    worker_id,
+                )
+
+            elif counts == (0, 0):
+                # Tables exist and returned 0 rows — first run with REDIS_MYSQL_BACKUPS=true.
+                # Attempt to seed MySQL from whatever Redis currently holds in memory.
+                logger.warning(
+                    "[{}] ⚠️  MySQL backup tables are empty — attempting to seed from Redis...",
+                    worker_id,
+                )
+                with time_execution(label="Redis → MySQL initial seed: counters"):
+                    c = await backup_counters(client)
+                with time_execution(label="Redis → MySQL initial seed: timeseries"):
+                    t = await backup_timeseries(client)
+
+                if c == 0 and t == 0:
+                    # Redis was also empty — genuine fresh install, nothing to seed
+                    logger.info(
+                        "[{}] ✅ Fresh install detected — Redis and MySQL are both empty. "
+                        "Starting with a clean slate.",
+                        worker_id,
+                    )
+                else:
+                    # Redis had existing data — seeded successfully
+                    logger.success(
+                        "[{}] ✅ MySQL seeded from existing Redis data: "
+                        "{} counter keys, {} timeseries keys. "
+                        "Data is already in Redis memory — no restore needed.",
+                        worker_id, c, t,
+                    )
+
+            else:
+                # MySQL has data — restore into Redis
+                counter_rows, ts_rows = counts
+                logger.info(
+                    "[{}] MySQL has data ({} counter rows, {} timeseries rows) — restoring to Redis...",
+                    worker_id, counter_rows, ts_rows,
+                )
+                with time_execution(label="Redis restore: counters"):
+                    await restore_counters(client)
+                with time_execution(label="Redis restore: timeseries"):
+                    await restore_timeseries(client)
+                logger.success(f"[{worker_id}] ✅ Redis restore complete")
+
             register_emergency_backup(redis_manager)
 
         # Initialize Koji geofences - always fetch fresh from Koji on startup
