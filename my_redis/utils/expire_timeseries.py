@@ -241,6 +241,70 @@ async def cleanup_all_counter_hourly(client) -> int:
     return total
 
 
+def get_counter_daily_retention_mapping() -> Dict[str, int]:
+    """Counter daily retention in days. 0 = cleanup disabled for that type."""
+    return {
+        "counter:pokemon_daily:*":     AppConfig.counter_pokemon_daily_retention_days,
+        "counter:tth_pokemon_daily:*": AppConfig.counter_tth_pokemon_daily_retention_days,
+        "counter:raid_daily:*":        AppConfig.counter_raid_daily_retention_days,
+        "counter:invasion_daily:*":    AppConfig.counter_invasion_daily_retention_days,
+        "counter:quest_daily:*":       AppConfig.counter_quest_daily_retention_days,
+    }
+
+
+async def cleanup_counter_daily_for_pattern(client, pattern: str, retention_days: int) -> int:
+    """
+    SCAN counter:*_daily:* keys, parse the YYYYMMDD suffix from each key name,
+    and pipeline-DEL keys older than retention_days.
+
+    Returns the number of keys deleted. 0 retention_days = disabled.
+    """
+    if retention_days == 0:
+        logger.debug(f"♻️ Counter daily cleanup disabled for {pattern} (retention=0)")
+        return 0
+
+    cutoff  = datetime.utcnow() - timedelta(days=retention_days)
+    deleted = 0
+    cursor  = 0
+
+    while True:
+        cursor, keys = await client.scan(cursor, match=pattern, count=SCAN_COUNT_DEFAULT)
+
+        to_delete = []
+        for key in keys:
+            key_str  = key.decode() if isinstance(key, bytes) else key
+            date_str = key_str.rsplit(":", 1)[-1]
+            if len(date_str) == 8 and date_str.isdigit():
+                try:
+                    if datetime.strptime(date_str, "%Y%m%d") < cutoff:
+                        to_delete.append(key)
+                except ValueError:
+                    pass
+
+        if to_delete:
+            for i in range(0, len(to_delete), HDEL_BATCH_DEFAULT):
+                batch = to_delete[i:i + HDEL_BATCH_DEFAULT]
+                await client.delete(*batch)
+                deleted += len(batch)
+
+        await asyncio.sleep(0)
+
+        if cursor == 0:
+            break
+
+    logger.info(f"♻️ Counter daily cleanup {pattern}: {deleted} keys deleted")
+    return deleted
+
+
+async def cleanup_all_counter_daily(client) -> int:
+    """Iterate the counter daily retention mapping and clean all enabled patterns."""
+    total = 0
+    for pattern, retention_days in get_counter_daily_retention_mapping().items():
+        total += await cleanup_counter_daily_for_pattern(client, pattern, retention_days)
+        await asyncio.sleep(0.1)
+    return total
+
+
 async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> None:
     """Cleanup timeseries for a pattern using chunked Lua approach (non-blocking)"""
     client = await _client()
@@ -322,6 +386,10 @@ async def cleanup_timeseries() -> None:
         # ── Counter hourly cleanup (whole-key DEL by key-name date suffix) ────
         total_counter_deleted = await cleanup_all_counter_hourly(client)
         logger.info(f"♻️ Counter hourly cleanup total: {total_counter_deleted} keys deleted")
+
+        # ── Counter daily cleanup (whole-key DEL by key-name date suffix) ────
+        total_daily_deleted = await cleanup_all_counter_daily(client)
+        logger.info(f"♻️ Counter daily cleanup total: {total_daily_deleted} keys deleted")
 
         total_duration = time.time() - total_start
         logger.success(f"✅ Cleanup pass finished in ⏱️ {total_duration:.2f}s")
