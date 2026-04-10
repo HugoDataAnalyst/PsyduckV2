@@ -8,6 +8,7 @@ REDIS_MYSQL_BACKUPS = true and the worker is the leader.
 
 import asyncio
 import time
+from datetime import datetime, timedelta, timezone
 
 from my_redis.connect_redis import RedisManager
 from my_redis.utils.mysql_backup import MySQLBackup, MySQLCleanup
@@ -61,6 +62,11 @@ class RedisBackupService:
 
         while self._running:
             try:
+                next_run = datetime.now(timezone.utc) + timedelta(seconds=self._interval)
+                logger.info(
+                    "⏳ Next backup cycle scheduled at {} UTC (~{}s)",
+                    next_run.strftime("%Y-%m-%d %H:%M:%S"), self._interval,
+                )
                 await asyncio.sleep(self._interval)
                 if not self._running:
                     break
@@ -75,7 +81,10 @@ class RedisBackupService:
                 await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
                 await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
                 await _run_with_retry("Backup timeseries",         MySQLBackup.timeseries,  client)
-                logger.info("Backup cycle finished in {:.2f}s", time.perf_counter() - t0)
+                logger.success(
+                    "✅ Backup cycle complete in {:.2f}s — rescheduling in {}s",
+                    time.perf_counter() - t0, self._interval,
+                )
 
             except asyncio.CancelledError:
                 logger.info("🛑 Redis backup loop cancelled")
