@@ -132,7 +132,7 @@ async def _hgetall_pipeline(client, keys: list[str]) -> list[dict[str, str] | No
     return decoded
 
 
-# ── Backup ────────────────────────────────────────────────────────────────────
+# ── Backup count check ────────────────────────────────────────────────────────
 
 async def check_backup_counts() -> tuple[int, int] | None:
     """
@@ -153,229 +153,216 @@ async def check_backup_counts() -> tuple[int, int] | None:
         return None
 
 
-async def backup_counters(client, *, yield_between_chunks: bool = True) -> int:
-    """
-    SCAN counter:* → pipelined HGETALL → upsert into redis_counter_backup.
-    Returns number of keys backed up.
+# ── Backup ────────────────────────────────────────────────────────────────────
 
-    yield_between_chunks: set False during startup seeding (we want to finish
-    fast); leave True for periodic background backups so webhooks keep flowing.
-    """
-    all_keys = await _scan_keys(client, COUNTER_PATTERNS)
-    if not all_keys:
-        logger.debug("Redis backup: no counter keys found")
-        return 0
+class MySQLBackup:
+    """Redis → MySQL backup of counter and timeseries hashes."""
 
-    now  = datetime.now(timezone.utc).replace(tzinfo=None)
-    keys = [k for k in all_keys if _is_counter_key_recent(k, now)]
-    logger.debug(
-        "Redis backup: {} counter keys total, {} within retention ({} outside window skipped)",
-        len(all_keys), len(keys), len(all_keys) - len(keys),
-    )
+    @staticmethod
+    async def counters(client, *, yield_between_chunks: bool = True) -> int:
+        """
+        SCAN counter:* → pipelined HGETALL → upsert into redis_counter_backup.
+        Returns number of keys backed up.
 
-    if not keys:
-        return 0
+        yield_between_chunks: set False during startup seeding (we want to finish
+        fast); leave True for periodic background backups so webhooks keep flowing.
+        """
+        all_keys = await _scan_keys(client, COUNTER_PATTERNS)
+        if not all_keys:
+            logger.debug("Redis backup: no counter keys found")
+            return 0
 
-    sql = """
-        INSERT INTO redis_counter_backup (redis_key, hash_data)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE
-            hash_data    = VALUES(hash_data),
-            backed_up_at = CURRENT_TIMESTAMP
-    """
-
-    backed_up = 0
-    skipped   = 0
-
-    for i in range(0, len(keys), _CHUNK_SIZE):
-        chunk_keys = keys[i:i + _CHUNK_SIZE]
-        results    = await _hgetall_pipeline(client, chunk_keys)
-
-        rows: list[tuple[str, str]] = []
-        for key, data in zip(chunk_keys, results):
-            if data is None:
-                skipped += 1
-            else:
-                rows.append((key, json.dumps(data)))
-
-        if rows:
-            await executemany(sql, rows)
-            backed_up += len(rows)
-
-        if yield_between_chunks:
-            await asyncio.sleep(0)   # yield to event loop between chunks
-
-    logger.debug(
-        "Redis backup: {} counter keys saved ({} empty skipped)",
-        backed_up, skipped,
-    )
-    return backed_up
-
-
-async def backup_timeseries(client, *, yield_between_chunks: bool = True) -> int:
-    """
-    SCAN ts:* patterns → pipelined HGETALL → upsert into redis_timeseries_backup.
-    Returns number of keys backed up.
-    """
-    keys = await _scan_keys(client, TIMESERIES_PATTERNS)
-    if not keys:
-        logger.debug("Redis backup: no timeseries keys found")
-        return 0
-
-    sql = """
-        INSERT INTO redis_timeseries_backup (redis_key, hash_data)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE
-            hash_data    = VALUES(hash_data),
-            backed_up_at = CURRENT_TIMESTAMP
-    """
-
-    backed_up = 0
-    skipped   = 0
-
-    for i in range(0, len(keys), _CHUNK_SIZE):
-        chunk_keys = keys[i:i + _CHUNK_SIZE]
-        results    = await _hgetall_pipeline(client, chunk_keys)
-
-        rows: list[tuple[str, str]] = []
-        for key, data in zip(chunk_keys, results):
-            if data is None:
-                skipped += 1
-            else:
-                rows.append((key, json.dumps(data)))
-
-        if rows:
-            await executemany(sql, rows)
-            backed_up += len(rows)
-
-        if yield_between_chunks:
-            await asyncio.sleep(0)
-
-    logger.debug(
-        "Redis backup: {} timeseries keys saved ({} empty skipped)",
-        backed_up, skipped,
-    )
-    return backed_up
-
-
-async def backup_all(client, *, yield_between_chunks: bool = True) -> None:
-    """Back up all counter and timeseries keys concurrently. Called by service loop and on shutdown."""
-    c, t = await asyncio.gather(
-        backup_counters(client, yield_between_chunks=yield_between_chunks),
-        backup_timeseries(client, yield_between_chunks=yield_between_chunks),
-    )
-    logger.info("Redis → MySQL backup complete: {} counter keys, {} timeseries keys", c, t)
-
-
-# ── MySQL backup cleanup ──────────────────────────────────────────────────────
-
-async def _cleanup_counter_backup() -> int:
-    """
-    Delete stale rows from redis_counter_backup using pure SQL date parsing.
-    Uses STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), fmt) to extract the
-    date suffix from the key name server-side — no Python row fetching needed.
-    Returns total rows deleted.
-    """
-    total = 0
-
-    hourly: list[tuple[str, int]] = [
-        ("counter:pokemon_hourly:%",     AppConfig.counter_pokemon_hourly_retention_hours),
-        ("counter:tth_pokemon_hourly:%", AppConfig.counter_tth_pokemon_hourly_retention_hours),
-        ("counter:raid_hourly:%",        AppConfig.counter_raid_hourly_retention_hours),
-        ("counter:invasion_hourly:%",    AppConfig.counter_invasion_hourly_retention_hours),
-        ("counter:quest_hourly:%",       AppConfig.counter_quest_hourly_retention_hours),
-    ]
-    daily: list[tuple[str, int]] = [
-        ("counter:pokemon_daily:%",     AppConfig.counter_pokemon_daily_retention_days),
-        ("counter:tth_pokemon_daily:%", AppConfig.counter_tth_pokemon_daily_retention_days),
-        ("counter:raid_daily:%",        AppConfig.counter_raid_daily_retention_days),
-        ("counter:invasion_daily:%",    AppConfig.counter_invasion_daily_retention_days),
-        ("counter:quest_daily:%",       AppConfig.counter_quest_daily_retention_days),
-    ]
-
-    for prefix, hours in hourly:
-        if hours == 0:
-            continue
-        result = await execute(
-            """
-            DELETE FROM redis_counter_backup
-            WHERE redis_key LIKE %s
-              AND STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), '%%Y%%m%%d%%H')
-                  < NOW() - INTERVAL %s HOUR
-            """,
-            (prefix, hours),
+        now  = datetime.now(timezone.utc).replace(tzinfo=None)
+        keys = [k for k in all_keys if _is_counter_key_recent(k, now)]
+        logger.debug(
+            "Redis backup: {} counter keys total, {} within retention ({} outside window skipped)",
+            len(all_keys), len(keys), len(all_keys) - len(keys),
         )
-        total += result.rowcount or 0
 
-    for prefix, days in daily:
-        if days == 0:
-            continue
-        result = await execute(
-            """
-            DELETE FROM redis_counter_backup
-            WHERE redis_key LIKE %s
-              AND STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), '%%Y%%m%%d')
-                  < NOW() - INTERVAL %s DAY
-            """,
-            (prefix, days),
+        if not keys:
+            return 0
+
+        sql = """
+            INSERT INTO redis_counter_backup (redis_key, hash_data)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE
+                hash_data    = VALUES(hash_data),
+                backed_up_at = CURRENT_TIMESTAMP
+        """
+
+        backed_up = 0
+        skipped   = 0
+
+        for i in range(0, len(keys), _CHUNK_SIZE):
+            chunk_keys = keys[i:i + _CHUNK_SIZE]
+            results    = await _hgetall_pipeline(client, chunk_keys)
+
+            rows: list[tuple[str, str]] = []
+            for key, data in zip(chunk_keys, results):
+                if data is None:
+                    skipped += 1
+                else:
+                    rows.append((key, json.dumps(data)))
+
+            if rows:
+                await executemany(sql, rows)
+                backed_up += len(rows)
+
+            if yield_between_chunks:
+                await asyncio.sleep(0)   # yield to event loop between chunks
+
+        logger.debug(
+            "Redis backup: {} counter keys saved ({} empty skipped)",
+            backed_up, skipped,
         )
-        total += result.rowcount or 0
+        return backed_up
 
-    logger.debug("MySQL counter backup cleanup: {} rows deleted", total)
-    return total
+    @staticmethod
+    async def timeseries(client, *, yield_between_chunks: bool = True) -> int:
+        """
+        SCAN ts:* patterns → pipelined HGETALL → upsert into redis_timeseries_backup.
+        Returns number of keys backed up.
+        """
+        keys = await _scan_keys(client, TIMESERIES_PATTERNS)
+        if not keys:
+            logger.debug("Redis backup: no timeseries keys found")
+            return 0
 
+        sql = """
+            INSERT INTO redis_timeseries_backup (redis_key, hash_data)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE
+                hash_data    = VALUES(hash_data),
+                backed_up_at = CURRENT_TIMESTAMP
+        """
 
-async def _cleanup_timeseries_backup(backup_interval_sec: int) -> int:
-    """
-    Delete stale rows from redis_timeseries_backup using backed_up_at as a
-    liveness proxy: active Redis keys are refreshed every backup cycle, so a
-    row that hasn't been updated in retention + buffer hours is safe to remove.
+        backed_up = 0
+        skipped   = 0
 
-    buffer = 2 * backup_interval_hours + 1  (prevents false positives during
-    slow or back-to-back cycles).
-    Returns total rows deleted.
-    """
-    total = 0
-    buffer_hours = (2 * backup_interval_sec // 3600) + 1
+        for i in range(0, len(keys), _CHUNK_SIZE):
+            chunk_keys = keys[i:i + _CHUNK_SIZE]
+            results    = await _hgetall_pipeline(client, chunk_keys)
 
-    ts_types: list[tuple[str, int]] = [
-        ("ts:pokemon:%",      AppConfig.timeseries_pokemon_retention_ms     // 3_600_000),
-        ("ts:tth_pokemon:%",  AppConfig.tth_timeseries_retention_ms         // 3_600_000),
-        ("ts:raids_total:%",  AppConfig.raid_timeseries_retention_ms        // 3_600_000),
-        ("ts:invasion:%",     AppConfig.invasion_timeseries_retention_ms    // 3_600_000),
-        ("ts:quests_total:%", AppConfig.quests_timeseries_retention_ms      // 3_600_000),
-    ]
+            rows: list[tuple[str, str]] = []
+            for key, data in zip(chunk_keys, results):
+                if data is None:
+                    skipped += 1
+                else:
+                    rows.append((key, json.dumps(data)))
 
-    for prefix, retention_hours in ts_types:
-        if retention_hours == 0:
-            continue
-        threshold = retention_hours + buffer_hours
-        result = await execute(
-            """
-            DELETE FROM redis_timeseries_backup
-            WHERE redis_key LIKE %s
-              AND backed_up_at < NOW() - INTERVAL %s HOUR
-            """,
-            (prefix, threshold),
+            if rows:
+                await executemany(sql, rows)
+                backed_up += len(rows)
+
+            if yield_between_chunks:
+                await asyncio.sleep(0)
+
+        logger.debug(
+            "Redis backup: {} timeseries keys saved ({} empty skipped)",
+            backed_up, skipped,
         )
-        total += result.rowcount or 0
-
-    logger.debug("MySQL timeseries backup cleanup: {} rows deleted", total)
-    return total
+        return backed_up
 
 
-async def cleanup_mysql_backup(backup_interval_sec: int = 3600) -> tuple[int, int]:
-    """
-    Delete stale rows from both backup tables before a backup cycle.
-    Should be called immediately before backup_all() so tables stay compact
-    and always mirror the current Redis retention windows.
+# ── Cleanup ───────────────────────────────────────────────────────────────────
 
-    Returns (counter_rows_deleted, timeseries_rows_deleted).
-    """
-    c = await _cleanup_counter_backup()
-    t = await _cleanup_timeseries_backup(backup_interval_sec)
-    logger.info("MySQL backup cleanup: {} counter + {} timeseries rows deleted", c, t)
-    return c, t
+class MySQLCleanup:
+    """Delete stale rows from MySQL backup tables."""
+
+    @staticmethod
+    async def counters() -> int:
+        """
+        Delete stale rows from redis_counter_backup using pure SQL date parsing.
+        Uses STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), fmt) to extract the
+        date suffix from the key name server-side — no Python row fetching needed.
+        Returns total rows deleted.
+        """
+        total = 0
+
+        hourly: list[tuple[str, int]] = [
+            ("counter:pokemon_hourly:%",     AppConfig.counter_pokemon_hourly_retention_hours),
+            ("counter:tth_pokemon_hourly:%", AppConfig.counter_tth_pokemon_hourly_retention_hours),
+            ("counter:raid_hourly:%",        AppConfig.counter_raid_hourly_retention_hours),
+            ("counter:invasion_hourly:%",    AppConfig.counter_invasion_hourly_retention_hours),
+            ("counter:quest_hourly:%",       AppConfig.counter_quest_hourly_retention_hours),
+        ]
+        daily: list[tuple[str, int]] = [
+            ("counter:pokemon_daily:%",     AppConfig.counter_pokemon_daily_retention_days),
+            ("counter:tth_pokemon_daily:%", AppConfig.counter_tth_pokemon_daily_retention_days),
+            ("counter:raid_daily:%",        AppConfig.counter_raid_daily_retention_days),
+            ("counter:invasion_daily:%",    AppConfig.counter_invasion_daily_retention_days),
+            ("counter:quest_daily:%",       AppConfig.counter_quest_daily_retention_days),
+        ]
+
+        for prefix, hours in hourly:
+            if hours == 0:
+                continue
+            result = await execute(
+                """
+                DELETE FROM redis_counter_backup
+                WHERE redis_key LIKE %s
+                  AND STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), '%%Y%%m%%d%%H')
+                      < NOW() - INTERVAL %s HOUR
+                """,
+                (prefix, hours),
+            )
+            total += result.rowcount or 0
+
+        for prefix, days in daily:
+            if days == 0:
+                continue
+            result = await execute(
+                """
+                DELETE FROM redis_counter_backup
+                WHERE redis_key LIKE %s
+                  AND STR_TO_DATE(SUBSTRING_INDEX(redis_key, ':', -1), '%%Y%%m%%d')
+                      < NOW() - INTERVAL %s DAY
+                """,
+                (prefix, days),
+            )
+            total += result.rowcount or 0
+
+        logger.debug("MySQL counter backup cleanup: {} rows deleted", total)
+        return total
+
+    @staticmethod
+    async def timeseries(backup_interval_sec: int) -> int:
+        """
+        Delete stale rows from redis_timeseries_backup using backed_up_at as a
+        liveness proxy: active Redis keys are refreshed every backup cycle, so a
+        row that hasn't been updated in retention + buffer hours is safe to remove.
+
+        buffer = 2 * backup_interval_hours + 1  (prevents false positives during
+        slow or back-to-back cycles).
+        Returns total rows deleted.
+        """
+        total = 0
+        buffer_hours = (2 * backup_interval_sec // 3600) + 1
+
+        ts_types: list[tuple[str, int]] = [
+            ("ts:pokemon:%",      AppConfig.timeseries_pokemon_retention_ms     // 3_600_000),
+            ("ts:tth_pokemon:%",  AppConfig.tth_timeseries_retention_ms         // 3_600_000),
+            ("ts:raids_total:%",  AppConfig.raid_timeseries_retention_ms        // 3_600_000),
+            ("ts:invasion:%",     AppConfig.invasion_timeseries_retention_ms    // 3_600_000),
+            ("ts:quests_total:%", AppConfig.quests_timeseries_retention_ms      // 3_600_000),
+        ]
+
+        for prefix, retention_hours in ts_types:
+            if retention_hours == 0:
+                continue
+            threshold = retention_hours + buffer_hours
+            result = await execute(
+                """
+                DELETE FROM redis_timeseries_backup
+                WHERE redis_key LIKE %s
+                  AND backed_up_at < NOW() - INTERVAL %s HOUR
+                """,
+                (prefix, threshold),
+            )
+            total += result.rowcount or 0
+
+        logger.debug("MySQL timeseries backup cleanup: {} rows deleted", total)
+        return total
 
 
 # ── Restore ───────────────────────────────────────────────────────────────────

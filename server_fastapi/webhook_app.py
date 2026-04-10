@@ -1,7 +1,7 @@
 import asyncio
 import os
 import config as AppConfig
-from fastapi import FastAPI, Response, openapi
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from server_fastapi.routes import data_api, webhook_router
@@ -28,10 +28,9 @@ from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
 from my_redis.utils.mysql_backup import (
     check_backup_counts,
-    backup_counters,
-    backup_timeseries,
     restore_counters,
     restore_timeseries,
+    MySQLBackup,
 )
 from my_redis.utils.emergency_backup import register_emergency_backup
 from my_redis.utils.redis_backup_service import RedisBackupService
@@ -197,9 +196,9 @@ async def lifespan(app: FastAPI):
                     worker_id,
                 )
                 with time_execution(label="Redis → MySQL initial seed: counters"):
-                    c = await backup_counters(client, yield_between_chunks=False)
+                    c = await MySQLBackup.counters(client, yield_between_chunks=False)
                 with time_execution(label="Redis → MySQL initial seed: timeseries"):
-                    t = await backup_timeseries(client, yield_between_chunks=False)
+                    t = await MySQLBackup.timeseries(client, yield_between_chunks=False)
 
                 if c == 0 and t == 0:
                     # Redis was also empty — genuine fresh install, nothing to seed

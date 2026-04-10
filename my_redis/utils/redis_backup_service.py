@@ -10,12 +10,42 @@ import asyncio
 import time
 
 from my_redis.connect_redis import RedisManager
-from my_redis.utils.mysql_backup import backup_all, cleanup_mysql_backup
+from my_redis.utils.mysql_backup import MySQLBackup, MySQLCleanup
 from utils.logger import logger
 
 _INITIAL_RETRY_DELAY = 5   # seconds
 _MAX_RETRY_DELAY     = 60  # seconds (exponential cap)
 _MAX_ATTEMPTS        = 5
+
+
+async def _run_with_retry(label: str, coro_factory, *args, **kwargs) -> bool:
+    """
+    Run an async job with exponential backoff.
+
+    coro_factory is called fresh on each attempt so exhausted coroutines
+    are never re-awaited. Returns True on success, False after all attempts
+    are exhausted (caller continues — jobs are independent).
+    """
+    delay = _INITIAL_RETRY_DELAY
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            await coro_factory(*args, **kwargs)
+            logger.success("✅ {} complete", label)
+            return True
+        except Exception as e:
+            if attempt < _MAX_ATTEMPTS:
+                logger.warning(
+                    "⚠️ {} failed (attempt {}/{}): {} — retrying in {}s",
+                    label, attempt, _MAX_ATTEMPTS, e, delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, _MAX_RETRY_DELAY)
+            else:
+                logger.error(
+                    "❌ {} failed after {} attempts: {} — will retry at next scheduled interval",
+                    label, _MAX_ATTEMPTS, e,
+                )
+    return False
 
 
 class RedisBackupService:
@@ -41,28 +71,11 @@ class RedisBackupService:
                     continue
 
                 t0 = time.perf_counter()
-                delay = _INITIAL_RETRY_DELAY
-                for attempt in range(1, _MAX_ATTEMPTS + 1):
-                    try:
-                        await cleanup_mysql_backup(self._interval)
-                        await backup_all(client)
-                        logger.success(
-                            "✅ Redis backup cycle complete in {:.2f}s", time.perf_counter() - t0
-                        )
-                        break
-                    except Exception as e:
-                        if attempt < _MAX_ATTEMPTS:
-                            logger.warning(
-                                "⚠️ Backup cycle failed (attempt {}/{}): {} — retrying in {}s",
-                                attempt, _MAX_ATTEMPTS, e, delay,
-                            )
-                            await asyncio.sleep(delay)
-                            delay = min(delay * 2, _MAX_RETRY_DELAY)
-                        else:
-                            logger.error(
-                                "❌ Backup cycle failed after {} attempts: {} — will retry at next scheduled interval",
-                                _MAX_ATTEMPTS, e,
-                            )
+                await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
+                await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
+                await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
+                await _run_with_retry("Backup timeseries",         MySQLBackup.timeseries,  client)
+                logger.info("Backup cycle finished in {:.2f}s", time.perf_counter() - t0)
 
             except asyncio.CancelledError:
                 logger.info("🛑 Redis backup loop cancelled")
@@ -90,11 +103,11 @@ class RedisBackupService:
             if client:
                 t0 = time.perf_counter()
                 logger.info("🔚 Final Redis backup on shutdown...")
-                await cleanup_mysql_backup(self._interval)
-                await backup_all(client)
-                logger.success(
-                    "✅ Final Redis backup complete in {:.2f}s", time.perf_counter() - t0
-                )
+                await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
+                await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
+                await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
+                await _run_with_retry("Backup timeseries",         MySQLBackup.timeseries,  client)
+                logger.success("✅ Final Redis backup complete in {:.2f}s", time.perf_counter() - t0)
         except Exception as e:
             logger.error("❌ Final Redis backup failed: {}", e)
 
