@@ -103,6 +103,147 @@ async def retry_call(coro_func, *args, max_attempts=5, initial_delay=2, delay_in
             await asyncio.sleep(delay)
             delay += delay_increment
 
+async def _start_leader_services(
+    redis_manager: RedisManager,
+    worker_id: str,
+) -> tuple[list, list]:
+    """
+    Build and start all leader-only services and background tasks.
+    Called at startup by the elected leader, and by the follower watchdog
+    when it wins a re-election after the original leader dies.
+    Returns (services, background_tasks) so the caller can stop them cleanly.
+    """
+    # Initialize Koji geofences - always fetch fresh from Koji on startup
+    # This ensures new areas added to Koji are immediately detected
+    koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
+    geofences = await retry_call(koji_instance.get_fresh_geofences)
+    if not geofences:
+        logger.error("⚠️ No geofences available at startup. Exiting application.")
+        raise Exception("❌ No geofences available at startup, stopping application.")
+
+    # Store geofences in Redis for other workers
+    await GlobalStateManager.set_geofences(geofences, expiry=AppConfig.geofence_expire_cache_seconds)
+
+    # Store timezone in Redis for other workers
+    await GlobalStateManager.set_timezone(global_state.user_timezone)
+
+    # Sync to legacy global_state for backward compatibility
+    global_state.geofences = geofences
+
+    # Start background refresh tasks leader only
+
+    async def safe_refresh():
+        await retry_call(koji_instance.refresh_geofences)
+
+    async def safe_refresh_pokestops():
+        await retry_call(GolbatSQLPokestops.run_refresh_loop, AppConfig.pokestop_refresh_interval_seconds)
+
+    refresh_task = asyncio.create_task(safe_refresh())
+    pokestop_refresh_task = asyncio.create_task(safe_refresh_pokestops())
+    cleanup_timeseries_task = asyncio.create_task(periodic_cleanup())
+
+    background_tasks = [
+        (refresh_task, "geofence refresh"),
+        (pokestop_refresh_task, "pokestop refresh"),
+        (cleanup_timeseries_task, "periodic cleanup"),
+    ]
+
+    # Initialize buffer flushers leader only
+
+    pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)
+    shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)
+    quests_buffer_flusher = QuestsBufferFlusher(flush_interval=AppConfig.quest_flush_interval)
+    raids_buffer_flusher = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
+    invasions_buffer_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
+
+    # Initialize partition ensurers leader only
+
+    partition_pokemon_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400, days_back=2, days_forward=30,
+        table="pokemon_iv_daily_events", column="day_date",
+    )
+    partition_quests_items_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400, days_back=2, days_forward=30,
+        table="quests_item_daily_events", column="day_date",
+    )
+    partition_quests_pokemon_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400, days_back=2, days_forward=30,
+        table="quests_pokemon_daily_events", column="day_date",
+    )
+    partition_raids_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400, days_back=2, days_forward=30,
+        table="raids_daily_events", column="day_date",
+    )
+    partition_invasions_ensurer = DailyPartitionEnsurer(
+        ensure_interval=86400, days_back=2, days_forward=30,
+        table="invasions_daily_events", column="day_date",
+    )
+    partition_shiny_rates_ensurer = MonthlyPartitionEnsurer(
+        ensure_interval=86400, months_back=2, months_forward=12,
+        table="shiny_username_rates", column="month_year",
+    )
+    partition_cleaner = build_default_cleaner()
+
+    # Ensure partitions exist on first run leader only
+
+    for tbl in (
+        "pokemon_iv_daily_events",
+        "quests_item_daily_events",
+        "quests_pokemon_daily_events",
+        "raids_daily_events",
+        "invasions_daily_events",
+    ):
+        await ensure_daily_partitions(tbl, "day_date", days_back=2, days_forward=30)
+
+    await ensure_monthly_partitions(
+        table="shiny_username_rates", column="month_year",
+        months_back=2, months_forward=12,
+    )
+
+    # Register all services leader only
+
+    redis_backup_svc = RedisBackupService(redis_manager, AppConfig.redis_backup_interval)
+
+    services = [
+        # Pokemon IV daily
+        Service("partitions:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
+                partition_pokemon_ensurer.start, partition_pokemon_ensurer.stop),
+        Service("flusher:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
+                pokemon_buffer_flusher.start, pokemon_buffer_flusher.stop),
+        # Shiny
+        Service("partitions:shiny_rates_month", AppConfig.store_sql_pokemon_shiny,
+                partition_shiny_rates_ensurer.start, partition_shiny_rates_ensurer.stop),
+        Service("flusher:shiny_rates", AppConfig.store_sql_pokemon_shiny,
+                shiny_rate_buffer_flusher.start, shiny_rate_buffer_flusher.stop),
+        # Quests
+        Service("partitions:quests_item_daily", AppConfig.store_sql_quest_aggregation,
+                partition_quests_items_ensurer.start, partition_quests_items_ensurer.stop),
+        Service("partitions:quests_poke_daily", AppConfig.store_sql_quest_aggregation,
+                partition_quests_pokemon_ensurer.start, partition_quests_pokemon_ensurer.stop),
+        Service("flusher:quests_daily", AppConfig.store_sql_quest_aggregation,
+                quests_buffer_flusher.start, quests_buffer_flusher.stop),
+        # Raids
+        Service("partitions:raids_daily", AppConfig.store_sql_raid_aggregation,
+                partition_raids_ensurer.start, partition_raids_ensurer.stop),
+        Service("flusher:raids_daily", AppConfig.store_sql_raid_aggregation,
+                raids_buffer_flusher.start, raids_buffer_flusher.stop),
+        # Invasions
+        Service("partitions:invasions_daily", AppConfig.store_sql_invasion_aggregation,
+                partition_invasions_ensurer.start, partition_invasions_ensurer.stop),
+        Service("flusher:invasions_daily", AppConfig.store_sql_invasion_aggregation,
+                invasions_buffer_flusher.start, invasions_buffer_flusher.stop),
+        # Partition Cleaner
+        Service("partitions:cleaner", True, partition_cleaner.start, partition_cleaner.stop),
+        # Redis MySQL Backup
+        Service("redis:mysql_backup", AppConfig.redis_mysql_backups,
+                redis_backup_svc.start, redis_backup_svc.stop),
+    ]
+
+    await start_services(services)
+    logger.success(f"[{worker_id}] ✅ Leader services started")
+    return services, background_tasks
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -147,6 +288,7 @@ async def lifespan(app: FastAPI):
     # Track background tasks and services only populated for leader
     background_tasks: list[tuple[asyncio.Task, str]] = []
     services: list[Service] = []
+    watchdog_task: asyncio.Task | None = None
 
     if is_leader:
         # LEADER: Initialize state and start background tasks
@@ -231,137 +373,11 @@ async def lifespan(app: FastAPI):
 
             register_emergency_backup(redis_manager)
 
-        # Initialize Koji geofences - always fetch fresh from Koji on startup
-        # This ensures new areas added to Koji are immediately detected
-        koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
-        geofences = await retry_call(koji_instance.get_fresh_geofences)
-        if not geofences:
-            logger.error("⚠️ No geofences available at startup. Exiting application.")
-            raise Exception("❌ No geofences available at startup, stopping application.")
-
-        # Store geofences in Redis for other workers
-        await GlobalStateManager.set_geofences(geofences, expiry=AppConfig.geofence_expire_cache_seconds)
-
-        # Store timezone in Redis for other workers
-        await GlobalStateManager.set_timezone(global_state.user_timezone)
-
-        # Sync to legacy global_state for backward compatibility
-        global_state.geofences = geofences
-
-        # Start background refresh tasks leader only
-
-        async def safe_refresh():
-            await retry_call(koji_instance.refresh_geofences)
-
-        async def safe_refresh_pokestops():
-            await retry_call(GolbatSQLPokestops.run_refresh_loop, AppConfig.pokestop_refresh_interval_seconds)
-
-        refresh_task = asyncio.create_task(safe_refresh())
-        pokestop_refresh_task = asyncio.create_task(safe_refresh_pokestops())
-        cleanup_timeseries_task = asyncio.create_task(periodic_cleanup())
-
-        background_tasks = [
-            (refresh_task, "geofence refresh"),
-            (pokestop_refresh_task, "pokestop refresh"),
-            (cleanup_timeseries_task, "periodic cleanup"),
-        ]
-
-        # Initialize buffer flushers leader only
-
-        pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)
-        shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)
-        quests_buffer_flusher = QuestsBufferFlusher(flush_interval=AppConfig.quest_flush_interval)
-        raids_buffer_flusher = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
-        invasions_buffer_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
-
-        # Initialize partition ensurers leader only
-
-        partition_pokemon_ensurer = DailyPartitionEnsurer(
-            ensure_interval=86400, days_back=2, days_forward=30,
-            table="pokemon_iv_daily_events", column="day_date",
-        )
-        partition_quests_items_ensurer = DailyPartitionEnsurer(
-            ensure_interval=86400, days_back=2, days_forward=30,
-            table="quests_item_daily_events", column="day_date",
-        )
-        partition_quests_pokemon_ensurer = DailyPartitionEnsurer(
-            ensure_interval=86400, days_back=2, days_forward=30,
-            table="quests_pokemon_daily_events", column="day_date",
-        )
-        partition_raids_ensurer = DailyPartitionEnsurer(
-            ensure_interval=86400, days_back=2, days_forward=30,
-            table="raids_daily_events", column="day_date",
-        )
-        partition_invasions_ensurer = DailyPartitionEnsurer(
-            ensure_interval=86400, days_back=2, days_forward=30,
-            table="invasions_daily_events", column="day_date",
-        )
-        partition_shiny_rates_ensurer = MonthlyPartitionEnsurer(
-            ensure_interval=86400, months_back=2, months_forward=12,
-            table="shiny_username_rates", column="month_year",
-        )
-        partition_cleaner = build_default_cleaner()
-
-        # Ensure partitions exist on first run leader only
-
-        for tbl in (
-            "pokemon_iv_daily_events",
-            "quests_item_daily_events",
-            "quests_pokemon_daily_events",
-            "raids_daily_events",
-            "invasions_daily_events",
-        ):
-            await ensure_daily_partitions(tbl, "day_date", days_back=2, days_forward=30)
-
-        await ensure_monthly_partitions(
-            table="shiny_username_rates", column="month_year",
-            months_back=2, months_forward=12,
-        )
-
-        # Register all services leader only
-
-        redis_backup_svc = RedisBackupService(redis_manager, AppConfig.redis_backup_interval)
-
-        services = [
-            # Pokemon IV daily
-            Service("partitions:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
-                    partition_pokemon_ensurer.start, partition_pokemon_ensurer.stop),
-            Service("flusher:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
-                    pokemon_buffer_flusher.start, pokemon_buffer_flusher.stop),
-            # Shiny
-            Service("partitions:shiny_rates_month", AppConfig.store_sql_pokemon_shiny,
-                    partition_shiny_rates_ensurer.start, partition_shiny_rates_ensurer.stop),
-            Service("flusher:shiny_rates", AppConfig.store_sql_pokemon_shiny,
-                    shiny_rate_buffer_flusher.start, shiny_rate_buffer_flusher.stop),
-            # Quests
-            Service("partitions:quests_item_daily", AppConfig.store_sql_quest_aggregation,
-                    partition_quests_items_ensurer.start, partition_quests_items_ensurer.stop),
-            Service("partitions:quests_poke_daily", AppConfig.store_sql_quest_aggregation,
-                    partition_quests_pokemon_ensurer.start, partition_quests_pokemon_ensurer.stop),
-            Service("flusher:quests_daily", AppConfig.store_sql_quest_aggregation,
-                    quests_buffer_flusher.start, quests_buffer_flusher.stop),
-            # Raids
-            Service("partitions:raids_daily", AppConfig.store_sql_raid_aggregation,
-                    partition_raids_ensurer.start, partition_raids_ensurer.stop),
-            Service("flusher:raids_daily", AppConfig.store_sql_raid_aggregation,
-                    raids_buffer_flusher.start, raids_buffer_flusher.stop),
-            # Invasions
-            Service("partitions:invasions_daily", AppConfig.store_sql_invasion_aggregation,
-                    partition_invasions_ensurer.start, partition_invasions_ensurer.stop),
-            Service("flusher:invasions_daily", AppConfig.store_sql_invasion_aggregation,
-                    invasions_buffer_flusher.start, invasions_buffer_flusher.stop),
-            # Partition Cleaner
-            Service("partitions:cleaner", True, partition_cleaner.start, partition_cleaner.stop),
-            # Redis MySQL Backup
-            Service("redis:mysql_backup", AppConfig.redis_mysql_backups,
-                    redis_backup_svc.start, redis_backup_svc.stop),
-        ]
-
-        await start_services(services)
+        services, background_tasks = await _start_leader_services(redis_manager, worker_id)
 
     else:
 
-        # FOLLOWER Wait for leader to populate state, then sync
+        # FOLLOWER: Wait for leader to populate state, then sync
 
         logger.info(f"[{worker_id}] [FOLLOWER] This worker is a follower - waiting for leader state")
 
@@ -373,6 +389,36 @@ async def lifespan(app: FastAPI):
         if not state_available:
             logger.error("❌ Timeout waiting for leader to populate state. Exiting.")
             raise Exception("❌ Timeout waiting for leader state, stopping application.")
+
+        # Watchdog: periodically attempt to acquire leadership.
+        # If the leader dies, its Redis key expires (TTL=30s) and the first
+        # follower to win try_acquire() promotes itself and starts all services.
+        async def _follower_watchdog():
+            watchdog_interval = LeaderElection.LOCK_TTL + 5  # slightly after TTL expiry
+            while True:
+                try:
+                    await asyncio.sleep(watchdog_interval)
+                    if not leader.is_leader:
+                        won = await leader.try_acquire()
+                        if won:
+                            logger.success(
+                                "[{}] [WATCHDOG] Acquired leadership — starting leader services",
+                                worker_id,
+                            )
+                            nonlocal services, background_tasks
+                            services, background_tasks = await _start_leader_services(
+                                redis_manager, worker_id
+                            )
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error("[{}] [WATCHDOG] Error during leader promotion: {}", worker_id, e)
+
+        watchdog_task = asyncio.create_task(_follower_watchdog())
+        logger.info(
+            "[{}] [WATCHDOG] Follower watchdog started — checking for leadership every {}s",
+            worker_id, LeaderElection.LOCK_TTL + 5,
+        )
 
 
     # Sync global state from Redis to local all workers
@@ -391,11 +437,19 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"[{worker_id}] 👋 Shutting down Webhook Receiver application.")
 
-    if is_leader:
-        # Stop services leader only
+    # Cancel follower watchdog if running (safe no-op if None)
+    if watchdog_task is not None:
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            logger.info(f"[{worker_id}] 🛑 Follower watchdog cancelled.")
+
+    if leader.is_leader:
+        # Stop services (covers both startup leaders and watchdog-promoted followers)
         await stop_services(services)
 
-        # Cancel background tasks leader only
+        # Cancel background tasks
         for task, name in background_tasks:
             task.cancel()
             try:
