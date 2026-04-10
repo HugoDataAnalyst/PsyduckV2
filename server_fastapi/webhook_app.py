@@ -154,6 +154,12 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"[{worker_id}] [LEADER] This worker is the leader - starting background services")
 
+        # Invalidate stale geofences from any previous run so followers cannot
+        # unblock on a leftover Redis key while restore is still in progress.
+        # Fresh geofences are written after restore completes (below), which is
+        # the point at which wait_for_state() on followers will return True.
+        await GlobalStateManager.clear_geofences()
+
         # Redis in-memory mode: disable persistence, restore from MySQL
         if AppConfig.redis_mysql_backups:
             client = await redis_manager.check_redis_connection()

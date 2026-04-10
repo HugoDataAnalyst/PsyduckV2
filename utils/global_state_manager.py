@@ -171,6 +171,27 @@ class GlobalStateManager:
             logger.error(f"GlobalStateManager: Error setting geofences: {e}")
             return False
 
+    @classmethod
+    async def clear_geofences(cls) -> None:
+        """
+        Delete the geofences key from Redis and invalidate local cache.
+
+        Called by the leader at startup before restore begins, so followers
+        cannot unblock on a stale key left over from the previous run.
+        Fresh geofences are set after restore completes, which is when
+        followers are allowed to proceed via wait_for_state().
+        """
+        try:
+            if not cls._redis_manager:
+                return
+            client = await cls._redis_manager.check_redis_connection()
+            if client:
+                await client.delete(cls.GEOFENCES_KEY)
+                cls.invalidate_local_cache(cls.GEOFENCES_KEY)
+                logger.info("GlobalStateManager: Cleared stale geofences — followers will wait for fresh state")
+        except Exception as e:
+            logger.warning(f"GlobalStateManager: Error clearing geofences: {e}")
+
     # Pokestops
 
     @classmethod
