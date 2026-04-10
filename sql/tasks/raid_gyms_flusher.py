@@ -39,7 +39,7 @@ class RaidsBufferFlusher:
                 if added:
                     logger.success(f"🏰 Raids flush ({mode}): +{added} rows in {dt:.2f}s ⏱️")
                 else:
-                    logger.info(f"🏰 No new raids rows to flush ({mode}). Took {dt:.2f}s ⏱️")
+                    logger.debug(f"🏰 No new raids rows to flush ({mode}). Took {dt:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Raids buffer flusher loop was cancelled.")

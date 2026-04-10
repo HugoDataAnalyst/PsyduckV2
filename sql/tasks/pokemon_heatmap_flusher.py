@@ -40,7 +40,7 @@ class PokemonIVBufferFlusher:
                 if added:
                     logger.success(f"👻 Pokémon IV Events flush ({mode}): +{added} rows in {duration:.2f}s ⏱️")
                 else:
-                    logger.info(f"👻 No new Pokémon IV events rows to flush ({mode}). Took {duration:.2f}s ⏱️")
+                    logger.debug(f"👻 No new Pokémon IV events rows to flush ({mode}). Took {duration:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Pokémon IV buffer flusher loop was cancelled.")
