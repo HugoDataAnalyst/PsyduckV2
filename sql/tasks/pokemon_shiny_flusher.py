@@ -40,7 +40,7 @@ class ShinyRateBufferFlusher:
                 if added:
                     logger.success(f"✨ Shiny buffer flush ({mode}): +{added} rows in {duration:.2f}s ⏱️")
                 else:
-                    logger.info(f"✨ No shiny rows to flush ({mode}). Took {duration:.2f}s ⏱️")
+                    logger.debug(f"✨ No shiny rows to flush ({mode}). Took {duration:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Shiny rate buffer flusher loop was cancelled.")
