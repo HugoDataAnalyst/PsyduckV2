@@ -13,7 +13,6 @@ import asyncio
 from datetime import datetime
 from utils.logger import logger
 from utils.safe_values import _safe_int, _to_float
-from sql.tasks.pokemon_processor import PokemonSQLProcessor
 import config as AppConfig
 
 
