@@ -1,6 +1,5 @@
 import json
 import config as AppConfig
-from my_redis.queries.buffer import raids_bulk_buffer
 from my_redis.queries.updates.pokemons import (
     pokemon_timeseries,
     pokemon_counterseries,
@@ -31,19 +30,14 @@ from my_redis.queries.updates.quests import (
     quests_daily_counterseries
 )
 from my_redis.connect_redis import RedisManager
-from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer, ShinyRateRedisBuffer
-from my_redis.queries.buffer.quests_bulk_buffer import QuestsRedisBuffer
-from my_redis.queries.buffer.raids_bulk_buffer import RaidsRedisBuffer
-from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsRedisBuffer
+from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVBuffer, ShinyRateBuffer
+from my_redis.queries.buffer.quests_bulk_buffer import QuestsBuffer
+from my_redis.queries.buffer.raids_bulk_buffer import RaidsBuffer
+from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsBuffer
 from utils.logger import logger
 from utils.retry_functions import retry
 
 redis_manager = RedisManager()
-pokemon_buffer = PokemonIVRedisBuffer()
-shiny_buffer = ShinyRateRedisBuffer()
-quests_buffer = QuestsRedisBuffer()
-raids_buffer = RaidsRedisBuffer()
-invasions_buffer = InvasionsRedisBuffer()
 
 async def process_pokemon_data(filtered_data):
     """
@@ -88,16 +82,14 @@ async def process_pokemon_data(filtered_data):
 
     # Execute SQL commands if Enabled
     if AppConfig.store_sql_pokemon_aggregation:
-        get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
         logger.debug("🔃 Processing Pokémon Aggregation...")
-        await pokemon_buffer.increment_event(get_client, filtered_data)
+        PokemonIVBuffer.add_event(filtered_data)
     else:
         logger.debug("⚠️ SQL Pokémon Aggregation is disabled.")
 
     if AppConfig.store_sql_pokemon_shiny:
-        get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
         logger.debug("🔃 Processing Pokémon Shiny Rates...")
-        await shiny_buffer.increment_event(get_client, filtered_data)
+        ShinyRateBuffer.add_event(filtered_data)
     else:
         logger.debug("⚠️ SQL Pokémon Shiny Rates is disabled.")
 
@@ -153,9 +145,8 @@ async def process_raid_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_raid_aggregation:
-            get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
             logger.debug("🔃 Processing Raid Aggregation...")
-            await raids_buffer.increment_event(get_client, filtered_data)
+            RaidsBuffer.add_event(filtered_data)
         else:
             logger.debug("⚠️ SQL Raid Aggregation is disabled.")
 
@@ -207,9 +198,8 @@ async def process_quest_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_quest_aggregation:
-            get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
             logger.debug("🔃 Processing Quest Aggregation...")
-            await quests_buffer.increment_event(get_client, filtered_data)
+            QuestsBuffer.add_event(filtered_data)
         else:
             logger.debug("⚠️ SQL Quest Aggregation is disabled.")
 
@@ -267,9 +257,8 @@ async def process_invasion_data(filtered_data):
 
         # Execute SQl commands if Enabled
         if AppConfig.store_sql_invasion_aggregation:
-            get_client = await redis_manager.get_connection_with_retry(max_attempts=2, delay=0.2)
             logger.debug("🔃 Processing Invasion Aggregation...")
-            await invasions_buffer.increment_event(get_client, filtered_data)
+            InvasionsBuffer.add_event(filtered_data)
         else:
             logger.debug("⚠️ SQL Invasion Aggregation is disabled.")
 
