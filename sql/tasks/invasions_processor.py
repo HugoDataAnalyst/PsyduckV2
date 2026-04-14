@@ -85,9 +85,9 @@ class InvasionSQLProcessor:
                         INSERT IGNORE INTO pokestops (pokestop, pokestop_name, latitude, longitude)
                         SELECT
                           t.pokestop,
-                          ANY_VALUE(t.pokestop_name),
-                          ANY_VALUE(t.latitude),
-                          ANY_VALUE(t.longitude)
+                          t.pokestop_name,
+                          t.latitude,
+                          t.longitude
                         FROM tmp_ide t
                         GROUP BY t.pokestop
                     """)
@@ -99,9 +99,9 @@ class InvasionSQLProcessor:
                         JOIN (
                           SELECT
                             t.pokestop,
-                            ANY_VALUE(t.pokestop_name) AS pokestop_name,
-                            ANY_VALUE(t.latitude)      AS latitude,
-                            ANY_VALUE(t.longitude)     AS longitude
+                            t.pokestop_name AS pokestop_name,
+                            t.latitude      AS latitude,
+                            t.longitude     AS longitude
                           FROM tmp_ide t
                           GROUP BY t.pokestop
                         ) x ON x.pokestop = p.pokestop

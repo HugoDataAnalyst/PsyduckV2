@@ -135,7 +135,7 @@ class QuestSQLProcessor:
                     # 2) Upsert pokestops using union of both temps (safe if one is empty)
                     await cur.execute("""
                         INSERT IGNORE INTO pokestops (pokestop, pokestop_name, latitude, longitude)
-                        SELECT pokestop, ANY_VALUE(pokestop_name), ANY_VALUE(latitude), ANY_VALUE(longitude)
+                        SELECT pokestop, pokestop_name, latitude, longitude
                         FROM (
                             SELECT t.pokestop, t.pokestop_name, t.latitude, t.longitude FROM tmp_qide t
                             UNION ALL
@@ -149,9 +149,9 @@ class QuestSQLProcessor:
                         UPDATE pokestops p
                         JOIN (
                         SELECT pokestop,
-                                ANY_VALUE(pokestop_name) AS pokestop_name,
-                                ANY_VALUE(latitude)      AS latitude,
-                                ANY_VALUE(longitude)     AS longitude
+                                pokestop_name AS pokestop_name,
+                                latitude      AS latitude,
+                                longitude     AS longitude
                         FROM (
                             SELECT t.pokestop, t.pokestop_name, t.latitude, t.longitude FROM tmp_qide t
                             UNION ALL

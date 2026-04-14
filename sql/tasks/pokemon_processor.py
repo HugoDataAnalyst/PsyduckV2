@@ -93,7 +93,7 @@ class PokemonSQLProcessor:
                     # 3) spawnpoints (insert new + update changed coords)
                     await cur.execute("""
                         INSERT IGNORE INTO spawnpoints (spawnpoint, latitude, longitude)
-                        SELECT t.spawnpoint, ANY_VALUE(t.latitude), ANY_VALUE(t.longitude)
+                        SELECT t.spawnpoint, t.latitude, t.longitude
                         FROM tmp_ivd t
                         WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
                         GROUP BY t.spawnpoint
@@ -104,8 +104,8 @@ class PokemonSQLProcessor:
                         UPDATE spawnpoints sp
                         JOIN (
                           SELECT t.spawnpoint,
-                                 ANY_VALUE(t.latitude)  AS latitude,
-                                 ANY_VALUE(t.longitude) AS longitude
+                                 t.latitude  AS latitude,
+                                 t.longitude AS longitude
                           FROM tmp_ivd t
                           WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
                           GROUP BY t.spawnpoint

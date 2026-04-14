@@ -123,8 +123,8 @@ async def fetch_quests_items_day(
           p.pokestop_name,
           i.mode,
           i.task_type,
-          ANY_VALUE(p.latitude)  AS latitude,
-          ANY_VALUE(p.longitude) AS longitude,
+          p.latitude  AS latitude,
+          p.longitude AS longitude,
           COUNT(*) AS cnt
         FROM quests_item_daily_events AS i
         LEFT JOIN pokestops AS p ON p.pokestop = i.pokestop
@@ -161,8 +161,8 @@ async def fetch_quests_pokemon_day(
           p.pokestop_name,
           qp.mode,
           qp.task_type,
-          ANY_VALUE(p.latitude)  AS latitude,
-          ANY_VALUE(p.longitude) AS longitude,
+          p.latitude  AS latitude,
+          p.longitude AS longitude,
           COUNT(*) AS cnt
         FROM quests_pokemon_daily_events AS qp
         LEFT JOIN pokestops AS p ON p.pokestop = qp.pokestop

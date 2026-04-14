@@ -60,8 +60,8 @@ async def fetch_raids_day(
           r.raid_pokemon,
           r.raid_form,
           r.raid_level,
-          ANY_VALUE(g.latitude)  AS latitude,
-          ANY_VALUE(g.longitude) AS longitude,
+          g.latitude  AS latitude,
+          g.longitude AS longitude,
           COUNT(*) AS cnt
         FROM raids_daily_events AS r
         JOIN gyms AS g
