@@ -185,14 +185,6 @@ async def lifespan(app: FastAPI):
             (cleanup_timeseries_task, "periodic cleanup"),
         ]
 
-        # Initialize buffer flushers leader only
-
-        pokemon_buffer_flusher = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)
-        shiny_rate_buffer_flusher = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)
-        quests_buffer_flusher = QuestsBufferFlusher(flush_interval=AppConfig.quest_flush_interval)
-        raids_buffer_flusher = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
-        invasions_buffer_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
-
         # Initialize partition ensurers leader only
 
         partition_pokemon_ensurer = DailyPartitionEnsurer(
@@ -247,30 +239,20 @@ async def lifespan(app: FastAPI):
             # Pokemon IV daily
             Service("partitions:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
                     partition_pokemon_ensurer.start, partition_pokemon_ensurer.stop),
-            Service("flusher:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
-                    pokemon_buffer_flusher.start, pokemon_buffer_flusher.stop),
             # Shiny
             Service("partitions:shiny_rates_month", AppConfig.store_sql_pokemon_shiny,
                     partition_shiny_rates_ensurer.start, partition_shiny_rates_ensurer.stop),
-            Service("flusher:shiny_rates", AppConfig.store_sql_pokemon_shiny,
-                    shiny_rate_buffer_flusher.start, shiny_rate_buffer_flusher.stop),
             # Quests
             Service("partitions:quests_item_daily", AppConfig.store_sql_quest_aggregation,
                     partition_quests_items_ensurer.start, partition_quests_items_ensurer.stop),
             Service("partitions:quests_poke_daily", AppConfig.store_sql_quest_aggregation,
                     partition_quests_pokemon_ensurer.start, partition_quests_pokemon_ensurer.stop),
-            Service("flusher:quests_daily", AppConfig.store_sql_quest_aggregation,
-                    quests_buffer_flusher.start, quests_buffer_flusher.stop),
             # Raids
             Service("partitions:raids_daily", AppConfig.store_sql_raid_aggregation,
                     partition_raids_ensurer.start, partition_raids_ensurer.stop),
-            Service("flusher:raids_daily", AppConfig.store_sql_raid_aggregation,
-                    raids_buffer_flusher.start, raids_buffer_flusher.stop),
             # Invasions
             Service("partitions:invasions_daily", AppConfig.store_sql_invasion_aggregation,
                     partition_invasions_ensurer.start, partition_invasions_ensurer.stop),
-            Service("flusher:invasions_daily", AppConfig.store_sql_invasion_aggregation,
-                    invasions_buffer_flusher.start, invasions_buffer_flusher.stop),
             # Partition Cleaner
             Service("partitions:cleaner", True, partition_cleaner.start, partition_cleaner.stop),
             # Redis → MySQL Backup
@@ -304,6 +286,29 @@ async def lifespan(app: FastAPI):
     await GlobalStateManager.sync_to_legacy_global_state()
     logger.info(f"[{worker_id}] Global state synced from Redis")
 
+    # Flushers run on ALL workers — each worker flushes its own in-memory buffer
+
+    _pokemon_flusher   = PokemonIVBufferFlusher(flush_interval=AppConfig.pokemon_flush_interval)
+    _shiny_flusher     = ShinyRateBufferFlusher(flush_interval=AppConfig.shiny_flush_interval)
+    _quests_flusher    = QuestsBufferFlusher(flush_interval=AppConfig.quest_flush_interval)
+    _raids_flusher     = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
+    _invasions_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
+
+    flusher_services: list[Service] = [
+        Service("flusher:pokemon_iv_daily", AppConfig.store_sql_pokemon_aggregation,
+                _pokemon_flusher.start, _pokemon_flusher.stop),
+        Service("flusher:shiny_rates", AppConfig.store_sql_pokemon_shiny,
+                _shiny_flusher.start, _shiny_flusher.stop),
+        Service("flusher:quests_daily", AppConfig.store_sql_quest_aggregation,
+                _quests_flusher.start, _quests_flusher.stop),
+        Service("flusher:raids_daily", AppConfig.store_sql_raid_aggregation,
+                _raids_flusher.start, _raids_flusher.stop),
+        Service("flusher:invasions_daily", AppConfig.store_sql_invasion_aggregation,
+                _invasions_flusher.start, _invasions_flusher.stop),
+    ]
+    await start_services(flusher_services)
+    logger.info(f"[{worker_id}] In-memory buffer flushers started")
+
     # YIELD. Application runs
 
     logger.success(f"[{worker_id}] ✅ Worker ready and accepting requests")
@@ -313,6 +318,9 @@ async def lifespan(app: FastAPI):
     # Shutdown
 
     logger.info(f"[{worker_id}] 👋 Shutting down Webhook Receiver application.")
+
+    # Stop flushers — all workers flush remaining in-memory events before exit
+    await stop_services(flusher_services)
 
     if is_leader:
         # Stop services leader only
