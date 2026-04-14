@@ -1,8 +1,8 @@
 import asyncio
 import time
 from utils.logger import logger
-from my_redis.connect_redis import RedisManager
-from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsRedisBuffer
+from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsBuffer
+from sql.tasks.invasions_processor import InvasionSQLProcessor
 
 
 class InvasionsBufferFlusher:
@@ -19,24 +19,19 @@ class InvasionsBufferFlusher:
         cycle = 0
         while self._running:
             try:
-                redis = await RedisManager().check_redis_connection()
-                if not redis:
-                    logger.warning("⚠️ Redis not ready. Skipping invasions flush cycle.")
-                    await asyncio.sleep(self.flush_interval)
-                    continue
-
                 start = time.perf_counter()
-                if cycle % 6 == 0:
-                    added = await InvasionsRedisBuffer.force_flush(redis)
-                    mode = "force"
-                else:
-                    added = await InvasionsRedisBuffer.flush_if_ready(redis)
-                    mode = "threshold/ready"
+                mode = "force" if cycle % 6 == 0 else "threshold/ready"
 
-                dt = time.perf_counter() - start
-                if added:
+                events = await InvasionsBuffer.flush()
+                if events:
+                    data_batch, malformed = InvasionsBuffer.build_batch(events)
+                    if malformed:
+                        logger.warning(f"⚠️ Invasions buffer: {malformed} malformed event(s) discarded")
+                    added = await InvasionSQLProcessor.bulk_insert_invasions_daily_events(data_batch)
+                    dt = time.perf_counter() - start
                     logger.success(f"🛰️ Invasions flush ({mode}): +{added} rows in {dt:.2f}s ⏱️")
                 else:
+                    dt = time.perf_counter() - start
                     logger.debug(f"🛰️ No new invasions rows to flush ({mode}). Took {dt:.2f}s ⏱️")
 
             except asyncio.CancelledError:
@@ -62,11 +57,13 @@ class InvasionsBufferFlusher:
 
         self._running = False
 
+        # Final flush
         try:
-            redis = await RedisManager().check_redis_connection()
-            if redis:
-                start = time.perf_counter()
-                count = await InvasionsRedisBuffer.force_flush(redis)
+            start = time.perf_counter()
+            events = await InvasionsBuffer.flush()
+            if events:
+                data_batch, _ = InvasionsBuffer.build_batch(events)
+                count = await InvasionSQLProcessor.bulk_insert_invasions_daily_events(data_batch)
                 logger.success(f"🔚 Final Invasions flush (+{count} rows in {time.perf_counter()-start:.2f}s)")
         except Exception as e:
             logger.error(f"❌ Final Invasions flush failed: {e}")

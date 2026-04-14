@@ -1,8 +1,9 @@
 import asyncio
 import time
 from utils.logger import logger
-from my_redis.connect_redis import RedisManager
-from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer
+from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVBuffer
+from sql.tasks.pokemon_processor import PokemonSQLProcessor
+
 
 class PokemonIVBufferFlusher:
     def __init__(self, flush_interval: int = 300):
@@ -19,27 +20,23 @@ class PokemonIVBufferFlusher:
         cycle = 0
         while self._running:
             try:
-                redis = await RedisManager().check_redis_connection()
-                if not redis:
-                    logger.warning("⚠️ Redis not ready. Skipping flush cycle.")
-                    await asyncio.sleep(self.flush_interval)
-                    continue
-
                 start = time.perf_counter()
+                mode = "force" if cycle % 6 == 0 else "threshold/ready"
 
-                # Every 6th cycle -> FORCE flush; otherwise normal flush-if-ready
-                if cycle % 6 == 0:
-                    added = await PokemonIVRedisBuffer.force_flush(redis)
-                    mode = "force"
+                data = await PokemonIVBuffer.flush()
+                if data:
+                    events, coords = data
+                    data_batch, used_coords, missing_coords, malformed = PokemonIVBuffer.build_batch(events, coords)
+                    if malformed:
+                        logger.warning(f"⚠️ Pokémon IV buffer: {malformed} malformed event(s) discarded")
+                    added = await PokemonSQLProcessor.bulk_insert_iv_daily_events(data_batch)
+                    duration = time.perf_counter() - start
+                    logger.success(
+                        f"👻 Pokémon IV Events flush ({mode}): +{added} rows in {duration:.2f}s ⏱️ "
+                        f"[coords: {used_coords} used, {missing_coords} missing]"
+                    )
                 else:
-                    added = await PokemonIVRedisBuffer.flush_if_ready(redis)
-                    mode = "threshold/ready"
-
-                duration = time.perf_counter() - start
-
-                if added:
-                    logger.success(f"👻 Pokémon IV Events flush ({mode}): +{added} rows in {duration:.2f}s ⏱️")
-                else:
+                    duration = time.perf_counter() - start
                     logger.debug(f"👻 No new Pokémon IV events rows to flush ({mode}). Took {duration:.2f}s ⏱️")
 
             except asyncio.CancelledError:
@@ -56,7 +53,6 @@ class PokemonIVBufferFlusher:
         if self._running:
             logger.warning("⚠️ Pokémon IV buffer flusher is already running.")
             return
-
         self._task = asyncio.create_task(self.flush_loop())
         logger.info("🚀 Started Pokémon IV buffer flusher.")
 
@@ -70,10 +66,12 @@ class PokemonIVBufferFlusher:
 
         # Final flush
         try:
-            redis = await RedisManager().check_redis_connection()
-            if redis:
-                start = time.perf_counter()
-                count = await PokemonIVRedisBuffer.force_flush(redis)
+            start = time.perf_counter()
+            data = await PokemonIVBuffer.flush()
+            if data:
+                events, coords = data
+                data_batch, _, _, _ = PokemonIVBuffer.build_batch(events, coords)
+                count = await PokemonSQLProcessor.bulk_insert_iv_daily_events(data_batch)
                 logger.success(
                     f"🔚 Final Pokémon 👻 IV flush completed (+{count} rows in {time.perf_counter()-start:.2f}s)"
                 )

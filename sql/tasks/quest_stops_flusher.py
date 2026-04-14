@@ -1,8 +1,8 @@
 import asyncio
 import time
 from utils.logger import logger
-from my_redis.connect_redis import RedisManager
-from my_redis.queries.buffer.quests_bulk_buffer import QuestsRedisBuffer
+from my_redis.queries.buffer.quests_bulk_buffer import QuestsBuffer
+from sql.tasks.quests_processor import QuestSQLProcessor
 
 
 class QuestsBufferFlusher:
@@ -19,24 +19,19 @@ class QuestsBufferFlusher:
         cycle = 0
         while self._running:
             try:
-                redis = await RedisManager().check_redis_connection()
-                if not redis:
-                    logger.warning("⚠️ Redis not ready. Skipping quests flush cycle.")
-                    await asyncio.sleep(self.flush_interval)
-                    continue
-
                 start = time.perf_counter()
-                if cycle % 6 == 0:
-                    added = await QuestsRedisBuffer.force_flush(redis)
-                    mode = "force"
-                else:
-                    added = await QuestsRedisBuffer.flush_if_ready(redis)
-                    mode = "threshold/ready"
+                mode = "force" if cycle % 6 == 0 else "threshold/ready"
 
-                dt = time.perf_counter() - start
-                if added:
+                events = await QuestsBuffer.flush()
+                if events:
+                    data_batch, malformed = QuestsBuffer.build_batch(events)
+                    if malformed:
+                        logger.warning(f"⚠️ Quests buffer: {malformed} malformed event(s) discarded")
+                    added = await QuestSQLProcessor.bulk_insert_quests_daily_events(data_batch)
+                    dt = time.perf_counter() - start
                     logger.success(f"📜 Quests flush ({mode}): +{added} rows in {dt:.2f}s ⏱️")
                 else:
+                    dt = time.perf_counter() - start
                     logger.debug(f"📜 No new quests rows to flush ({mode}). Took {dt:.2f}s ⏱️")
 
             except asyncio.CancelledError:
@@ -62,11 +57,13 @@ class QuestsBufferFlusher:
 
         self._running = False
 
+        # Final flush
         try:
-            redis = await RedisManager().check_redis_connection()
-            if redis:
-                start = time.perf_counter()
-                count = await QuestsRedisBuffer.force_flush(redis)
+            start = time.perf_counter()
+            events = await QuestsBuffer.flush()
+            if events:
+                data_batch, _ = QuestsBuffer.build_batch(events)
+                count = await QuestSQLProcessor.bulk_insert_quests_daily_events(data_batch)
                 logger.success(f"🔚 Final Quests flush (+{count} rows in {time.perf_counter()-start:.2f}s)")
         except Exception as e:
             logger.error(f"❌ Final Quests flush failed: {e}")
