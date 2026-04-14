@@ -10,8 +10,12 @@ import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 
+import config as AppConfig
 from my_redis.connect_redis import RedisManager
-from my_redis.utils.mysql_backup import MySQLBackup, MySQLCleanup
+from my_redis.utils.mysql_backup import (
+    MySQLBackup, MySQLCleanup,
+    check_backup_counts, restore_counters, restore_timeseries,
+)
 from utils.logger import logger
 
 _INITIAL_RETRY_DELAY = 5   # seconds
@@ -126,3 +130,48 @@ class RedisBackupService:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+
+class RedisRestoreService:
+    """
+    One-shot MySQL → Redis restore, called once at leader startup before services begin.
+    Only active when REDIS_MYSQL_BACKUPS = true.
+
+    Three outcomes from check_backup_counts():
+      None    → MySQL unreachable          — skip restore, warn
+      (0, 0)  → backup tables empty        — skip restore (fresh start)
+      (n, m)  → data present               — restore counters + timeseries
+    """
+
+    def __init__(self, redis_manager: RedisManager):
+        self._redis_manager = redis_manager
+
+    async def restore(self) -> None:
+        if not AppConfig.redis_mysql_backups:
+            logger.info("Redis restore: REDIS_MYSQL_BACKUPS disabled — skipping")
+            return
+
+        counts = await check_backup_counts()
+        if counts is None:
+            logger.warning("Redis restore: MySQL unreachable — skipping restore")
+            return
+
+        counter_rows, ts_rows = counts
+        if counter_rows == 0 and ts_rows == 0:
+            logger.info("Redis restore: backup tables empty — no restore needed (fresh start)")
+            return
+
+        logger.info(
+            "Redis restore: starting — {} counter rows, {} timeseries rows",
+            counter_rows, ts_rows,
+        )
+
+        client = await self._redis_manager.check_redis_connection()
+        if not client:
+            logger.error("Redis restore: Redis connection unavailable — skipping restore")
+            return
+
+        t0 = time.perf_counter()
+        await restore_counters(client)
+        await restore_timeseries(client)
+        logger.success("✅ Redis restore complete in {:.2f}s", time.perf_counter() - t0)
