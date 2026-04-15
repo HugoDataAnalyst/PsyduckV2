@@ -5,25 +5,30 @@ from my_redis.queries.updates.pokemons import (
     pokemon_timeseries,
     pokemon_counterseries,
     pokemon_hourly_counterseries,
+    pokemon_daily_counterseries,
     pokemon_tth_counterseries,
     pokemon_tth_timeseries,
     pokemon_tth_hourly_counterseries,
+    pokemon_tth_daily_counterseries,
     pokemon_weather_iv_counterseries
 )
 from my_redis.queries.updates.raids import (
     raids_timeseries,
     raids_counterseries,
-    raids_hourly_counterseries
+    raids_hourly_counterseries,
+    raids_daily_counterseries
 )
 from my_redis.queries.updates.invasions import (
     invasions_timeseries,
     invasions_counterseries,
-    invasions_hourly_counterseries
+    invasions_hourly_counterseries,
+    invasions_daily_counterseries
 )
 from my_redis.queries.updates.quests import (
     quests_timeseries,
     quests_counterseries,
-    quests_hourly_counterseries
+    quests_hourly_counterseries,
+    quests_daily_counterseries
 )
 from my_redis.connect_redis import RedisManager
 from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer, ShinyRateRedisBuffer
@@ -62,10 +67,12 @@ async def process_pokemon_data(filtered_data):
             pokemon_timeseries_update = await pokemon_timeseries.add_pokemon_timeseries_event(filtered_data, pipe)
         pokemon_counterseries_update = await pokemon_counterseries.update_total_pokemon_counter(filtered_data, pipe)
         pokemon_hourly_counterseries_update = await pokemon_hourly_counterseries.update_pokemon_hourly_counter(filtered_data, pipe)
+        pokemon_daily_counterseries_update = await pokemon_daily_counterseries.update_daily_pokemon_counter(filtered_data, pipe)
         if AppConfig.store_pokemon_tth_timeseries:
             pokemon_tth_timeseries_update = await pokemon_tth_timeseries.add_tth_timeseries_pokemon_event(filtered_data, pipe)
         pokemon_tth_counterseries_update = await pokemon_tth_counterseries.update_tth_pokemon_counter(filtered_data, pipe)
         pokemon_tth_hourly_counterseries_update = await pokemon_tth_hourly_counterseries.update_tth_pokemon_hourly_counter(filtered_data, pipe)
+        pokemon_tth_daily_counterseries_update = await pokemon_tth_daily_counterseries.update_tth_pokemon_daily_counter(filtered_data, pipe)
         pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
 
         # Execute all Redis commands in a single batch
@@ -103,9 +110,11 @@ async def process_pokemon_data(filtered_data):
         f"  - Timeseries Total: {json.dumps(pokemon_timeseries_update, indent=2)}\n"
         f"  - Counter Weekly Total: {json.dumps(pokemon_counterseries_update, indent=2)}\n"
         f"  - Counter Hourly Total: {json.dumps(pokemon_hourly_counterseries_update, indent=2)}\n"
+        f"  - Counter Daily Total: {json.dumps(pokemon_daily_counterseries_update, indent=2)}\n"
         f"  - TTH Timeseries: {json.dumps(pokemon_tth_timeseries_update, indent=2)}\n"
         f"  - TTH Weekly Counter: {json.dumps(pokemon_tth_counterseries_update, indent=2)}\n"
         f"  - TTH Hourly Counter: {json.dumps(pokemon_tth_hourly_counterseries_update, indent=2)}\n"
+        f"  - TTH Daily Counter: {json.dumps(pokemon_tth_daily_counterseries_update, indent=2)}\n"
         f"  - Counter Weather: {json.dumps(pokemon_weather_counterseries_update, indent=2)}\n"
     )
 
@@ -137,6 +146,7 @@ async def process_raid_data(filtered_data):
                 raid_timeseries_update = await raids_timeseries.add_raid_timeseries_event(filtered_data, pipe)
             raid_counterseries_update = await raids_counterseries.update_raid_counter(filtered_data, pipe)
             raid_hourly_counterseries_update = await raids_hourly_counterseries.update_raid_hourly_counter(filtered_data, pipe)
+            raid_daily_counterseries_update = await raids_daily_counterseries.update_raid_daily_counter(filtered_data, pipe)
 
             # Execute all Redis commands in a single batch wrapped in retry function for startup exception connection handling
             await retry(pipe.execute, max_attempts=5, delay=2)
@@ -159,6 +169,7 @@ async def process_raid_data(filtered_data):
             f"  - Raid Timeseries Total: {json.dumps(raid_timeseries_update, indent=2)}\n"
             f"  - Raid Weekly Counter Total: {json.dumps(raid_counterseries_update, indent=2)}\n"
             f"  - Raid Hourly Counter Total: {json.dumps(raid_hourly_counterseries_update, indent=2)}\n"
+            f"  - Raid Daily Counter Total: {json.dumps(raid_daily_counterseries_update, indent=2)}\n"
         )
 
         logger.debug(f"✅ Processed Raid {filtered_data['raid_pokemon']} in area {filtered_data['area_name']} - Updates: {structured_result}")
@@ -189,6 +200,7 @@ async def process_quest_data(filtered_data):
                 quest_timeseries_update = await quests_timeseries.add_timeseries_quest_event(filtered_data, pipe)
             quest_counterseries_update = await quests_counterseries.update_quest_counter(filtered_data, pipe)
             quest_hourly_counterseries_update = await quests_hourly_counterseries.update_quest_hourly_counter(filtered_data, pipe)
+            quest_daily_counterseries_update = await quests_daily_counterseries.update_quest_daily_counter(filtered_data, pipe)
 
             # Execute all Redis commands in a single batch wrapped in retry function for startup exception connection handling
             await retry(pipe.execute, max_attempts=5, delay=2)
@@ -217,6 +229,7 @@ async def process_quest_data(filtered_data):
             f"  - Quest Timeseries Total: {json.dumps(quest_timeseries_update, indent=2)}\n"
             f"  - Quest Weekly Counter Total: {json.dumps(quest_counterseries_update, indent=2)}\n"
             f"  - Quest Hourly Counter Total: {json.dumps(quest_hourly_counterseries_update, indent=2)}\n"
+            f"  - Quest Daily Counter Total: {json.dumps(quest_daily_counterseries_update, indent=2)}\n"
         )
 
         logger.debug(f"✅ Processed Quest {mode} in area {filtered_data['area_name']} - Updates: {structured_result}")
@@ -247,6 +260,7 @@ async def process_invasion_data(filtered_data):
                 invasion_timeseries_update = await invasions_timeseries.add_timeseries_invasion_event(filtered_data, pipe)
             invasion_counterseries_update = await invasions_counterseries.update_invasion_counter(filtered_data, pipe)
             invasion_hourly_counterseries_update = await invasions_hourly_counterseries.update_invasion_hourly_counter(filtered_data, pipe)
+            invasion_daily_counterseries_update = await invasions_daily_counterseries.update_invasion_daily_counter(filtered_data, pipe)
 
             # Execute all Redis commands in a single batch wrapped in retry function for startup exception connection handling
             await retry(pipe.execute, max_attempts=5, delay=2)
@@ -269,6 +283,7 @@ async def process_invasion_data(filtered_data):
             f"  - Invasion Timeseries Total: {json.dumps(invasion_timeseries_update, indent=2)}\n"
             f"  - Invasion Weekly Counter Total: {json.dumps(invasion_counterseries_update, indent=2)}\n"
             f"  - Invasion Hourly Counter Total: {json.dumps(invasion_hourly_counterseries_update, indent=2)}\n"
+            f"  - Invasion Daily Counter Total: {json.dumps(invasion_daily_counterseries_update, indent=2)}\n"
         )
 
         logger.debug(f"✅ Processed Invasion {filtered_data['invasion_type']} in area {filtered_data['area_name']} - Updates: {structured_result}")

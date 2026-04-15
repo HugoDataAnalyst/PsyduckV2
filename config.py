@@ -119,6 +119,20 @@ raid_timeseries_retention_ms     = retention_ms(config.get("retention_hours", {}
 invasion_timeseries_retention_ms = retention_ms(config.get("retention_hours", {}).get("timeseries_invasion", 72))
 quests_timeseries_retention_ms   = retention_ms(config.get("retention_hours", {}).get("timeseries_quest", 72))
 
+# Counter hourly retention (hours; 0 = disabled — no cleanup, no backup filtering)
+counter_pokemon_hourly_retention_hours     = int(config.get("retention_hours", {}).get("counter_pokemon_hourly",     168))
+counter_tth_pokemon_hourly_retention_hours = int(config.get("retention_hours", {}).get("counter_tth_pokemon_hourly", 168))
+counter_raid_hourly_retention_hours        = int(config.get("retention_hours", {}).get("counter_raid_hourly",        168))
+counter_invasion_hourly_retention_hours    = int(config.get("retention_hours", {}).get("counter_invasion_hourly",    168))
+counter_quest_hourly_retention_hours       = int(config.get("retention_hours", {}).get("counter_quest_hourly",       168))
+
+# Counter daily retention (days; 0 = disabled — no cleanup, no backup filtering)
+counter_pokemon_daily_retention_days     = int(config.get("retention_days", {}).get("counter_pokemon_daily",     30))
+counter_tth_pokemon_daily_retention_days = int(config.get("retention_days", {}).get("counter_tth_pokemon_daily", 30))
+counter_raid_daily_retention_days        = int(config.get("retention_days", {}).get("counter_raid_daily",        30))
+counter_invasion_daily_retention_days    = int(config.get("retention_days", {}).get("counter_invasion_daily",    30))
+counter_quest_daily_retention_days       = int(config.get("retention_days", {}).get("counter_quest_daily",       30))
+
 #Store in Redis
 store_pokemon_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemon_timeseries', True)).upper() == "TRUE"
 store_pokemon_tth_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemon_tth_timeseries', True)).upper() == "TRUE"
@@ -128,6 +142,11 @@ store_quests_timeseries = str(config.get('IN-MEMORY', {}).get('store_quests_time
 
 # Cleanup Redis Timeseries
 cleanup_interval_seconds = int(config.get("CLEAN_REDIS_TS", {}).get("cleanup_interval_seconds", 1800))
+
+# Redis MySQL Backup
+redis_mysql_backups          = str(config.get("IN-MEMORY", {}).get("REDIS_MYSQL_BACKUPS", False)).upper() == "TRUE"
+redis_backup_interval        = int(config.get("IN-MEMORY", {}).get("backup_interval_seconds", 3600))
+redis_restore_timeout        = int(config.get("IN-MEMORY", {}).get("redis_restore_timeout_seconds", 600))
 
 # Golbat Pokestops
 pokestop_cache_expiry_seconds = config.get("golbat_pokestops", {}).get("pokestop_cache_expiry_seconds", 86400)

@@ -111,6 +111,41 @@ class RaidCounterRetrieval(CounterTransformer):
             final_data = filtered_data
         return {"mode": self.mode, "data": final_data}
 
+    async def raid_retrieve_totals_daily(self) -> dict:
+        """
+        Retrieve daily raid totals.
+        Key format: "counter:raid_daily:{area}:{YYYYMMDD}"
+        """
+        client = await redis_manager.check_redis_connection()
+        if not client:
+            logger.error("❌ Retrieval pool connection not available")
+            return {"mode": self.mode, "data": {}}
+
+        time_format = "%Y%m%d"
+        pattern = "counter:raid_daily:*" if self.area.lower() in ["global", "all"] \
+                  else f"counter:raid_daily:{self.area}:*"
+
+        keys = await client.keys(pattern)
+        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        if not keys:
+            return {"mode": self.mode, "data": {}}
+
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        if self.mode == "grouped" and isinstance(next(iter(raw_aggregated.values()), None), dict):
+            raw_aggregated = self._flatten_grouped(raw_aggregated)
+
+        filtered_data = self._filter_aggregated_raids(raw_aggregated)
+        if self.mode == "sum":
+            logger.debug("▶️ Transforming daily 👹 raid_totals SUM")
+            final_data = self.transform_raid_totals_sum(filtered_data)
+        elif self.mode == "grouped":
+            logger.debug("▶️ Transforming daily 👹 raid_totals GROUPED")
+            final_data = self.transform_raid_totals_grouped(filtered_data)
+        else:
+            logger.debug("❌ Else Block daily 👹 raid_totals")
+            final_data = filtered_data
+        return {"mode": self.mode, "data": final_data}
+
     async def raid_retrieve_totals_hourly(self) -> dict:
         """
         Retrieve hourly raid totals.

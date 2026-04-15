@@ -249,6 +249,57 @@ class PokemonCounterRetrieval(CounterTransformer):
         final_data = self._filter_tth_data(final_data)
         return {"mode": self.mode, "data": final_data}
 
+    async def retrieve_totals_daily(self) -> dict:
+        """
+        Retrieve daily totals for Pokémon counters.
+        Key format: "counter:pokemon_daily:{area}:{YYYYMMDD}"  (actual calendar date)
+        """
+        client = await redis_manager.check_redis_connection()
+        if not client:
+            logger.error("❌ Redis connection not available")
+            return {"mode": self.mode, "data": {}}
+
+        time_format = "%Y%m%d"
+        if self.area.lower() in ["global", "all"]:
+            pattern = "counter:pokemon_daily:*"
+        else:
+            pattern = f"counter:pokemon_daily:{self.area}:*"
+        keys = await client.keys(pattern)
+        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        if not keys:
+            return {"mode": self.mode, "data": {}}
+
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        raw_aggregated = self._filter_aggregated_data(raw_aggregated)
+        final_data = self.transform_aggregated_totals(raw_aggregated, self.mode)
+        return {"mode": self.mode, "data": final_data}
+
+    async def retrieve_tth_daily(self) -> dict:
+        """
+        Retrieve daily TTH counters.
+        Key format: "counter:tth_pokemon_daily:{area}:{YYYYMMDD}"  (actual calendar date)
+        """
+        time_format = "%Y%m%d"
+        client = await redis_manager.check_redis_connection()
+        if not client:
+            logger.error("❌ Redis connection not available")
+            return {"mode": self.mode, "data": {}}
+
+        if self.area.lower() in ["global", "all"]:
+            pattern = "counter:tth_pokemon_daily:*"
+        else:
+            pattern = f"counter:tth_pokemon_daily:{self.area}:*"
+
+        keys = await client.keys(pattern)
+        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        if not keys:
+            return {"mode": self.mode, "data": {}}
+
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        final_data = self.transform_aggregated_tth(raw_aggregated, self.mode, self.start, self.end)
+        final_data = self._filter_tth_data(final_data)
+        return {"mode": self.mode, "data": final_data}
+
     # --- Retrieval function for Weather (monthly) ---
 
     async def retrieve_weather_monthly(self) -> dict:

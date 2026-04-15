@@ -18,7 +18,10 @@
         "store_pokemon_tth_timeseries": true,
         "store_raids_timeseries": true,
         "store_invasions_timeseries": true,
-        "store_quests_timeseries": true
+        "store_quests_timeseries": true,
+        "REDIS_MYSQL_BACKUPS": false,
+        "backup_interval_seconds": 3600,
+        "redis_restore_timeout_seconds": 600
     },
     "REDIS": {
         "redis_connections": 600
@@ -48,7 +51,19 @@
         "tth_timeseries_pokemon": 72,
         "timeseries_raid": 72,
         "timeseries_invasion": 72,
-        "timeseries_quest": 72
+        "timeseries_quest": 72,
+        "counter_pokemon_hourly": 168,
+        "counter_tth_pokemon_hourly": 168,
+        "counter_raid_hourly": 168,
+        "counter_invasion_hourly": 168,
+        "counter_quest_hourly": 168
+    },
+    "retention_days": {
+        "counter_pokemon_daily": 30,
+        "counter_tth_pokemon_daily": 30,
+        "counter_raid_daily": 30,
+        "counter_invasion_daily": 30,
+        "counter_quest_daily": 30
     },
     "CLEAN_REDIS_TS": {
         "cleanup_interval_seconds": 1800

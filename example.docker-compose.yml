@@ -98,6 +98,27 @@ services:
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
       #REDIS_ARGS: "--requirepass ${REDIS_PASSWORD} --appendonly yes --save 60 1"
       #REDISTIMESERIES_ARGS: "RETENTION_POLICY=315360000000"  # Keep data for 10 years
+    # ── Redis persistence mode ─────────────────────────────────────────────────
+    # DEFAULT (persistence enabled, REDIS_MYSQL_BACKUPS = false):
+    #   AOF + RDB keep data on disk across restarts. Use the command block below.
+    #
+    # IN-MEMORY MODE (REDIS_MYSQL_BACKUPS = true in config.json):
+    #   The app disables persistence at runtime via CONFIG SET on every startup.
+    #   Docker ignores CONFIG REWRITE because config lives in command flags, so
+    #   to make no-persistence permanent across container restarts replace the
+    #   command block below with:
+    #
+    #   command: >
+    #     redis-server
+    #     --requirepass ${REDIS_PASSWORD}
+    #     --appendonly no
+    #     --save ""
+    #     --tcp-backlog 65536
+    #     --tcp-keepalive 0
+    #
+    #   Note: CONFIG SET still disables persistence for the running session even
+    #   without changing these flags, so data won't hit disk after app startup.
+    # ──────────────────────────────────────────────────────────────────────────
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD}
