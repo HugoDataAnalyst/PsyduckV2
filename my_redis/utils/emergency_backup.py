@@ -69,7 +69,7 @@ def _run_backup() -> None:
 
 
 async def _do_backup() -> None:
-    from my_redis.utils.mysql_backup import backup_all
+    from my_redis.utils.mysql_backup import MySQLBackup
     from sql.connect_db import init_db, close_db
 
     try:
@@ -77,7 +77,8 @@ async def _do_backup() -> None:
         await init_db()
         client = await _redis_manager.check_redis_connection()
         if client:
-            await backup_all(client)
+            await MySQLBackup.counters(client)
+            await MySQLBackup.timeseries(client)
         else:
             logger.error("Emergency backup: could not obtain Redis connection")
     finally:

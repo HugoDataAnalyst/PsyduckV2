@@ -83,9 +83,9 @@ class RaidSQLProcessor:
                         INSERT IGNORE INTO gyms (gym, gym_name, latitude, longitude)
                         SELECT
                           t.gym,
-                          ANY_VALUE(t.gym_name),
-                          ANY_VALUE(t.latitude),
-                          ANY_VALUE(t.longitude)
+                          t.gym_name,
+                          t.latitude,
+                          t.longitude
                         FROM tmp_rde t
                         GROUP BY t.gym
                     """)
@@ -96,9 +96,9 @@ class RaidSQLProcessor:
                         JOIN (
                           SELECT
                             t.gym,
-                            ANY_VALUE(t.gym_name) AS gym_name,
-                            ANY_VALUE(t.latitude)  AS latitude,
-                            ANY_VALUE(t.longitude) AS longitude
+                            t.gym_name AS gym_name,
+                            t.latitude  AS latitude,
+                            t.longitude AS longitude
                           FROM tmp_rde t
                           GROUP BY t.gym
                         ) x ON x.gym = g.gym

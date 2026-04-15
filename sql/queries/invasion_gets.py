@@ -53,8 +53,8 @@ async def fetch_invasions_day(
           p.pokestop_name,
           i.display_type,
           i.`character`,
-          ANY_VALUE(p.latitude)  AS latitude,
-          ANY_VALUE(p.longitude) AS longitude,
+          p.latitude  AS latitude,
+          p.longitude AS longitude,
           COUNT(*) AS cnt
         FROM invasions_daily_events AS i
         JOIN pokestops AS p

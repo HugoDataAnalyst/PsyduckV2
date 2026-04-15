@@ -28,7 +28,7 @@ def upgrade():
         sa.UniqueConstraint("name", name="uq_area_names_name"),
         mysql_engine="InnoDB",
         mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_0900_ai_ci",
+        mysql_collate="utf8mb4_general_ci",
     )
 
     # spawnpoints: natural PK on spawnpoint (BIGINT) - store lat/lon as DOUBLE
@@ -39,7 +39,7 @@ def upgrade():
         sa.Column("longitude", mysql.DOUBLE(asdecimal=False), nullable=False),
         mysql_engine="InnoDB",
         mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_0900_ai_ci",
+        mysql_collate="utf8mb4_general_ci",
     )
     op.create_index("idx_spawnpoints_latlon", "spawnpoints", ["latitude", "longitude"])
 
@@ -52,7 +52,7 @@ def upgrade():
         sa.Column("longitude", mysql.DOUBLE(asdecimal=False), nullable=False),
         mysql_engine="InnoDB",
         mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_0900_ai_ci",
+        mysql_collate="utf8mb4_general_ci",
     )
 
     # gyms: natural PK on gym (string id)
@@ -64,7 +64,7 @@ def upgrade():
         sa.Column("longitude", mysql.DOUBLE(asdecimal=False), nullable=False),
         mysql_engine="InnoDB",
         mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_0900_ai_ci",
+        mysql_collate="utf8mb4_general_ci",
     )
 
 

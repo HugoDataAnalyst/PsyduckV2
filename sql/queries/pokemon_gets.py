@@ -69,8 +69,8 @@ async def fetch_pokemon_heatmap_day(
           e.spawnpoint,
           e.pokemon_id,
           e.form,
-          ANY_VALUE(s.latitude)  AS latitude,
-          ANY_VALUE(s.longitude) AS longitude,
+          s.latitude  AS latitude,
+          s.longitude AS longitude,
           COUNT(*) AS cnt
         FROM pokemon_iv_daily_events AS e
         JOIN spawnpoints AS s
