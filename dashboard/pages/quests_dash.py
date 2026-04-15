@@ -580,11 +580,12 @@ def toggle_source(source):
 
 @callback(
     [Output("quests-mode-selector", "options"), Output("quests-mode-selector", "value"),
-     Output("quests-data-source-selector", "options"), Output("quests-interval-selector", "options")],
-    [Input("quests-data-source-selector", "value"), Input("language-store", "data")],
+     Output("quests-data-source-selector", "options")],
+    [Input("quests-data-source-selector", "value"), Input("language-store", "data"),
+     Input("quests-interval-selector", "value")],
     [State("quests-mode-persistence-store", "data"), State("quests-mode-selector", "value")]
 )
-def restrict_modes(source, lang, stored_mode, current_ui_mode):
+def restrict_modes(source, lang, interval, stored_mode, current_ui_mode):
     lang = lang or "en"
     # Define View Mode Options (Translated)
     full_mode_opts = [
@@ -615,12 +616,15 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("TimeSeries", lang), "value": "timeseries"}
     ]
 
-    # Interval Options
-    interval_opts = [
-        {"label": translate("Hourly", lang), "value": "hourly"}
-    ]
+    return mode_opts, final_mode, source_opts
 
-    return mode_opts, final_mode, source_opts, interval_opts
+@callback(Output("quests-interval-selector", "options"), Input("language-store", "data"))
+def update_interval_options(lang):
+    lang = lang or "en"
+    return [
+        {"label": translate("Hourly", lang), "value": "hourly"},
+        {"label": translate("Daily", lang),  "value": "daily"},
+    ]
 
 @callback(Output("quests-mode-persistence-store", "data"), Input("quests-mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val

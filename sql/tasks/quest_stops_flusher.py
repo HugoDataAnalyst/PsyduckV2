@@ -37,7 +37,7 @@ class QuestsBufferFlusher:
                 if added:
                     logger.success(f"📜 Quests flush ({mode}): +{added} rows in {dt:.2f}s ⏱️")
                 else:
-                    logger.info(f"📜 No new quests rows to flush ({mode}). Took {dt:.2f}s ⏱️")
+                    logger.debug(f"📜 No new quests rows to flush ({mode}). Took {dt:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Quests buffer flusher loop was cancelled.")

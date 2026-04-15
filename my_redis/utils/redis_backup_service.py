@@ -13,6 +13,10 @@ from my_redis.connect_redis import RedisManager
 from my_redis.utils.mysql_backup import backup_all, cleanup_mysql_backup
 from utils.logger import logger
 
+_INITIAL_RETRY_DELAY = 5   # seconds
+_MAX_RETRY_DELAY     = 60  # seconds (exponential cap)
+_MAX_ATTEMPTS        = 5
+
 
 class RedisBackupService:
     def __init__(self, redis_manager: RedisManager, interval: int = 3600):
@@ -37,11 +41,28 @@ class RedisBackupService:
                     continue
 
                 t0 = time.perf_counter()
-                await cleanup_mysql_backup(self._interval)
-                await backup_all(client)
-                logger.success(
-                    "✅ Redis backup cycle complete in {:.2f}s", time.perf_counter() - t0
-                )
+                delay = _INITIAL_RETRY_DELAY
+                for attempt in range(1, _MAX_ATTEMPTS + 1):
+                    try:
+                        await cleanup_mysql_backup(self._interval)
+                        await backup_all(client)
+                        logger.success(
+                            "✅ Redis backup cycle complete in {:.2f}s", time.perf_counter() - t0
+                        )
+                        break
+                    except Exception as e:
+                        if attempt < _MAX_ATTEMPTS:
+                            logger.warning(
+                                "⚠️ Backup cycle failed (attempt {}/{}): {} — retrying in {}s",
+                                attempt, _MAX_ATTEMPTS, e, delay,
+                            )
+                            await asyncio.sleep(delay)
+                            delay = min(delay * 2, _MAX_RETRY_DELAY)
+                        else:
+                            logger.error(
+                                "❌ Backup cycle failed after {} attempts: {} — will retry at next scheduled interval",
+                                _MAX_ATTEMPTS, e,
+                            )
 
             except asyncio.CancelledError:
                 logger.info("🛑 Redis backup loop cancelled")

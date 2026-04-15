@@ -37,7 +37,7 @@ class InvasionsBufferFlusher:
                 if added:
                     logger.success(f"🛰️ Invasions flush ({mode}): +{added} rows in {dt:.2f}s ⏱️")
                 else:
-                    logger.info(f"🛰️ No new invasions rows to flush ({mode}). Took {dt:.2f}s ⏱️")
+                    logger.debug(f"🛰️ No new invasions rows to flush ({mode}). Took {dt:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Invasions buffer flusher loop was cancelled.")

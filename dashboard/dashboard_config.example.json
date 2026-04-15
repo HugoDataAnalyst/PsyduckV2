@@ -1,6 +1,7 @@
 {
   "map_name": "YourMapName",
   "icon_url": "",
+  "alltime_start_date": "2025-01-01",
   "custom_navbar_links": [
     {
       "name": "API Docs",

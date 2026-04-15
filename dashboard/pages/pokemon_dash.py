@@ -803,11 +803,12 @@ def toggle_source_controls(source):
 @callback(
     [Output("mode-selector", "options"), Output("mode-selector", "value"),
      Output("data-source-selector", "options"), Output("data-source-tth-selector", "options"), Output("data-source-sql-selector", "options"),
-     Output("heatmap-display-mode", "options"), Output("interval-selector", "options")],
-    [Input("combined-source-store", "data"), Input("language-store", "data")],
+     Output("heatmap-display-mode", "options")],
+    [Input("combined-source-store", "data"), Input("language-store", "data"),
+     Input("interval-selector", "value")],
     [State("mode-persistence-store", "data"), State("mode-selector", "value")]
 )
-def restrict_modes(source, lang, stored_mode, current_ui_mode):
+def restrict_modes(source, lang, interval, stored_mode, current_ui_mode):
     lang = lang or "en"
 
     # Translate Radio Options
@@ -830,6 +831,11 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
     elif source == "sql_heatmap": allowed = heatmap_options
     elif source == "sql_shiny": allowed = shiny_options
     else: allowed = full_options
+
+    # Surged requires hourly keys — suppress when daily is selected
+    if interval == "daily":
+        allowed = [o for o in allowed if o["value"] != "surged"]
+
     allowed_vals = [o['value'] for o in allowed]
     final_val = current_ui_mode if current_ui_mode in allowed_vals else (stored_mode if stored_mode in allowed_vals else allowed_vals[0])
 
@@ -852,12 +858,15 @@ def restrict_modes(source, lang, stored_mode, current_ui_mode):
         {"label": translate("Grid Overlay", lang), "value": "grid"}
     ]
 
-    # Interval Options
-    interval_opts = [
-        {"label": translate("Hourly", lang), "value": "hourly"}
-    ]
+    return allowed, final_val, source_opts, tth_opts, sql_opts, heatmap_mode_opts
 
-    return allowed, final_val, source_opts, tth_opts, sql_opts, heatmap_mode_opts, interval_opts
+@callback(Output("interval-selector", "options"), Input("language-store", "data"))
+def update_interval_options(lang):
+    lang = lang or "en"
+    return [
+        {"label": translate("Hourly", lang), "value": "hourly"},
+        {"label": translate("Daily", lang),  "value": "daily"},
+    ]
 
 @callback(Output("mode-persistence-store", "data"), Input("mode-selector", "value"), prevent_initial_call=True)
 def save_mode(val): return val
