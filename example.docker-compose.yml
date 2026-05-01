@@ -40,24 +40,25 @@ services:
 
   psyduckv2_db:
     container_name: psyduckv2_db
-    image: mysql:8.0.35
+    image: mariadb:10.11
     restart: always
     env_file:
       - .env
     environment:
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_CHARSET: utf8mb4
-      MYSQL_COLLATION: utf8mb4_general_ci
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DB_PASSWORD}
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
     # Ports should be commented out in production.
     ports:
       - "3307:3306"
     volumes:
       - ./database:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "-h", "127.0.0.1", "-u", "${DB_USER}", "-p${DB_PASSWORD}", "ping"]
+      test: ["CMD", "mariadb-admin", "-h", "127.0.0.1", "-u", "${DB_USER}", "-p${DB_PASSWORD}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
