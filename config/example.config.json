@@ -19,6 +19,7 @@
         "store_raids_timeseries": true,
         "store_invasions_timeseries": true,
         "store_quests_timeseries": true,
+        "store_active_pokemon": true,
         "REDIS_MYSQL_BACKUPS": false,
         "backup_interval_seconds": 3600,
         "redis_restore_timeout_seconds": 600
@@ -66,6 +67,7 @@
         "counter_quest_daily": 30
     },
     "CLEAN_REDIS_TS": {
-        "cleanup_interval_seconds": 1800
+        "cleanup_interval_seconds": 1800,
+        "active_pokemon_grace_seconds": 300
     }
 }
