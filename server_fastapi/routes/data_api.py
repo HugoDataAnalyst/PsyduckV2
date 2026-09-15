@@ -14,6 +14,7 @@ from my_redis.queries.gets.pokemons.pokemon_counter_retrieval import PokemonCoun
 from my_redis.queries.gets.raids.raid_counter_retrieval import RaidCounterRetrieval
 from my_redis.queries.gets.invasions.invasion_counter_retrieval import InvasionCounterRetrieval
 from my_redis.queries.gets.quests.quest_counter_retrieval import QuestCounterRetrieval
+from my_redis.queries.gets.pokemons.pokemon_active_retrieval import PokemonActiveRetrieval
 from my_redis.queries.gets.pokemons.pokemon_timeseries_retrieval import PokemonTimeSeries
 from my_redis.queries.gets.pokemons.pokemon_tth_timeseries_retrieval import PokemonTTHTimeSeries
 from my_redis.queries.gets.invasions.invasion_timeseries_retrieval import InvasionTimeSeries
@@ -920,6 +921,72 @@ async def get_quest_timeseries(
         return results if len(results) != 1 else next(iter(results.values()))
     else:
         return "\n".join(f"{k}: {v}" for k, v in results.items())
+
+@router.get(
+    "/api/redis/get_pokemon_active",
+    tags=["Pokémon Active"],
+    dependencies=dependencies_list
+)
+@time_execution(label="POKEMON_GET_ACTIVE")
+async def get_pokemon_active(
+    area: str = Query("global", description="Area to filter: a single name, a CSV list, or 'global'/'all'"),
+    min_seconds_left: int = Query(0, description="Only count Pokémon with strictly more than this many seconds before despawning"),
+    response_format: str = Query("json", description="Response format: json or text"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+):
+    """
+    Retrieve live (not yet despawned) Pokémon counts per area.
+
+    A Pokémon is counted while now < disappear_time. Counts are read with
+    ZCOUNT over the despawn epoch, so they are exact at request time and do
+    not depend on any background job having run.
+
+    Note: the live sets are rebuilt purely from the incoming webhook feed, so
+    after a Redis restart the counts ramp back up over one despawn cycle
+    (up to 60 minutes).
+    """
+    # Validate secret parameters
+    await secure_api.check_secret_header_value(api_secret_header)
+
+    resp_fmt = response_format.lower()
+    if resp_fmt not in ["json", "text"]:
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+    if min_seconds_left < 0:
+        raise HTTPException(status_code=400, detail="❌ min_seconds_left must be 0 or greater.")
+
+    # Area handling (case-insensitive; returns canonical names).
+    # Offsets are unused here: scores are true UTC, so "live" is offset free.
+    area_is_global = area.strip().lower() in ["global", "all"]
+    area_list = None if area_is_global else _parse_csv_param(area)
+
+    if area_is_global:
+        area_offsets = filtering_keys.get_area_offset("global", global_state.geofences)
+    elif area_list:
+        area_offsets = filtering_keys.get_area_offsets_for_list(list(area_list), global_state.geofences)
+        if not area_offsets:
+            raise HTTPException(400, "❌ None of the requested areas were found.")
+    else:
+        # single area -> resolve via list helper to get canonical name
+        resolved = filtering_keys.get_area_offsets_for_list([area], global_state.geofences)
+        if not resolved:
+            raise HTTPException(400, f"❌ Area not found: {area}")
+        area_offsets = resolved
+
+    # Run per-area
+    results = {}
+    for area_name in area_offsets.keys():
+        try:
+            retr = PokemonActiveRetrieval(area=area_name, min_seconds_left=min_seconds_left)
+            results[area_name] = await retr.retrieve_active_counts()
+        except Exception as e:
+            results[area_name] = {"mode": "live", "error": str(e)}
+
+    if resp_fmt == "json":
+        return results if len(results) != 1 else next(iter(results.values()))
+    else:
+        text_output = "\n".join(f"{k}: {v}" for k, v in results.items())
+        return text_output
+
 
 # SQL section
 @router.get(

@@ -72,6 +72,11 @@ TAGS_METADATA = [
         "summary": "Get Quest timeseries data.",
     },
     {
+        "name": "Pokémon Active",
+        "description": "Obtain live (not yet despawned) Pokémon counts from Redis.",
+        "summary": "Get active Pokémon counts per area.",
+    },
+    {
         "name": "Pokémon HeatMap Data",
         "description": "Obtain Pokémon HeatMap Data from SQL.",
         "summary": "Get Pokémon HeatMap data.",
