@@ -7,6 +7,12 @@ persistence disabled (REDIS_MYSQL_BACKUPS = true in config.json).
 Buffer keys (buffer:*) are intentionally excluded — they are transient
 staging data that is always flushed to MySQL before being discarded.
 
+Live keys (active:*) are intentionally excluded too. They are sorted sets,
+not hashes, so they cannot flow through the HGETALL/HSET paths here; every
+member despawns within 60 minutes, so a restore would be stale by definition;
+and the sets rebuild themselves from the webhook feed within one despawn
+cycle, unlike the counter/timeseries families where a lost hour is lost.
+
 Performance:
     HGETALL calls are pipelined in chunks of _CHUNK_SIZE, so we send
     one round trip per chunk instead of one per key.  HSET restores are
