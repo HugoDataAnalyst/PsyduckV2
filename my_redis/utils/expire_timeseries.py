@@ -18,6 +18,9 @@ CHUNK_SLEEP_DEFAULT      = 0.15       # sleep between chunks (seconds)
 LOCK_KEY                 = "ts:cleanup:lock"
 LOCK_TTL_SEC             = 300        # prevents overlapping runs (5 minutes)
 
+# Live Pokémon sorted sets (score = disappear_time epoch)
+ACTIVE_PATTERNS: list[str] = ["active:pokemon:*"]
+
 # Chunked cleanup script - processes multiple keys per call
 _CLEANUP_CHUNK_SHA: Optional[str] = None
 
@@ -305,6 +308,39 @@ async def cleanup_all_counter_daily(client) -> int:
     return total
 
 
+async def cleanup_active_pokemon(client) -> int:
+    """
+    Drop despawned members from the live Pokémon sorted sets (active:pokemon:*).
+
+    This is memory reclamation only: reads use ZCOUNT from "now", so a despawned
+    member is never counted whether or not this has run. Redis deletes a sorted
+    set once its last member is removed, so areas that stop receiving spawns
+    disappear without an explicit DEL pass.
+
+    Returns the number of members removed.
+    """
+    if not AppConfig.store_active_pokemon:
+        logger.debug("♻️ Active Pokémon cleanup disabled (store_active_pokemon=false)")
+        return 0
+
+    cutoff  = int(time.time()) - AppConfig.active_pokemon_grace_seconds
+    removed = 0
+
+    for pattern in ACTIVE_PATTERNS:
+        keys = await _scan_keys_by_pattern(client, pattern)
+        for i in range(0, len(keys), CHUNK_SIZE_DEFAULT):
+            chunk = keys[i:i + CHUNK_SIZE_DEFAULT]
+            async with client.pipeline(transaction=False) as pipe:
+                for key in chunk:
+                    pipe.zremrangebyscore(key, "-inf", cutoff)
+                results = await pipe.execute()
+            removed += sum(int(res or 0) for res in results)
+            await asyncio.sleep(CHUNK_SLEEP_DEFAULT)
+
+    logger.info(f"♻️ Active Pokémon cleanup: {removed} despawned members removed")
+    return removed
+
+
 async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> None:
     """Cleanup timeseries for a pattern using chunked Lua approach (non-blocking)"""
     client = await _client()
@@ -390,6 +426,10 @@ async def cleanup_timeseries() -> None:
         # ── Counter daily cleanup (whole-key DEL by key-name date suffix) ────
         total_daily_deleted = await cleanup_all_counter_daily(client)
         logger.info(f"♻️ Counter daily cleanup total: {total_daily_deleted} keys deleted")
+
+        # ── Active Pokémon cleanup (score-range trim of despawned members) ───
+        total_active_removed = await cleanup_active_pokemon(client)
+        logger.info(f"♻️ Active Pokémon cleanup total: {total_active_removed} members removed")
 
         total_duration = time.time() - total_start
         logger.success(f"✅ Cleanup pass finished in ⏱️ {total_duration:.2f}s")
