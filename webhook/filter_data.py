@@ -1,5 +1,6 @@
 from server_fastapi import global_state
 from utils.logger import logger
+from utils.safe_values import normalize_encounter_id
 from shapely.geometry import Point, Polygon
 from zoneinfo import ZoneInfo
 from datetime import datetime
@@ -362,6 +363,14 @@ class WebhookFilter:
             "area_id": geofence_id,
             "area_name": geofence_name,
             "disappear_time_verified": message["disappear_time_verified"],
+            # ✅ Raw Golbat epoch - NOT shifted into local_area_utc like "first_seen",
+            # so it can be compared directly against time.time() for live tracking.
+            "disappear_time": int(message["disappear_time"]),
+            # ✅ Unique per encounter, used to de-duplicate re-sent webhooks.
+            # Canonical unsigned int64 string (None when absent/unusable):
+            # ~half of all encounter_ids sit above 2^63, so a signed
+            # interpretation anywhere upstream would flip them negative.
+            "encounter_id": normalize_encounter_id(message.get("encounter_id")),
         }
 
         logger.debug(f"✅ Pokémon {pokemon_data['pokemon_id']} (Form {pokemon_data['form']}) in {geofence_id} - IV: {pokemon_data['iv']}% - Despawns in {despawn_timer} sec with True UTC: {true_utc} and local time: {local_area_utc}")
