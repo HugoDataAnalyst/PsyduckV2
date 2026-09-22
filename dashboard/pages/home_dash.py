@@ -175,6 +175,10 @@ def wrap_anim(content):
 def layout():
     return dbc.Container([
         dcc.Interval(id="home-interval", interval=60*1000, n_intervals=0),
+        # Faster tick for the live Pokémon card. Deliberately NOT a multiple of
+        # the 60s background fetch: at equal periods the age badge renders at a
+        # fixed phase offset and looks frozen even though it is refreshing.
+        dcc.Interval(id="home-live-interval", interval=15*1000, n_intervals=0),
 
         # Header
         dbc.Row([
@@ -297,9 +301,10 @@ def update_static_translations(lang):
 # 1. Pokemon Callback
 @callback(
     [Output("global-pokemon-stats-container", "children"), Output("poke-desc", "children")],
-    [Input("home-interval", "n_intervals"), Input("poke-time-toggle", "value"), Input("language-store", "data")]
+    [Input("home-interval", "n_intervals"), Input("home-live-interval", "n_intervals"),
+     Input("poke-time-toggle", "value"), Input("language-store", "data")]
 )
-def update_pokemon(n, toggle_val, lang):
+def update_pokemon(n, n_live, toggle_val, lang):
     lang = lang or "en"
 
     if toggle_val == "live":

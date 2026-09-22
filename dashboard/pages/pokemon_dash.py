@@ -244,7 +244,7 @@ def layout(area=None, **kwargs):
                         # Live counts for the selected area - deliberately outside the
                         # Data Source controls, since "on the map right now" has no
                         # time range and must not be read as another query option.
-                        dcc.Interval(id="pokemon-live-interval", interval=60*1000, n_intervals=0),
+                        dcc.Interval(id="pokemon-live-interval", interval=15*1000, n_intervals=0),
                         html.Div(id="pokemon-live-strip", className="mb-3")
                     ], width=12, md=6),
                     dbc.Col([
@@ -727,12 +727,14 @@ def update_static_translations(lang, current_area):
     )
 
 # 0b. Live counts for the selected area
+# Same icons the Total Counts card uses for these metrics.
+LIVE_ICON_BASE = "https://raw.githubusercontent.com/WatWowMap/wwm-uicons-webp/main"
 LIVE_STRIP_METRICS = [
-    ("iv100", "100 IV", "#dc3545"),
-    ("iv0", "0 IV", "#28a745"),
-    ("pvp_little", "PvP Lit", "#e0e0e0"),
-    ("pvp_great", "PvP Grt", "#007bff"),
-    ("pvp_ultra", "PvP Ult", "#FFD700"),
+    ("iv100", "100 IV", "#dc3545", "/assets/images/100iv.png"),
+    ("iv0", "0 IV", "#28a745", "/assets/images/0iv.png"),
+    ("pvp_little", "PvP Lit", "#e0e0e0", f"{LIVE_ICON_BASE}/misc/500.webp"),
+    ("pvp_great", "PvP Grt", "#007bff", f"{LIVE_ICON_BASE}/misc/1500.webp"),
+    ("pvp_ultra", "PvP Ult", "#FFD700", f"{LIVE_ICON_BASE}/misc/2500.webp"),
 ]
 
 
@@ -761,12 +763,13 @@ def update_live_strip(n, area, lang):
 
     chips = [
         dbc.Badge(
-            [html.Span(translate(label, lang), className="me-1"),
-             html.Span(f"{counts.get(key, 0):,}", className="fw-bold")],
-            color=None, className="me-1 mb-1",
+            [html.Img(src=icon, style={"width": "20px", "height": "20px", "marginRight": "6px",
+                                       "verticalAlign": "middle"}),
+             html.Span(f"{counts.get(key, 0):,}", className="fw-bold align-middle")],
+            color=None, className="me-1 mb-1", title=translate(label, lang),
             style={"backgroundColor": "#2b2b2b", "color": color, "border": "1px solid #444"}
         )
-        for key, label, color in LIVE_STRIP_METRICS
+        for key, label, color, icon in LIVE_STRIP_METRICS
     ]
 
     return html.Div([
