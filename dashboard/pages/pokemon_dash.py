@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, date
-from dashboard.utils import get_cached_geofences, get_pokemon_stats, get_pokemon_icon_url, get_pokemon_daily_timeseries
+from dashboard.utils import get_cached_geofences, get_pokemon_stats, get_pokemon_icon_url, get_pokemon_daily_timeseries, load_active_pokemon, freshness_badge
 from utils.logger import logger
 import config as AppConfig
 import json
@@ -240,7 +240,12 @@ def layout(area=None, **kwargs):
                             dbc.InputGroupText("🗺️"),
                             dbc.Input(id="pokemons-selected-area-display", value=area_label, disabled=True, style={"backgroundColor": "#fff", "color": "#333", "fontWeight": "bold"}),
                             dbc.Button("Change", id="open-area-modal", color="primary")
-                        ], className="mb-3")
+                        ], className="mb-3"),
+                        # Live counts for the selected area - deliberately outside the
+                        # Data Source controls, since "on the map right now" has no
+                        # time range and must not be read as another query option.
+                        dcc.Interval(id="pokemon-live-interval", interval=60*1000, n_intervals=0),
+                        html.Div(id="pokemon-live-strip", className="mb-3")
                     ], width=12, md=6),
                     dbc.Col([
                         dbc.Label("Data Source", id="label-data-source", className="fw-bold"),
@@ -720,6 +725,59 @@ def update_static_translations(lang, current_area):
         translate("Prev", lang),
         translate("Next", lang)
     )
+
+# 0b. Live counts for the selected area
+LIVE_STRIP_METRICS = [
+    ("iv100", "100 IV", "#dc3545"),
+    ("iv0", "0 IV", "#28a745"),
+    ("pvp_little", "PvP Lit", "#e0e0e0"),
+    ("pvp_great", "PvP Grt", "#007bff"),
+    ("pvp_ultra", "PvP Ult", "#FFD700"),
+]
+
+
+@callback(
+    Output("pokemon-live-strip", "children"),
+    [Input("pokemon-live-interval", "n_intervals"),
+     Input("area-selector", "value"),
+     Input("language-store", "data")]
+)
+def update_live_strip(n, area, lang):
+    """
+    How many Pokémon are on the map in the selected area right now.
+
+    Reads the same file the home page uses (written by the "pokemons_live"
+    background task), picking out this area - so switching areas or opening
+    the page costs no extra API call. Hidden entirely until an area is
+    chosen, so the numbers always have an unambiguous subject.
+    """
+    lang = lang or "en"
+    if not area:
+        return None
+
+    counts = load_active_pokemon(area)
+    if not counts:
+        return None
+
+    chips = [
+        dbc.Badge(
+            [html.Span(translate(label, lang), className="me-1"),
+             html.Span(f"{counts.get(key, 0):,}", className="fw-bold")],
+            color=None, className="me-1 mb-1",
+            style={"backgroundColor": "#2b2b2b", "color": color, "border": "1px solid #444"}
+        )
+        for key, label, color in LIVE_STRIP_METRICS
+    ]
+
+    return html.Div([
+        html.Div([
+            html.I(className="bi bi-broadcast me-2", style={"color": "#28a745"}),
+            html.Span(translate("On map now", lang), className="text-muted small text-uppercase me-2"),
+            html.Span(f"{counts.get('total', 0):,}", className="fw-bold text-white fs-5"),
+            freshness_badge(counts.get("last_updated")),
+        ], className="d-flex align-items-center flex-wrap mb-1"),
+        html.Div(chips, className="d-flex flex-wrap"),
+    ], className="p-2 rounded", style={"backgroundColor": "#1b1b1b", "border": "1px solid #333"})
 
 # Callback to combine all three data source selectors into one value
 @callback(

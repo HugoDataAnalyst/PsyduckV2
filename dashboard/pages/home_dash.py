@@ -11,6 +11,8 @@ try:
 except ImportError:
     from translations.manager import translate
 
+from dashboard.utils import load_active_pokemon, freshness_badge
+
 def load_dashboard_config():
     """Load dashboard configuration from dashboard_config.json"""
     config_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard_config.json')
@@ -51,8 +53,6 @@ POKE_FILE = os.path.join(DATA_DIR, 'global_pokes.json')
 RAID_FILE = os.path.join(DATA_DIR, 'global_raids.json')
 INVASION_FILE = os.path.join(DATA_DIR, 'global_invasions.json')
 QUEST_FILE = os.path.join(DATA_DIR, 'global_quests.json')
-
-POKE_FILE_LIVE = os.path.join(DATA_DIR, 'global_pokes_live.json')
 
 POKE_FILE_ALL = os.path.join(DATA_DIR, 'global_pokes_alltime.json')
 RAID_FILE_ALL = os.path.join(DATA_DIR, 'global_raids_alltime.json')
@@ -164,34 +164,6 @@ def get_total_header(count, title):
         html.H3(f"{count:,}", className="text-white fw-bold mb-0"),
         html.Small(title, className="text-muted text-uppercase")
     ], className="w-100 text-center mb-3 pb-3 border-bottom border-secondary")
-
-def format_age(seconds):
-    """Compact, language neutral 'how old is this number' string."""
-    seconds = max(0, int(seconds))
-    if seconds < 60:
-        return f"{seconds}s"
-    if seconds < 3600:
-        return f"{seconds // 60}m"
-    return f"{seconds // 3600}h"
-
-
-def freshness_badge(last_updated, stale_after=180):
-    """
-    Small age indicator for live data.
-
-    Live counts come from a background fetch, so the page must say how old the
-    number is instead of implying it is instantaneous. Turns amber once the
-    fetcher has missed enough cycles to matter.
-    """
-    if not last_updated:
-        return None
-    age = time.time() - last_updated
-    color = "#ffc107" if age > stale_after else "#6c757d"
-    return html.Span([
-        html.I(className="bi bi-clock me-1"),
-        format_age(age)
-    ], className="ms-2 small", style={"color": color})
-
 
 def wrap_anim(content):
     """Wraps content in a div with the animate-flip class.
@@ -372,14 +344,8 @@ def update_pokemon_live(lang):
     """
     label = translate("Currently active Pokémon across all areas.", lang)
 
-    if not os.path.exists(POKE_FILE_LIVE):
-        return wrap_anim([html.Div("Loading...", className="text-muted small")]), label
-
-    try:
-        with open(POKE_FILE_LIVE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"Error pokemon live: {e}")
+    data = load_active_pokemon()
+    if not data:
         return wrap_anim([html.Div("Loading...", className="text-muted small")]), label
 
     content = [

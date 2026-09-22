@@ -177,5 +177,6 @@
     "{val} Pokémon selected": "{val} Pokémon sélectionnés",
     "Page {current} / {total} ({count} total)": "Page {current} / {total} ({count} total)",
     "Currently active Pokémon across all areas.": "Pokémon actuellement actifs dans toutes les zones.",
-    "Active Now": "Actifs Maintenant"
+    "Active Now": "Actifs Maintenant",
+    "On map now": "Sur la carte"
 }
