@@ -1324,6 +1324,85 @@ def get_global_pokemon_task(endpoint_type="counter", params=None):
         return None
 
 
+# Live (not yet despawned) Pokémon - metrics exposed by /api/redis/get_pokemon_active
+ACTIVE_METRICS = ("total", "iv100", "iv0", "pvp_little", "pvp_great", "pvp_ultra")
+
+
+def _iter_active_entries(raw):
+    """
+    Yield (area_name, counts) from a get_pokemon_active response.
+
+    The endpoint unwraps the envelope when exactly one area resolves, so the
+    payload is either {"mode":..., "data":{...}} or {area: {"mode":..., "data":{...}}}.
+    Areas that returned an error are skipped rather than counted as zero.
+    """
+    if not isinstance(raw, dict):
+        return
+
+    if isinstance(raw.get("data"), dict) and "counts" in raw["data"]:
+        entries = {raw["data"].get("area", "unknown"): raw}
+    else:
+        entries = raw
+
+    for area_name, payload in entries.items():
+        if not isinstance(payload, dict):
+            continue
+        data = payload.get("data") or {}
+        counts = data.get("counts") or {}
+        if counts:
+            yield data.get("area", area_name), counts, data.get("as_of")
+
+
+def get_global_active_pokemon_task(params=None):
+    """
+    Background Task: fetch live Pokémon counts (now < disappear_time).
+
+    One request covers the whole map - the endpoint already fans out over every
+    area server side. Stores the summed totals for the home page AND the
+    per-area breakdown under "areas", so per-area views need no extra call.
+
+    Returns None on failure so the runner keeps the previous file; consumers
+    should show the "last_updated" age rather than assume freshness.
+    """
+    if params is None:
+        params = {"area": "global", "min_seconds_left": 0, "response_format": "json"}
+
+    try:
+        url = f"{API_BASE_URL}/api/redis/get_pokemon_active"
+        response = requests.get(url, headers=get_api_headers(), params=params)
+
+        if response.status_code != 200:
+            logger.info(f"Error fetching active pokemon: HTTP {response.status_code}")
+            return None
+
+        raw_data = response.json()
+
+        totals = {metric: 0 for metric in ACTIVE_METRICS}
+        areas = {}
+        as_of = 0
+
+        for area_name, counts, area_as_of in _iter_active_entries(raw_data):
+            clean = {metric: int(counts.get(metric, 0) or 0) for metric in ACTIVE_METRICS}
+            areas[area_name] = clean
+            for metric in ACTIVE_METRICS:
+                totals[metric] += clean[metric]
+            as_of = max(as_of, int(area_as_of or 0))
+
+        if not areas:
+            logger.info("No active Pokémon data returned (no areas resolved).")
+            return None
+
+        final_data = dict(totals)
+        final_data["areas"] = areas
+        final_data["as_of"] = as_of or int(time.time())
+        final_data["last_updated"] = time.time()
+        return final_data
+
+    except Exception as e:
+        logger.error(f"Error in get_global_active_pokemon_task: {e}")
+        return None
+
+
 def get_global_raids_task(endpoint_type="counter", params=None):
     """
     Hybrid Function: Background Task (defaults) OR Generic Fetcher.

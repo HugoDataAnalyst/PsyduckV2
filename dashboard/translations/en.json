@@ -175,5 +175,7 @@
     "Select All disabled (range too wide: {val}%)": "Select All disabled (range too wide: {val}%)",
     "No Pokémon selected - selection required to run query": "No Pokémon selected - selection required to run query",
     "{val} Pokémon selected": "{val} Pokémon selected",
-    "Page {current} / {total} ({count} total)": "Page {current} / {total} ({count} total)"
+    "Page {current} / {total} ({count} total)": "Page {current} / {total} ({count} total)",
+    "Currently active Pokémon across all areas.": "Currently active Pokémon across all areas.",
+    "Active Now": "Active Now"
 }

@@ -52,6 +52,8 @@ RAID_FILE = os.path.join(DATA_DIR, 'global_raids.json')
 INVASION_FILE = os.path.join(DATA_DIR, 'global_invasions.json')
 QUEST_FILE = os.path.join(DATA_DIR, 'global_quests.json')
 
+POKE_FILE_LIVE = os.path.join(DATA_DIR, 'global_pokes_live.json')
+
 POKE_FILE_ALL = os.path.join(DATA_DIR, 'global_pokes_alltime.json')
 RAID_FILE_ALL = os.path.join(DATA_DIR, 'global_raids_alltime.json')
 INVASION_FILE_ALL = os.path.join(DATA_DIR, 'global_invasions_alltime.json')
@@ -91,10 +93,20 @@ ICONS = {
 
 # HELPERS
 
-def create_time_toggle(id_name):
+def create_time_toggle(id_name, include_live=False):
+    """
+    Time range switch for a stats card.
+
+    include_live adds a "Live" option - only Pokémon have a live (not yet
+    despawned) set, so the other cards keep the 24h/All pair.
+    """
+    options = [{"label": "24h", "value": "24h"}, {"label": "All", "value": "all"}]
+    if include_live:
+        options.append({"label": "Live", "value": "live"})
+
     return dbc.RadioItems(
         id=id_name,
-        options=[{"label": "24h", "value": "24h"}, {"label": "All", "value": "all"}],
+        options=options,
         value="24h",
         inline=True,
         className="btn-group",
@@ -153,6 +165,34 @@ def get_total_header(count, title):
         html.Small(title, className="text-muted text-uppercase")
     ], className="w-100 text-center mb-3 pb-3 border-bottom border-secondary")
 
+def format_age(seconds):
+    """Compact, language neutral 'how old is this number' string."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
+
+
+def freshness_badge(last_updated, stale_after=180):
+    """
+    Small age indicator for live data.
+
+    Live counts come from a background fetch, so the page must say how old the
+    number is instead of implying it is instantaneous. Turns amber once the
+    fetcher has missed enough cycles to matter.
+    """
+    if not last_updated:
+        return None
+    age = time.time() - last_updated
+    color = "#ffc107" if age > stale_after else "#6c757d"
+    return html.Span([
+        html.I(className="bi bi-clock me-1"),
+        format_age(age)
+    ], className="ms-2 small", style={"color": color})
+
+
 def wrap_anim(content):
     """Wraps content in a div with the animate-flip class.
     The key=time.time() forces React to rebuild the element, triggering the CSS animation."""
@@ -183,7 +223,7 @@ def layout():
                             html.Span("Pokémon Stats", id="poke-header-text", className="fw-bold fs-5")
                         ], className="d-flex align-items-center justify-content-center mb-2"),
                         html.Div(
-                            create_time_toggle("poke-time-toggle"),
+                            create_time_toggle("poke-time-toggle", include_live=True),
                             className="d-flex justify-content-center w-100"
                         )
                     ], className="d-flex flex-column w-100")
@@ -289,6 +329,10 @@ def update_static_translations(lang):
 )
 def update_pokemon(n, toggle_val, lang):
     lang = lang or "en"
+
+    if toggle_val == "live":
+        return update_pokemon_live(lang)
+
     file_path = POKE_FILE if toggle_val == "24h" else POKE_FILE_ALL
 
     # Translate label based on toggle
@@ -315,6 +359,40 @@ def update_pokemon(n, toggle_val, lang):
             print(f"Error pokemon: {e}")
 
     return wrap_anim(content), label
+
+
+def update_pokemon_live(lang):
+    """
+    Live Pokémon counts, summed across every area.
+
+    Reads the file written by the "pokemons_live" background task rather than
+    calling the API from the callback, so N viewers still cost one fetch per
+    cycle. There is no shiny tile: shiny is per account, so it has no meaning
+    for "what is on the map right now".
+    """
+    label = translate("Currently active Pokémon across all areas.", lang)
+
+    if not os.path.exists(POKE_FILE_LIVE):
+        return wrap_anim([html.Div("Loading...", className="text-muted small")]), label
+
+    try:
+        with open(POKE_FILE_LIVE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Error pokemon live: {e}")
+        return wrap_anim([html.Div("Loading...", className="text-muted small")]), label
+
+    content = [
+        get_total_header(data.get('total', 0), translate("Active Now", lang)),
+        create_mini_stat(data.get('iv100', 0), translate("100 IV", lang), "#dc3545", icon_url=ICONS['iv100']),
+        create_mini_stat(data.get('iv0', 0), translate("0 IV", lang), "#28a745", icon_url=ICONS['iv0']),
+        create_mini_stat(data.get('pvp_little', 0), translate("PvP Lit", lang), "#e0e0e0", icon_url=ICONS['pvp_little']),
+        create_mini_stat(data.get('pvp_great', 0), translate("PvP Grt", lang), "#007bff", icon_url=ICONS['pvp_great']),
+        create_mini_stat(data.get('pvp_ultra', 0), translate("PvP Ult", lang), "#FFD700", icon_url=ICONS['pvp_ultra']),
+    ]
+
+    desc = [label, freshness_badge(data.get('last_updated'))]
+    return wrap_anim(content), desc
 
 # 2. Raid Callback
 @callback(
