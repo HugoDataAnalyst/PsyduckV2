@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from utils.logger import logger
 from dashboard.utils import (
     get_global_pokemon_task,
+    get_global_active_pokemon_task,
     get_global_raids_task,
     get_global_invasions_task,
     get_global_quests_task,
@@ -22,9 +23,10 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 # Default intervals (in seconds)
 DEFAULT_INTERVAL = 3600        # 1 hour for most tasks
 DAILY_INTERVAL = 86400         # 24 hours for alltime/historical tasks
+LIVE_INTERVAL = 60             # live Pokémon counts - matches the home page refresh
 
 # Task categories for startup ordering
-DAILY_TASKS = ["areas", "pokestops", "pokemons_daily", "raids_daily", "invasions_daily", "quests_daily"]
+DAILY_TASKS = ["areas", "pokestops", "pokemons_daily", "pokemons_live", "raids_daily", "invasions_daily", "quests_daily"]
 ALLTIME_TASKS = ["pokemon_alltime", "raids_alltime", "invasions_alltime", "quests_alltime"]
 
 # Delay between daily and alltime tasks on startup (seconds)
@@ -60,6 +62,11 @@ TASK_CONFIG = {
         "func": get_global_pokemon_task,
         "file": os.path.join(DATA_DIR, 'global_pokes.json'),
         "task_interval": DEFAULT_INTERVAL
+    },
+    "pokemons_live": {
+        "func": get_global_active_pokemon_task,
+        "file": os.path.join(DATA_DIR, 'global_pokes_live.json'),
+        "task_interval": LIVE_INTERVAL
     },
     "raids_daily": {
         "func": get_global_raids_task,

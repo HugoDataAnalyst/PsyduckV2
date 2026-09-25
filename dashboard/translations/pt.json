@@ -175,5 +175,8 @@
     "Select All disabled (range too wide: {val}%)": "Selecionar Tudo desativado (intervalo muito grande: {val}%)",
     "No Pokémon selected - selection required to run query": "Nenhum Pokémon selecionado - seleção necessária para executar a consulta",
     "{val} Pokémon selected": "{val} Pokémon selecionados",
-    "Page {current} / {total} ({count} total)": "Página {current} / {total} ({count} total)"
+    "Page {current} / {total} ({count} total)": "Página {current} / {total} ({count} total)",
+    "Currently active Pokémon across all areas.": "Pokémon ativos neste momento em todas as áreas.",
+    "Active Now": "Ativos Agora",
+    "On map now": "No mapa agora"
 }

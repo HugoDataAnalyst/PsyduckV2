@@ -11,6 +11,8 @@ try:
 except ImportError:
     from translations.manager import translate
 
+from dashboard.utils import load_active_pokemon, freshness_badge
+
 def load_dashboard_config():
     """Load dashboard configuration from dashboard_config.json"""
     config_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard_config.json')
@@ -91,10 +93,20 @@ ICONS = {
 
 # HELPERS
 
-def create_time_toggle(id_name):
+def create_time_toggle(id_name, include_live=False):
+    """
+    Time range switch for a stats card.
+
+    include_live adds a "Live" option - only Pokémon have a live (not yet
+    despawned) set, so the other cards keep the 24h/All pair.
+    """
+    options = [{"label": "24h", "value": "24h"}, {"label": "All", "value": "all"}]
+    if include_live:
+        options.append({"label": "Live", "value": "live"})
+
     return dbc.RadioItems(
         id=id_name,
-        options=[{"label": "24h", "value": "24h"}, {"label": "All", "value": "all"}],
+        options=options,
         value="24h",
         inline=True,
         className="btn-group",
@@ -163,6 +175,10 @@ def wrap_anim(content):
 def layout():
     return dbc.Container([
         dcc.Interval(id="home-interval", interval=60*1000, n_intervals=0),
+        # Faster tick for the live Pokémon card. Deliberately NOT a multiple of
+        # the 60s background fetch: at equal periods the age badge renders at a
+        # fixed phase offset and looks frozen even though it is refreshing.
+        dcc.Interval(id="home-live-interval", interval=15*1000, n_intervals=0),
 
         # Header
         dbc.Row([
@@ -183,7 +199,7 @@ def layout():
                             html.Span("Pokémon Stats", id="poke-header-text", className="fw-bold fs-5")
                         ], className="d-flex align-items-center justify-content-center mb-2"),
                         html.Div(
-                            create_time_toggle("poke-time-toggle"),
+                            create_time_toggle("poke-time-toggle", include_live=True),
                             className="d-flex justify-content-center w-100"
                         )
                     ], className="d-flex flex-column w-100")
@@ -285,10 +301,15 @@ def update_static_translations(lang):
 # 1. Pokemon Callback
 @callback(
     [Output("global-pokemon-stats-container", "children"), Output("poke-desc", "children")],
-    [Input("home-interval", "n_intervals"), Input("poke-time-toggle", "value"), Input("language-store", "data")]
+    [Input("home-interval", "n_intervals"), Input("home-live-interval", "n_intervals"),
+     Input("poke-time-toggle", "value"), Input("language-store", "data")]
 )
-def update_pokemon(n, toggle_val, lang):
+def update_pokemon(n, n_live, toggle_val, lang):
     lang = lang or "en"
+
+    if toggle_val == "live":
+        return update_pokemon_live(lang)
+
     file_path = POKE_FILE if toggle_val == "24h" else POKE_FILE_ALL
 
     # Translate label based on toggle
@@ -315,6 +336,34 @@ def update_pokemon(n, toggle_val, lang):
             print(f"Error pokemon: {e}")
 
     return wrap_anim(content), label
+
+
+def update_pokemon_live(lang):
+    """
+    Live Pokémon counts, summed across every area.
+
+    Reads the file written by the "pokemons_live" background task rather than
+    calling the API from the callback, so N viewers still cost one fetch per
+    cycle. There is no shiny tile: shiny is per account, so it has no meaning
+    for "what is on the map right now".
+    """
+    label = translate("Currently active Pokémon across all areas.", lang)
+
+    data = load_active_pokemon()
+    if not data:
+        return wrap_anim([html.Div("Loading...", className="text-muted small")]), label
+
+    content = [
+        get_total_header(data.get('total', 0), translate("Active Now", lang)),
+        create_mini_stat(data.get('iv100', 0), translate("100 IV", lang), "#dc3545", icon_url=ICONS['iv100']),
+        create_mini_stat(data.get('iv0', 0), translate("0 IV", lang), "#28a745", icon_url=ICONS['iv0']),
+        create_mini_stat(data.get('pvp_little', 0), translate("PvP Lit", lang), "#e0e0e0", icon_url=ICONS['pvp_little']),
+        create_mini_stat(data.get('pvp_great', 0), translate("PvP Grt", lang), "#007bff", icon_url=ICONS['pvp_great']),
+        create_mini_stat(data.get('pvp_ultra', 0), translate("PvP Ult", lang), "#FFD700", icon_url=ICONS['pvp_ultra']),
+    ]
+
+    desc = [label, freshness_badge(data.get('last_updated'))]
+    return wrap_anim(content), desc
 
 # 2. Raid Callback
 @callback(

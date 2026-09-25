@@ -139,9 +139,12 @@ store_pokemon_tth_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemo
 store_raids_timeseries = str(config.get('IN-MEMORY', {}).get('store_raids_timeseries', True)).upper() == "TRUE"
 store_invasions_timeseries = str(config.get('IN-MEMORY', {}).get('store_invasions_timeseries', True)).upper() == "TRUE"
 store_quests_timeseries = str(config.get('IN-MEMORY', {}).get('store_quests_timeseries', True)).upper() == "TRUE"
+store_active_pokemon = str(config.get('IN-MEMORY', {}).get('store_active_pokemon', True)).upper() == "TRUE"
 
 # Cleanup Redis Timeseries
 cleanup_interval_seconds = int(config.get("CLEAN_REDIS_TS", {}).get("cleanup_interval_seconds", 1800))
+# Grace period before a despawned live Pokémon is dropped from the active sets
+active_pokemon_grace_seconds = int(config.get("CLEAN_REDIS_TS", {}).get("active_pokemon_grace_seconds", 300))
 
 # Redis MySQL Backup
 redis_mysql_backups          = str(config.get("IN-MEMORY", {}).get("REDIS_MYSQL_BACKUPS", False)).upper() == "TRUE"

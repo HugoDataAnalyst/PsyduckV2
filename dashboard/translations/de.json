@@ -176,5 +176,8 @@
     "No Pokémon selected - selection required to run query": "Kein Pokémon ausgewählt - Auswahl erforderlich für Abfrage",
     "{val} Pokémon selected": "{val} Pokémon ausgewählt",
     "Page {current} / {total} ({count} total)": "Seite {current} / {total} ({count} gesamt)",
-    "No areas match your search.": "Keine Gebiete entsprechen deiner Suche."
+    "No areas match your search.": "Keine Gebiete entsprechen deiner Suche.",
+    "Currently active Pokémon across all areas.": "Aktuell aktive Pokémon in allen Gebieten.",
+    "Active Now": "Jetzt Aktiv",
+    "On map now": "Jetzt auf der Karte"
 }

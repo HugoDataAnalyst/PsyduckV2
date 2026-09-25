@@ -10,7 +10,8 @@ from my_redis.queries.updates.pokemons import (
     pokemon_tth_timeseries,
     pokemon_tth_hourly_counterseries,
     pokemon_tth_daily_counterseries,
-    pokemon_weather_iv_counterseries
+    pokemon_weather_iv_counterseries,
+    pokemon_active
 )
 from my_redis.queries.updates.raids import (
     raids_timeseries,
@@ -60,6 +61,12 @@ async def process_pokemon_data(filtered_data):
         return None
 
     #try:
+    # Pre-initialised so the summary string below never hits an unbound name
+    # when a toggle is off.
+    pokemon_timeseries_update = {"status": "DISABLED"}
+    pokemon_tth_timeseries_update = {"status": "DISABLED"}
+    pokemon_active_update = {"status": "DISABLED"}
+
     async with client.pipeline(transaction=False) as pipe:
         # Add all Redis operations to the pipeline
         # Binary Time Series with Hash
@@ -74,6 +81,9 @@ async def process_pokemon_data(filtered_data):
         pokemon_tth_hourly_counterseries_update = await pokemon_tth_hourly_counterseries.update_tth_pokemon_hourly_counter(filtered_data, pipe)
         pokemon_tth_daily_counterseries_update = await pokemon_tth_daily_counterseries.update_tth_pokemon_daily_counter(filtered_data, pipe)
         pokemon_weather_counterseries_update = await pokemon_weather_iv_counterseries.update_pokemon_weather_iv(filtered_data, pipe)
+        # Live set: sorted set scored by disappear_time
+        if AppConfig.store_active_pokemon:
+            pokemon_active_update = await pokemon_active.add_pokemon_active_event(filtered_data, pipe)
 
         # Execute all Redis commands in a single batch
         results = await retry(pipe.execute, max_attempts=5, delay=2)
@@ -116,6 +126,7 @@ async def process_pokemon_data(filtered_data):
         f"  - TTH Hourly Counter: {json.dumps(pokemon_tth_hourly_counterseries_update, indent=2)}\n"
         f"  - TTH Daily Counter: {json.dumps(pokemon_tth_daily_counterseries_update, indent=2)}\n"
         f"  - Counter Weather: {json.dumps(pokemon_weather_counterseries_update, indent=2)}\n"
+        f"  - Active Live Set: {json.dumps(pokemon_active_update, indent=2)}\n"
     )
 
     logger.debug(f"✅ Processed Pokémon {filtered_data['pokemon_id']} in area {filtered_data['area_name']} - Updates: {structured_result}")

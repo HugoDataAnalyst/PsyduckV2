@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 import plotly.graph_objects as go
+from dash import html
 import config as AppConfig
 from urllib.parse import quote
 import json
@@ -1321,6 +1322,145 @@ def get_global_pokemon_task(endpoint_type="counter", params=None):
 
     except Exception as e:
         logger.error(f"Error in get_global_pokemon_task: {e}")
+        return None
+
+
+# Live (not yet despawned) Pokémon - metrics exposed by /api/redis/get_pokemon_active
+ACTIVE_METRICS = ("total", "iv100", "iv0", "pvp_little", "pvp_great", "pvp_ultra")
+
+ACTIVE_POKEMON_FILE = Path(__file__).parent / "data" / "global_pokes_live.json"
+
+
+def load_active_pokemon(area=None):
+    """
+    Read the live Pokémon counts written by the "pokemons_live" background task.
+
+    area=None returns the map wide totals (plus the "areas" breakdown); a name
+    returns just that area's counts, matched case insensitively. Returns None
+    when there is no usable data yet, so callers can render a placeholder.
+    """
+    try:
+        with open(ACTIVE_POKEMON_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        logger.debug(f"No live Pokémon data available: {e}")
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    if area is None:
+        return data
+
+    areas = data.get("areas") or {}
+    counts = areas.get(area)
+    if counts is None:
+        counts = {name.lower(): c for name, c in areas.items()}.get(str(area).lower())
+    if counts is None:
+        return None
+
+    return {**counts, "as_of": data.get("as_of"), "last_updated": data.get("last_updated")}
+
+
+def format_age(seconds):
+    """Compact, language neutral 'how old is this number' string."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
+
+
+def freshness_badge(last_updated, stale_after=180, className="ms-2 small"):
+    """
+    Small age indicator for live data.
+
+    Live counts come from a background fetch, so the UI must say how old the
+    number is instead of implying it is instantaneous. Turns amber once the
+    fetcher has missed enough cycles to matter.
+    """
+    if not last_updated:
+        return None
+    age = time.time() - last_updated
+    color = "#ffc107" if age > stale_after else "#6c757d"
+    return html.Span([
+        html.I(className="bi bi-clock me-1"),
+        format_age(age)
+    ], className=className, style={"color": color})
+
+
+def _iter_active_entries(raw):
+    """
+    Yield (area_name, counts) from a get_pokemon_active response.
+
+    The endpoint unwraps the envelope when exactly one area resolves, so the
+    payload is either {"mode":..., "data":{...}} or {area: {"mode":..., "data":{...}}}.
+    Areas that returned an error are skipped rather than counted as zero.
+    """
+    if not isinstance(raw, dict):
+        return
+
+    if isinstance(raw.get("data"), dict) and "counts" in raw["data"]:
+        entries = {raw["data"].get("area", "unknown"): raw}
+    else:
+        entries = raw
+
+    for area_name, payload in entries.items():
+        if not isinstance(payload, dict):
+            continue
+        data = payload.get("data") or {}
+        counts = data.get("counts") or {}
+        if counts:
+            yield data.get("area", area_name), counts, data.get("as_of")
+
+
+def get_global_active_pokemon_task(params=None):
+    """
+    Background Task: fetch live Pokémon counts (now < disappear_time).
+
+    One request covers the whole map - the endpoint already fans out over every
+    area server side. Stores the summed totals for the home page AND the
+    per-area breakdown under "areas", so per-area views need no extra call.
+
+    Returns None on failure so the runner keeps the previous file; consumers
+    should show the "last_updated" age rather than assume freshness.
+    """
+    if params is None:
+        params = {"area": "global", "min_seconds_left": 0, "response_format": "json"}
+
+    try:
+        url = f"{API_BASE_URL}/api/redis/get_pokemon_active"
+        response = requests.get(url, headers=get_api_headers(), params=params)
+
+        if response.status_code != 200:
+            logger.info(f"Error fetching active pokemon: HTTP {response.status_code}")
+            return None
+
+        raw_data = response.json()
+
+        totals = {metric: 0 for metric in ACTIVE_METRICS}
+        areas = {}
+        as_of = 0
+
+        for area_name, counts, area_as_of in _iter_active_entries(raw_data):
+            clean = {metric: int(counts.get(metric, 0) or 0) for metric in ACTIVE_METRICS}
+            areas[area_name] = clean
+            for metric in ACTIVE_METRICS:
+                totals[metric] += clean[metric]
+            as_of = max(as_of, int(area_as_of or 0))
+
+        if not areas:
+            logger.info("No active Pokémon data returned (no areas resolved).")
+            return None
+
+        final_data = dict(totals)
+        final_data["areas"] = areas
+        final_data["as_of"] = as_of or int(time.time())
+        final_data["last_updated"] = time.time()
+        return final_data
+
+    except Exception as e:
+        logger.error(f"Error in get_global_active_pokemon_task: {e}")
         return None
 
 

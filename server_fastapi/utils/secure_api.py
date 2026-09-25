@@ -34,6 +34,7 @@ ALLOWED_PATHS = [
     "/api/redis/get_raid_timeseries",
     "/api/redis/get_invasion_timeseries",
     "/api/redis/get_quest_timeseries",
+    "/api/redis/get_pokemon_active",
     "/api/sql/get_pokemon_heatmap_data",
     "/api/sql/get_shiny_rate_data",
     "/api/sql/get_raid_data",
