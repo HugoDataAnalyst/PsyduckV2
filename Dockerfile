@@ -1,5 +1,5 @@
 # Use an official Python runtime as a base image
-FROM python:3.11-slim-bullseye
+FROM python:3.11-slim-bookworm
 
 # Set environment variables for Python
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     gcc \
     libffi-dev \
-    libicu67 \
+    libicu72 \
     libssl-dev \
     libc-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*

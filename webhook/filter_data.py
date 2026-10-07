@@ -22,6 +22,22 @@ class WebhookFilter:
         self.geofences = geofences  # ✅ Inject geofences dynamically
         self.user_timezone = global_state.user_timezone
 
+    # Golbat seen_type values whose stats were actually observed in an encounter.
+    # Everything else (wild, lure_wild, nearby_stop, nearby_cell) is rejected:
+    # nearby_* carry approximate coordinates, and with Golbat's derive_iv on a
+    # wild/lure_wild spawn can arrive with derived (not observed) IVs.
+    # Full list of Golbat seen_type values - uncomment to accept one.
+    ENCOUNTERED_SEEN_TYPES = frozenset({
+        "encounter",                  # Encountered - exact current IVs
+        "lure_encounter",             # Encountered at a lure
+        "tappable_encounter",         # Encountered from a tappable
+        "tappable_lure_encounter",    # Encountered from a lured tappable
+        # "wild",                     # Seen in the wild - accurate location, no IVs (derived IVs if derive_iv is on)
+        # "lure_wild",                # Seen at a lure - no IVs (derived IVs if derive_iv is on)
+        # "nearby_stop",              # Seen near a Pokéstop - location is the Pokéstop's, not the Pokémon's
+        # "nearby_cell",              # Seen in an S2 cell - no accurate location
+    })
+
     # Helper functions
     HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 
@@ -293,6 +309,15 @@ class WebhookFilter:
 
     async def handle_pokemon_data(self, message, geofence_id, geofence_name, offset: int):
         """Process and filter Pokémon webhook data."""
+        # ✅ Only accept Pokémon whose stats were observed in an encounter
+        seen_type = message.get("seen_type")
+        if seen_type not in self.ENCOUNTERED_SEEN_TYPES:
+            logger.debug(
+                f"⚠️ Skipping Pokémon {message.get('pokemon_id')}: seen_type={seen_type!r} is not an encounter "
+                f"(encounter_id={message.get('encounter_id')})"
+            )
+            return None
+
         required_fields = [
             "pokemon_id",
             "latitude",
