@@ -22,7 +22,8 @@
         "store_active_pokemon": true,
         "REDIS_MYSQL_BACKUPS": false,
         "backup_interval_seconds": 3600,
-        "redis_restore_timeout_seconds": 600
+        "redis_restore_timeout_seconds": 600,
+        "full_backup_interval_hours": 24
     },
     "REDIS": {
         "redis_connections": 600

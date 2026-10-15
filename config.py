@@ -150,6 +150,9 @@ active_pokemon_grace_seconds = int(config.get("CLEAN_REDIS_TS", {}).get("active_
 redis_mysql_backups          = str(config.get("IN-MEMORY", {}).get("REDIS_MYSQL_BACKUPS", False)).upper() == "TRUE"
 redis_backup_interval        = int(config.get("IN-MEMORY", {}).get("backup_interval_seconds", 3600))
 redis_restore_timeout        = int(config.get("IN-MEMORY", {}).get("redis_restore_timeout_seconds", 600))
+# Backups only rewrite keys that can have changed since the previous one; every
+# this many hours (and after any restore) a full one rewrites everything. 0 = always full.
+redis_full_backup_interval_hours = int(config.get("IN-MEMORY", {}).get("full_backup_interval_hours", 24))
 
 # Golbat Pokestops
 pokestop_cache_expiry_seconds = config.get("golbat_pokestops", {}).get("pokestop_cache_expiry_seconds", 86400)

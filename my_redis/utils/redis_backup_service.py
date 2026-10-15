@@ -17,6 +17,7 @@ from my_redis.utils.mysql_backup import (
     MySQLBackup, MySQLCleanup,
     check_backup_counts, restore_counters, restore_timeseries,
     redis_dataset_id, mint_dataset_id, redis_uptime_s, get_backup_dataset_id, first_data_key,
+    get_meta, set_meta, META_LAST_BACKUP, META_LAST_FULL,
 )
 from utils.logger import logger
 
@@ -87,13 +88,10 @@ class RedisBackupService:
                     t0 = time.perf_counter()
                     if not await self._reconcile(client, "backup cycle"):
                         continue
-                    await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
-                    await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
-                    await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
-                    await _run_with_retry("Backup timeseries",         MySQLBackup.timeseries,  client)
+                    kind = await self._backup_once(client)
                 logger.success(
-                    "✅ Backup cycle complete in {:.2f}s — rescheduling in {}s",
-                    time.perf_counter() - t0, self._interval,
+                    "✅ Backup cycle ({}) complete in {:.2f}s — rescheduling in {}s",
+                    kind, time.perf_counter() - t0, self._interval,
                 )
 
             except asyncio.CancelledError:
@@ -101,6 +99,37 @@ class RedisBackupService:
                 break
             except Exception as e:
                 logger.error("❌ Redis backup cycle failed: {}", e)
+
+    async def _backup_window(self) -> float | None:
+        """
+        Start of the previous successful backup, to back up only what changed
+        since - or None for a full backup: on the first run, after a restore or
+        merge (which clears the last-full mark), and every full_backup_interval_hours.
+        """
+        full_every = AppConfig.redis_full_backup_interval_hours * 3600
+        last = await get_meta(META_LAST_BACKUP)
+        last_full = await get_meta(META_LAST_FULL)
+        if full_every <= 0 or last is None or last_full is None:
+            return None
+        if time.time() - float(last_full) >= full_every:
+            return None
+        return float(last)
+
+    async def _backup_once(self, client) -> str:
+        """Cleanup + backup of counters and timeseries. Returns "full" or "incremental"."""
+        since = await self._backup_window()
+        started = time.time()
+        await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
+        await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
+        ok_counters = await _run_with_retry("Backup counters", MySQLBackup.counters, client, since_utc=since)
+        ok_ts = await _run_with_retry("Backup timeseries", MySQLBackup.timeseries, client, since_utc=since)
+        # Only a complete backup moves the window forward; after a failure the
+        # next cycle starts from the last good one again.
+        if ok_counters and ok_ts:
+            await set_meta(META_LAST_BACKUP, str(started))
+            if since is None:
+                await set_meta(META_LAST_FULL, str(started))
+        return "full" if since is None else "incremental"
 
     @staticmethod
     async def _reconcile(client, context: str) -> bool:
@@ -139,11 +168,8 @@ class RedisBackupService:
             if client and await self._reconcile(client, "final backup"):
                 t0 = time.perf_counter()
                 logger.info("🔚 Final Redis backup on shutdown...")
-                await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
-                await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
-                await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
-                await _run_with_retry("Backup timeseries",         MySQLBackup.timeseries,  client)
-                logger.success("✅ Final Redis backup complete in {:.2f}s", time.perf_counter() - t0)
+                kind = await self._backup_once(client)
+                logger.success("✅ Final Redis backup ({}) complete in {:.2f}s", kind, time.perf_counter() - t0)
         except Exception as e:
             logger.error("❌ Final Redis backup failed: {}", e)
 
@@ -225,6 +251,8 @@ async def _reconcile_unlocked(client, context: str) -> str:
     # Tag first: if the merge is interrupted, the next attempt must not add
     # the same counts a second time.
     await mint_dataset_id(client)
+    # The merge can touch keys of any age: the next backup must be a full one
+    await set_meta(META_LAST_FULL, None)
     t0 = time.perf_counter()
     await restore_counters(client, older_than_s=uptime, only_absent=only_absent)
     await restore_timeseries(client, older_than_s=uptime, only_absent=only_absent)
