@@ -1,12 +1,31 @@
 from server_fastapi import global_state
 from utils.logger import logger
 from utils.safe_values import normalize_encounter_id
+from shapely import STRtree
 from shapely.geometry import Point, Polygon
 from zoneinfo import ZoneInfo
 from datetime import datetime
 import pytz
 import math
 import re
+import time
+
+# Spatial index over the current geofence list, rebuilt only when the list
+# changes (GlobalStateManager hands out the same list object until it refreshes).
+# Before, every event built a shapely Polygon for each geofence in turn - all of
+# them for a point outside every area.
+_geofence_index: dict = {"source": None, "tree": None}
+
+
+def _geofence_tree(geofences: list) -> STRtree:
+    if _geofence_index["source"] is not geofences:
+        polygons = [Polygon(g["coordinates"][0]) for g in geofences]
+        _geofence_index.update(source=geofences, tree=STRtree(polygons))
+    return _geofence_index["tree"]
+
+
+_MACHINE_OFFSET_TTL = 60  # seconds; a DST change shows up within a minute
+_machine_offset_cache: dict = {}
 
 class WebhookFilter:
     """Filters incoming webhook data based on type and geofence location."""
@@ -64,7 +83,18 @@ class WebhookFilter:
 
     @staticmethod
     def get_machine_offset(user_timezone) -> int:
-        """Get the machine's current UTC offset in hours."""
+        """Get the machine's current UTC offset in hours (cached for a minute - it is asked per event)."""
+        cache_key = str(user_timezone)
+        cached = _machine_offset_cache.get(cache_key)
+        now_mono = time.monotonic()
+        if cached and now_mono < cached[0]:
+            return cached[1]
+        offset = WebhookFilter._compute_machine_offset(user_timezone)
+        _machine_offset_cache[cache_key] = (now_mono + _MACHINE_OFFSET_TTL, offset)
+        return offset
+
+    @staticmethod
+    def _compute_machine_offset(user_timezone) -> int:
         try:
             if isinstance(user_timezone, str):
                 try:
@@ -247,12 +277,13 @@ class WebhookFilter:
 
             point = Point(longitude, latitude)  # ✅ Create a point with (lon, lat)
 
-            for geofence in self.geofences:
-                polygon = Polygon(geofence["coordinates"][0])  # ✅ Convert geofence into Polygon
-
-                if point.within(polygon):  # ✅ Check if point is inside geofence
-                    logger.debug(f"✅ Data is inside geofence: {geofence['name']} (ID: {geofence['id']}), offset: {geofence['offset']}")
-                    return True, geofence["id"], geofence["name"], geofence["offset"]  # ✅ Return True + Geofence Name
+            # Indices of every geofence containing the point; the lowest one is
+            # the first match in list order, as the old linear scan returned.
+            hits = _geofence_tree(self.geofences).query(point, predicate="within")
+            if len(hits):
+                geofence = self.geofences[int(hits.min())]
+                logger.debug(f"✅ Data is inside geofence: {geofence['name']} (ID: {geofence['id']}), offset: {geofence['offset']}")
+                return True, geofence["id"], geofence["name"], geofence["offset"]  # ✅ Return True + Geofence Name
 
             logger.debug("❌ Data is outside geofenced areas. Ignoring.")
             return False, None, None, None  # ❌ Reject if outside geofences
@@ -274,6 +305,15 @@ class WebhookFilter:
 
         if latitude is None or longitude is None:
             logger.debug("⚠️ Webhook data missing coordinates. Ignoring.")
+            return None
+
+        # Cheapest rejection first: about half of all Pokémon messages are
+        # non-encounter sightings, dropped regardless of where they are.
+        if data_type == "pokemon" and message.get("seen_type") not in self.ENCOUNTERED_SEEN_TYPES:
+            logger.debug(
+                f"⚠️ Skipping Pokémon {message.get('pokemon_id')}: seen_type={message.get('seen_type')!r} is not an encounter "
+                f"(encounter_id={message.get('encounter_id')})"
+            )
             return None
 
         inside_geofence, geofence_id, geofence_name, offset = await self.is_inside_geofence(latitude, longitude)
