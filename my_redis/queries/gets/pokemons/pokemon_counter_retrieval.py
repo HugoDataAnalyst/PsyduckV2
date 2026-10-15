@@ -133,8 +133,7 @@ class PokemonCounterRetrieval(CounterTransformer):
             pattern = "counter:pokemon_hourly:*"
         else:
             pattern = f"counter:pokemon_hourly:{self.area}:*"
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
@@ -169,8 +168,7 @@ class PokemonCounterRetrieval(CounterTransformer):
             pattern = "counter:pokemon_total:*"
         else:
             pattern = f"counter:pokemon_total:{self.area}:*"
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -202,8 +200,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         else:
             pattern = f"counter:tth_pokemon_hourly:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -239,8 +236,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         else:
             pattern = f"counter:tth_pokemon:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -264,8 +260,7 @@ class PokemonCounterRetrieval(CounterTransformer):
             pattern = "counter:pokemon_daily:*"
         else:
             pattern = f"counter:pokemon_daily:{self.area}:*"
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -290,8 +285,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         else:
             pattern = f"counter:tth_pokemon_daily:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -321,8 +315,7 @@ class PokemonCounterRetrieval(CounterTransformer):
         pattern = "counter:pokemon_weather_iv:*" if self.area.lower() in ["global", "all"] \
                   else f"counter:pokemon_weather_iv:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end, component_index=-2)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end, suffixes=("0", "1"))
         if not keys:
             return {"mode": self.mode, "data": {}}
 
