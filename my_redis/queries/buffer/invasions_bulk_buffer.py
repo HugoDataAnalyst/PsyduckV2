@@ -72,7 +72,9 @@ class InvasionsRedisBuffer:
             first_seen    = _safe_int(event_data.get("invasion_first_seen"), None)
 
             if not pokestop or area_id is None or first_seen is None:
-                logger.debug("❌ invasions: missing pokestop/area_id/first_seen")
+                missing = [name for name, bad in (("invasion_pokestop_id", not pokestop), ("area_id", area_id is None),
+                                                  ("invasion_first_seen", first_seen is None)) if bad]
+                logger.debug(f"❌ invasions: missing required fields {missing} (pokestop={pokestop!r})")
                 return
 
             # Skip if coords are missing/zero/invalid

@@ -48,6 +48,17 @@ class PokemonIVRedisBuffer:
     @classmethod
     async def increment_event(cls, redis_client: Redis, event_data: dict):
         try:
+            # Checked before the casts below, which would raise on None and
+            # end up as an anonymous error instead of naming the field.
+            required = ("spawnpoint", "pokemon_id", "iv", "level", "area_id", "first_seen")
+            missing = [name for name in required if event_data.get(name) is None]
+            if missing:
+                logger.warning(
+                    f"❌ IV event missing required fields {missing} "
+                    f"(pokemon_id={event_data.get('pokemon_id')}, encounter_id={event_data.get('encounter_id')}). Skipping."
+                )
+                return
+
             # Construct a unique key based on event fields
             spawnpoint = event_data.get("spawnpoint")
             pokemon_id = int(event_data.get("pokemon_id"))
@@ -58,10 +69,6 @@ class PokemonIVRedisBuffer:
             first_seen = int(event_data.get("first_seen"))
             latitude   = _to_float(event_data.get("latitude"))
             longitude  = _to_float(event_data.get("longitude"))
-
-            if None in [spawnpoint, pokemon_id, round_iv, area_id, first_seen]:
-                logger.warning("❌ Event missing required fields. Skipping.")
-                return
 
             # Create a composite unique key string
             unique_key = f"{spawnpoint}|{pokemon_id}|{form}|{round_iv}|{level}|{area_id}|{first_seen}"

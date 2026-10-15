@@ -332,8 +332,9 @@ class WebhookFilter:
         ]
 
         # ✅ Check if all required fields are present
-        if not all(field in message and message[field] is not None for field in required_fields):
-            logger.debug(f"⚠️ Skipping Pokémon data due to missing fields: {message}")
+        missing = [field for field in required_fields if message.get(field) is None]
+        if missing:
+            logger.debug(f"⚠️ Skipping Pokémon data due to missing fields {missing}: {message}")
             return None
 
         spid = message.get("spawnpoint_id")
@@ -473,8 +474,9 @@ class WebhookFilter:
             ]
 
         #✅ Check if all required fields are present
-        if not all(field in message and message[field] is not None for field in required_raid_fields):
-            logger.debug(f"⚠️ Skipping Raid data due to missing fields: {message}")
+        missing = [field for field in required_raid_fields if message.get(field) is None]
+        if missing:
+            logger.debug(f"⚠️ Skipping Raid data due to missing fields {missing}: {message}")
             return None
 
         if "rsvps" in message:
@@ -558,8 +560,9 @@ class WebhookFilter:
             "longitude"
         ]
         # ✅ Check if all required fields are present
-        if not all(field in message and message[field] is not None for field in required_invasion_fields):
-            logger.debug(f"⚠️ Skipping Invasion data due to missing fields: {message}")
+        missing = [field for field in required_invasion_fields if message.get(field) is None]
+        if missing:
+            logger.debug(f"⚠️ Skipping Invasion data due to missing fields {missing}: {message}")
             return None
 
         required_always = ["pokestop_id", "start", "latitude", "longitude"]

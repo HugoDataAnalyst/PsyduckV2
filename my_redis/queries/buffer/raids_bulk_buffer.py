@@ -70,7 +70,9 @@ class RaidsRedisBuffer:
             first_seen        = _safe_int(event_data.get("raid_first_seen"), None)
 
             if not gym or area_id is None or first_seen is None:
-                logger.warning("❌ Raid event missing required fields (gym/area_id/first_seen). Skipping.")
+                missing = [name for name, value in (("gym", gym), ("area_id", area_id), ("raid_first_seen", first_seen))
+                           if value is None or value == ""]
+                logger.warning(f"❌ Raid event missing required fields {missing} (gym={gym!r}). Skipping.")
                 return
 
             # Skip if coords are missing/zero/invalid

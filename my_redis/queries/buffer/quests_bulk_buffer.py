@@ -75,7 +75,9 @@ class QuestsRedisBuffer:
             task_type    = _safe_int(event_data.get("ar_type") if mode else event_data.get("normal_type"), 0)
 
             if not pokestop or area_id is None or first_seen is None or task_type == 0:
-                logger.debug("❌ quests: missing pokestop/area_id/first_seen/task_type")
+                missing = [name for name, bad in (("pokestop_id", not pokestop), ("area_id", area_id is None),
+                                                  ("first_seen", first_seen is None), ("task_type", task_type == 0)) if bad]
+                logger.debug(f"❌ quests: missing required fields {missing} (pokestop={pokestop!r})")
                 return
 
             # Skip if coords are missing/zero/invalid
