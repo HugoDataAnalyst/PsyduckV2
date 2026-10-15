@@ -39,10 +39,18 @@ class LeaderElection:
     end
     """
 
-    # Lua script for atomic check-and-extend (only extend if we own the lock)
+    # Lua script for atomic check-and-extend.
+    #   1 = we own the lock, TTL extended
+    #   2 = the lock had vanished (e.g. Redis restarted) and we re-took it
+    #   0 = another worker holds it
     EXTEND_SCRIPT = """
-    if redis.call("GET", KEYS[1]) == ARGV[1] then
-        return redis.call("EXPIRE", KEYS[1], ARGV[2])
+    local current = redis.call("GET", KEYS[1])
+    if current == ARGV[1] then
+        redis.call("EXPIRE", KEYS[1], ARGV[2])
+        return 1
+    elseif not current then
+        redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+        return 2
     else
         return 0
     end
@@ -53,8 +61,9 @@ class LeaderElection:
         self.worker_id = self._generate_worker_id()
         self._is_leader = False
         self._heartbeat_task: asyncio.Task | None = None
-        self._release_script_sha: str | None = None
-        self._extend_script_sha: str | None = None
+        # Called (as a task) when the heartbeat finds the lock gone and re-takes
+        # it - in practice a Redis restart, so the app can react right away.
+        self.on_reacquired = None
 
     @staticmethod
     def _generate_worker_id() -> str:
@@ -69,11 +78,12 @@ class LeaderElection:
         """Check if this worker is currently the leader."""
         return self._is_leader
 
-    async def try_acquire(self) -> bool:
+    async def try_acquire(self, quiet: bool = False) -> bool:
         """
         Attempt to acquire leadership.
 
         Returns True if this worker became the leader, False otherwise.
+        quiet logs a failed attempt at DEBUG (used by the takeover watcher).
         """
         try:
             client = await self.redis_manager.check_redis_connection()
@@ -92,8 +102,6 @@ class LeaderElection:
             if result:
                 self._is_leader = True
                 # Load Lua scripts for atomic operations
-                self._release_script_sha = await client.script_load(self.RELEASE_SCRIPT)
-                self._extend_script_sha = await client.script_load(self.EXTEND_SCRIPT)
                 # Start heartbeat to maintain leadership
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
                 logger.info(f"[LEADER] Worker {self.worker_id} acquired leadership")
@@ -101,7 +109,8 @@ class LeaderElection:
             else:
                 # Someone else is leader
                 current_leader = await client.get(self.LOCK_KEY)
-                logger.info(f"[FOLLOWER] Worker {self.worker_id} - current leader: {current_leader}")
+                (logger.debug if quiet else logger.info)(
+                    f"[FOLLOWER] Worker {self.worker_id} - current leader: {current_leader}")
                 return False
 
         except Exception as e:
@@ -116,9 +125,17 @@ class LeaderElection:
                 if not self._is_leader:
                     break
 
-                success = await self._extend_lock()
-                if not success:
-                    logger.warning(f"[LEADER] Lost leadership - lock was taken by another worker")
+                result = await self._extend_lock()
+                if result is None:
+                    # Redis unreachable: we are still running the leader's
+                    # services, so keep trying rather than give the role up.
+                    continue
+                if result == 2:
+                    logger.warning(f"[LEADER] Lock had vanished (Redis restart?) - re-acquired by {self.worker_id}")
+                    if self.on_reacquired:
+                        asyncio.create_task(self.on_reacquired())
+                elif result == 0:
+                    logger.error(f"[LEADER] Lost leadership - lock is held by another worker")
                     self._is_leader = False
                     break
 
@@ -129,34 +146,35 @@ class LeaderElection:
                 logger.error(f"[LEADER] Heartbeat error: {e}")
                 # Don't break - try again on next iteration
 
-    async def _extend_lock(self) -> bool:
-        """Extend the lock TTL if we still own it."""
+    async def _extend_lock(self) -> int | None:
+        """
+        Extend (or re-take a vanished) lock. Returns 1 extended, 2 re-acquired,
+        0 held by another worker, None when Redis could not be reached.
+        """
         try:
             client = await self.redis_manager.check_redis_connection()
             if not client:
-                return False
-
-            # Use Lua script for atomic check-and-extend
-            if self._extend_script_sha:
-                result = await client.evalsha(
-                    self._extend_script_sha,
-                    1,  # Number of keys
-                    self.LOCK_KEY,
-                    self.worker_id,
-                    str(self.LOCK_TTL)
-                )
-                return result == 1
-            else:
-                # Fallback: non-atomic version (less safe but works)
-                current = await client.get(self.LOCK_KEY)
-                if current == self.worker_id:
-                    await client.expire(self.LOCK_KEY, self.LOCK_TTL)
-                    return True
-                return False
-
+                return None
+            # EVAL (not EVALSHA): the script cache is empty after a Redis restart
+            result = await client.eval(self.EXTEND_SCRIPT, 1, self.LOCK_KEY, self.worker_id, str(self.LOCK_TTL))
+            return int(result)
         except Exception as e:
             logger.error(f"Error extending lock: {e}")
-            return False
+            return None
+
+    async def watch_for_takeover(self, on_acquired):
+        """
+        Followers: keep trying to take leadership and run on_acquired() once it
+        is ours. Covers a leader that died without releasing its lock - e.g. a
+        crash or OOM kill followed by a restart within the lock's 30s TTL, which
+        otherwise left the only worker as a follower with no background services.
+        """
+        while not self._is_leader:
+            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
+            if await self.try_acquire(quiet=True):
+                logger.warning(f"[LEADER] Worker {self.worker_id} took over leadership")
+                await on_acquired()
+                return
 
     async def release(self):
         """
@@ -183,24 +201,13 @@ class LeaderElection:
                 self._is_leader = False
                 return
 
-            # Use Lua script for atomic check-and-delete
-            if self._release_script_sha:
-                result = await client.evalsha(
-                    self._release_script_sha,
-                    1,  # Number of keys
-                    self.LOCK_KEY,
-                    self.worker_id
-                )
-                if result == 1:
-                    logger.info(f"[LEADER] Worker {self.worker_id} released leadership")
-                else:
-                    logger.warning(f"[LEADER] Lock was already taken by another worker")
+            # Atomic check-and-delete. EVAL (not EVALSHA): the script cache is
+            # empty after a Redis restart.
+            result = await client.eval(self.RELEASE_SCRIPT, 1, self.LOCK_KEY, self.worker_id)
+            if result == 1:
+                logger.info(f"[LEADER] Worker {self.worker_id} released leadership")
             else:
-                # Fallback: non-atomic version
-                current = await client.get(self.LOCK_KEY)
-                if current == self.worker_id:
-                    await client.delete(self.LOCK_KEY)
-                    logger.info(f"[LEADER] Worker {self.worker_id} released leadership")
+                logger.warning(f"[LEADER] Lock was already taken by another worker")
 
         except Exception as e:
             logger.error(f"Error releasing leadership: {e}")
