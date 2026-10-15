@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import config as AppConfig
 from my_redis.connect_redis import RedisManager
+from my_redis.utils import maintenance
 from my_redis.utils.mysql_backup import (
     MySQLBackup, MySQLCleanup,
     check_backup_counts, restore_counters, restore_timeseries,
@@ -81,13 +82,15 @@ class RedisBackupService:
                     logger.warning("⚠️ Redis backup: connection unavailable, skipping cycle")
                     continue
 
-                t0 = time.perf_counter()
-                if not await self._reconcile(client, "backup cycle"):
-                    continue
-                await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
-                await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
-                await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
-                await _run_with_retry("Backup timeseries",         MySQLBackup.timeseries,  client)
+                # Never alongside the Redis cleanup: both walk the whole keyspace
+                async with maintenance.exclusive("Redis backup"):
+                    t0 = time.perf_counter()
+                    if not await self._reconcile(client, "backup cycle"):
+                        continue
+                    await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
+                    await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
+                    await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
+                    await _run_with_retry("Backup timeseries",         MySQLBackup.timeseries,  client)
                 logger.success(
                     "✅ Backup cycle complete in {:.2f}s — rescheduling in {}s",
                     time.perf_counter() - t0, self._interval,
@@ -128,7 +131,9 @@ class RedisBackupService:
 
         self._running = False
 
-        # Final backup before shutdown
+        # Final backup before shutdown. Deliberately not behind
+        # maintenance.exclusive(): waiting out a cleanup pass here could
+        # outlast the shutdown grace period and lose the backup entirely.
         try:
             client = await self._redis_manager.check_redis_connection()
             if client and await self._reconcile(client, "final backup"):
