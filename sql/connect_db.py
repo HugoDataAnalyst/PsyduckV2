@@ -163,6 +163,26 @@ async def fetch_all(sql: str, params: Optional[Iterable[Any]] = None) -> list[di
         return list(await cur.fetchall())
 
 
+async def stream_rows(sql: str, params: Optional[Iterable[Any]] = None, batch: int = 1000):
+    """
+    Yield lists of dict rows from an unbuffered (server-side) cursor, so a large
+    result set is never held in memory at once - unlike fetch_all.
+    """
+    pool = _require_pool()
+    conn = await pool.acquire()
+    try:
+        await conn.ping(reconnect=True)
+        async with conn.cursor(aiomysql.SSDictCursor) as cur:
+            await cur.execute(sql, params or ())
+            while True:
+                rows = await cur.fetchmany(batch)
+                if not rows:
+                    break
+                yield rows
+    finally:
+        pool.release(conn)
+
+
 async def fetch_one(sql: str, params: Optional[Iterable[Any]] = None) -> Optional[dict]:
     async with acquire_cursor() as cur:
         await cur.execute(sql, params or ())
