@@ -220,8 +220,16 @@ class ShinyRateRedisBuffer:
                 shiny = 1 if shiny_num and shiny_num != 0 else 0
             area_id = event_data.get("area_id")
             first_seen = event_data.get("first_seen")
-            if None in [username, pokemon_id, area_id, first_seen]:
-                logger.warning("❌ Shiny event missing required fields. Skipping.")
+            # Golbat sends username = null when it re-saves a pokemon without a
+            # reporting account - e.g. its weather-change IV recalculation
+            # (ProactiveIVSwitch) with store_username off - so expect ['username'].
+            required = {"username": username, "pokemon_id": pokemon_id, "area_id": area_id, "first_seen": first_seen}
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                logger.warning(
+                    f"❌ Shiny event missing required fields {missing} "
+                    f"(pokemon_id={pokemon_id}, encounter_id={event_data.get('encounter_id')}). Skipping."
+                )
                 return
 
             dt = datetime.fromtimestamp(first_seen)
