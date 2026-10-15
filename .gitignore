@@ -37,3 +37,6 @@ redis-data/
 examples/test_api_url.py
 examples/test_timeseries_api.py
 dragonfly-data/
+
+# Local test stack output
+test/results/

@@ -1,0 +1,79 @@
+{
+    "SQL": {
+        "store_sql_pokemon_aggregation": true,
+        "store_sql_pokemon_shiny": true,
+        "store_sql_raid_aggregation": true,
+        "store_sql_quest_aggregation": true,
+        "store_sql_invasion_aggregation": true
+    },
+    "CLEAN_SQL": {
+        "clean_pokemon_older_than_x_days": 30,
+        "clean_raid_older_than_x_days": 60,
+        "clean_quest_older_than_x_days": 60,
+        "clean_invasion_older_than_x_days": 60,
+        "clean_pokemon_shiny_older_than_x_months": 3
+    },
+    "IN-MEMORY": {
+        "store_pokemon_timeseries": true,
+        "store_pokemon_tth_timeseries": true,
+        "store_raids_timeseries": true,
+        "store_invasions_timeseries": true,
+        "store_quests_timeseries": true,
+        "store_active_pokemon": true,
+        "REDIS_MYSQL_BACKUPS": true,
+        "backup_interval_seconds": 60,
+        "redis_restore_timeout_seconds": 600
+    },
+    "REDIS": {
+        "redis_connections": 200
+    },
+    "WEBHOOK": {
+        "max_inflight_events": 5000,
+        "max_rss_mb": 0,
+        "abort_on_disconnect": true,
+        "health_log_interval_seconds": 10
+    },
+    "flusher": {
+        "pokemon_max_threshold": 10000,
+        "shiny_max_threshold": 10000,
+        "raid_max_threshold": 10000,
+        "invasion_max_threshold": 10000,
+        "quest_max_threshold": 10000,
+        "shiny_flush_interval": 5,
+        "pokemon_flush_interval": 5,
+        "raid_flush_interval": 5,
+        "invasion_flush_interval": 5,
+        "quest_flush_interval": 5
+    },
+    "geofences": {
+        "expire_cache_seconds": 3600,
+        "refresh_cache_seconds": 3500
+    },
+    "golbat_pokestops": {
+        "pokestop_cache_expiry_seconds": 86400,
+        "pokestop_refresh_interval_seconds": 86300
+    },
+    "retention_hours": {
+        "timeseries_pokemon": 48,
+        "tth_timeseries_pokemon": 48,
+        "timeseries_raid": 48,
+        "timeseries_invasion": 48,
+        "timeseries_quest": 48,
+        "counter_pokemon_hourly": 1440,
+        "counter_tth_pokemon_hourly": 1440,
+        "counter_raid_hourly": 1440,
+        "counter_invasion_hourly": 1440,
+        "counter_quest_hourly": 1440
+    },
+    "retention_days": {
+        "counter_pokemon_daily": 0,
+        "counter_tth_pokemon_daily": 0,
+        "counter_raid_daily": 0,
+        "counter_invasion_daily": 0,
+        "counter_quest_daily": 0
+    },
+    "CLEAN_REDIS_TS": {
+        "cleanup_interval_seconds": 900,
+        "active_pokemon_grace_seconds": 300
+    }
+}
