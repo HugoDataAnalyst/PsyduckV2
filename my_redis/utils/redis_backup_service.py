@@ -15,7 +15,7 @@ from my_redis.connect_redis import RedisManager
 from my_redis.utils.mysql_backup import (
     MySQLBackup, MySQLCleanup,
     check_backup_counts, restore_counters, restore_timeseries,
-    redis_run_id, redis_uptime_s, get_backup_run_id, set_backup_run_id, first_data_key,
+    redis_dataset_id, mint_dataset_id, redis_uptime_s, get_backup_dataset_id, first_data_key,
 )
 from utils.logger import logger
 
@@ -156,26 +156,28 @@ _reconcile_lock = asyncio.Lock()
 async def reconcile_with_backup(client, context: str) -> str:
     """
     Bring Redis and the MySQL backup back in step, without ever overwriting
-    live data. Decided by which Redis process (run_id) the backup came from:
+    live data. Decided by the dataset id stored in Redis (DATASET_KEY) against
+    the one recorded with the backup:
 
-      same run_id        Redis still holds everything the backup has (an app
-                         restart or crash) -> leave Redis alone. Restoring here
-                         is what rewound live counters and resurrected keys
-                         that cleanup had already deleted.
-      different run_id   Redis restarted and lost its data -> merge the backup
-                         in: missing keys restored, live keys incremented.
-      no run_id recorded first run of this version. An empty Redis is restored
-                         in full. A Redis that already holds data only gets
-                         back the keys it lost when it last started (backed up
-                         before that, absent now); keys it holds are left alone,
-                         since the app that ran before may already have
-                         restored them.
+      same id            Redis still holds the data the backup came from - an
+                         app restart or crash, or a Redis restart that reloaded
+                         its data -> leave Redis alone. Restoring here is what
+                         rewound live counters and resurrected cleaned keys.
+      other id           Redis holds a different dataset (an older RDB restored
+                         by hand): it is what the operator chose, so adopt it -
+                         merging would add the backup's counts on top of it.
+      no id, empty Redis Redis lost everything -> restore the backup in full.
+      no id, data        Redis lost its data and has refilled since (Redis
+                         restarted under the running app) -> merge: missing
+                         keys restored, live keys incremented. Only rows backed
+                         up before this Redis started are used; newer rows were
+                         taken from this same Redis and are already live.
+                         First run of this version (nothing recorded yet): the
+                         app before it may already have restored keys Redis
+                         holds, so only missing keys are restored.
 
-    Only rows backed up before the current Redis process started are merged:
-    newer rows were taken from this same Redis, so their counts are already live.
-
-    Serialised: two concurrent calls could both see the old run_id and merge
-    the same backup twice.
+    Serialised: two concurrent calls could both find no id and merge the same
+    backup twice.
 
     Returns a short label for logs and tests.
     """
@@ -184,35 +186,40 @@ async def reconcile_with_backup(client, context: str) -> str:
 
 
 async def _reconcile_unlocked(client, context: str) -> str:
-    current = await redis_run_id(client)
-    recorded = await get_backup_run_id()
+    current = await redis_dataset_id(client)
+    recorded = await get_backup_dataset_id()
 
-    if current and recorded == current:
+    if current and current == recorded:
         logger.info("Redis restore ({}): Redis still holds the data the backup came from "
-                    "(run_id {}) - nothing to restore", context, current[:8])
-        return "skip:same-redis"
+                    "(dataset {}) - nothing to restore", context, current[:8])
+        return "skip:same-dataset"
+
+    if current:
+        logger.warning("Redis restore ({}): Redis holds dataset {} but the backup is from {} "
+                       "(an RDB restored by hand?) - adopting the Redis data, not merging",
+                       context, current[:8], recorded[:8] if recorded else "none")
+        await mint_dataset_id(client, current)
+        return "skip:adopted"
 
     uptime = await redis_uptime_s(client)
     only_absent = False
-    if recorded is None:
-        sample = await first_data_key(client)
-        if sample:
-            only_absent = True
-            logger.warning("Redis restore ({}): no backup provenance yet and Redis already holds data "
-                           "(e.g. {}) - restoring only keys backed up before Redis started {}s ago "
-                           "and missing now; live keys are left alone", context, sample, uptime)
-        else:
-            uptime = None   # empty Redis: every backed-up row is missing
-            logger.warning("Redis restore ({}): Redis holds no data - restoring the MySQL backup", context)
+    sample = await first_data_key(client)
+    if not sample:
+        uptime = None   # empty Redis: every backed-up row is missing
+        logger.warning("Redis restore ({}): Redis holds no data - restoring the MySQL backup", context)
+    elif recorded is None:
+        only_absent = True
+        logger.warning("Redis restore ({}): no backup provenance yet and Redis already holds data "
+                       "(e.g. {}) - restoring only keys backed up before Redis started {}s ago "
+                       "and missing now; live keys are left alone", context, sample, uptime)
     else:
-        logger.warning("Redis restore ({}): Redis restarted since the last backup (run_id {} -> {}, up {}s) "
-                       "- merging the MySQL backup into Redis", context,
-                       recorded[:8], current[:8] if current else "?", uptime)
+        logger.warning("Redis restore ({}): Redis lost the data the backup came from (dataset {}) "
+                       "and refilled since it started {}s ago - merging the MySQL backup into Redis",
+                       context, recorded[:8], uptime)
 
-    # Record first: if the merge is interrupted, the next attempt must not add
+    # Tag first: if the merge is interrupted, the next attempt must not add
     # the same counts a second time.
-    if current:
-        await set_backup_run_id(current)
+    await mint_dataset_id(client)
     t0 = time.perf_counter()
     await restore_counters(client, older_than_s=uptime, only_absent=only_absent)
     await restore_timeseries(client, older_than_s=uptime, only_absent=only_absent)

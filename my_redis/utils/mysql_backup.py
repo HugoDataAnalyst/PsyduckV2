@@ -21,6 +21,7 @@ Performance:
 """
 
 import asyncio
+import uuid
 import json
 from datetime import datetime, timedelta, timezone
 import config as AppConfig
@@ -373,21 +374,21 @@ class MySQLCleanup:
 
 # ── Backup provenance ─────────────────────────────────────────────────────────
 #
-# Redis assigns a new run_id every time its process starts. Recording the run_id
-# a backup was taken from tells a restarting app whether Redis still holds the
-# data (same run_id: leave it alone) or lost it (different run_id: restore).
+# Which Redis dataset the MySQL backup belongs to. The id lives in Redis itself
+# (DATASET_KEY) and is recorded in redis_backup_meta, so it travels with the
+# data: a Redis that restarts and reloads its data (RDB/AOF persistence, or an
+# RDB restored by hand) keeps the key and still matches, while a Redis that
+# lost its data no longer has it. Redis's run_id can't tell these apart - it
+# changes on every restart, data or not, and merging the backup into a Redis
+# that still holds the data would count everything twice.
 
-META_RUN_ID = "redis_run_id"
+META_DATASET_ID = "redis_dataset_id"
+DATASET_KEY = "psyduckv2:dataset_id"
 DATA_PATTERNS = ("counter:*", "ts:*")
 
 
-async def redis_run_id(client) -> str | None:
-    try:
-        info = await client.info("server")
-        return info.get("run_id")
-    except Exception as e:
-        logger.warning("Could not read Redis run_id: {}", e)
-        return None
+async def redis_dataset_id(client) -> str | None:
+    return await client.get(DATASET_KEY)
 
 
 async def redis_uptime_s(client) -> int | None:
@@ -399,16 +400,24 @@ async def redis_uptime_s(client) -> int | None:
         return None
 
 
-async def get_backup_run_id() -> str | None:
-    return await fetch_val("SELECT value FROM redis_backup_meta WHERE name = %s", (META_RUN_ID,))
+async def get_backup_dataset_id() -> str | None:
+    return await fetch_val("SELECT value FROM redis_backup_meta WHERE name = %s", (META_DATASET_ID,))
 
 
-async def set_backup_run_id(run_id: str) -> None:
+async def set_backup_dataset_id(dataset_id: str) -> None:
     await execute(
         "INSERT INTO redis_backup_meta (name, value) VALUES (%s, %s) "
         "ON DUPLICATE KEY UPDATE value = VALUES(value)",
-        (META_RUN_ID, run_id),
+        (META_DATASET_ID, dataset_id),
     )
+
+
+async def mint_dataset_id(client, dataset_id: str | None = None) -> str:
+    """Tag the current Redis data with a dataset id and record it as the backup's source."""
+    dataset_id = dataset_id or uuid.uuid4().hex
+    await set_backup_dataset_id(dataset_id)
+    await client.set(DATASET_KEY, dataset_id)
+    return dataset_id
 
 
 async def first_data_key(client) -> str | None:
