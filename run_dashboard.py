@@ -14,8 +14,8 @@ setup_logging(
     {
         "to_file": AppConfig.log_file_dashboard,
         "file_path": "logs/dashboard_psyduckv2.log",
-        "rotation": "5 MB",
-        "keep_total": 5,
+        "rotation": AppConfig.log_rotation,
+        "retention": AppConfig.log_retention,
         "compression": "gz",
         "show_file": True,
         "show_function": True,

@@ -25,6 +25,7 @@ class LoggingOptions(TypedDict, total=False):
     file_path: str
     rotation: str
     keep_total: int
+    retention: str
     compression: str
 
 class WaitressQueueFilter(logging.Filter):
@@ -38,7 +39,7 @@ class WaitressQueueFilter(logging.Filter):
 def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = None) -> None:
     """
     - Console sink with colors.
-    - Optional file sink with rotation, retention (count-based) and compression.
+    - Optional file sink with rotation, retention (count- or age-based) and compression.
     - Bridges stdlib logging (uvicorn/sqlalchemy/waitress/etc.) to Loguru.
     - Captures unhandled exceptions (sync + asyncio).
     """
@@ -53,6 +54,7 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     file_path     = options.get("file_path", "logs/psyduckv2.log")
     rotation      = options.get("rotation", "5 MB")
     keep_total    = int(options.get("keep_total", 5))
+    retention     = options.get("retention")  # e.g. "7 days"; overrides keep_total
     compression   = options.get("compression", "gz")
 
     # FIX: Use the patcher to inject the worker ID dynamically.
@@ -92,12 +94,14 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
         # Ensure directory exists
         Path(os.path.dirname(file_path) or ".").mkdir(parents=True, exist_ok=True)
 
-        # We want N total files: 1 current + (N-1) rotated
-        rotated_keep = max(0, keep_total - 1)
+        # We want N total files: 1 current + (N-1) rotated, unless a time-based
+        # retention is given - a file count covers fewer hours the busier the
+        # feed, which is how the logs of an incident get rotated away.
+        rotated_keep = retention or max(0, keep_total - 1)
 
         # Loguru handles:
         # - rotation: by size/time
-        # - retention: count-based (applies to rotated set)
+        # - retention: count- or age-based (applies to rotated set)
         # - compression: rotated files compressed
         #
         # Rotated file naming will be:

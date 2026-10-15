@@ -160,6 +160,12 @@ log_level = get_env_var("LOG_LEVEL", "INFO").upper()
 log_file = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
 log_level_dashboard = get_env_var("LOG_LEVEL_DASHBOARD", "INFO").upper()
 log_file_dashboard = get_env_var("LOG_FILE_DASHBOARD", "FALSE").upper() == "TRUE"
+# Log file rotation size and how long rotated files are kept (loguru syntax, e.g.
+# "50 MB" / "7 days"). Time-based retention keeps enough history to trace an
+# incident regardless of log volume. Optional, so read quietly.
+log_rotation = os.getenv("LOG_ROTATION") or "50 MB"
+log_retention = os.getenv("LOG_RETENTION") or "7 days"
+
 # Webhook ingest protection (per worker process)
 #   max_inflight_events: shed new POSTs with HTTP 503 while this many events are
 #     still being processed (0 = unlimited). Golbat drops a rejected batch, so

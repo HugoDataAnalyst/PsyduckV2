@@ -38,8 +38,8 @@ setup_logging(
     {
         "to_file": AppConfig.log_file,
         "file_path": "logs/psyduckv2.log",
-        "rotation": "5 MB",
-        "keep_total": 5,
+        "rotation": AppConfig.log_rotation,
+        "retention": AppConfig.log_retention,
         "compression": "gz",
         "show_file": True,
         "show_function": True,
