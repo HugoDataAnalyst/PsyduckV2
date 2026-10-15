@@ -46,74 +46,54 @@ class PokemonIVRedisBuffer:
     aggregation_threshold = int(AppConfig.pokemon_max_threshold)
 
     @classmethod
-    async def increment_event(cls, redis_client: Redis, event_data: dict):
+    def entry(cls, event_data: dict) -> tuple[str, str, str | None] | None:
+        """(event line, spawnpoint, "lat,lon" or None) for one event; None (already logged) to skip it."""
+        # Checked before the casts below, which would raise on None and
+        # end up as an anonymous error instead of naming the field.
+        required = ("spawnpoint", "pokemon_id", "iv", "level", "area_id", "first_seen")
+        missing = [name for name in required if event_data.get(name) is None]
+        if missing:
+            logger.warning(
+                f"❌ IV event missing required fields {missing} "
+                f"(pokemon_id={event_data.get('pokemon_id')}, encounter_id={event_data.get('encounter_id')}). Skipping."
+            )
+            return None
+
+        # Construct a unique key based on event fields
+        spawnpoint = event_data.get("spawnpoint")
+        pokemon_id = int(event_data.get("pokemon_id"))
+        form       = str(event_data.get("form", 0))
+        round_iv   = int(round(event_data.get("iv")))
+        level      = int(event_data.get("level"))
+        area_id    = int(event_data.get("area_id"))
+        first_seen = int(event_data.get("first_seen"))
+        latitude   = _to_float(event_data.get("latitude"))
+        longitude  = _to_float(event_data.get("longitude"))
+
+        # Create a composite unique key string
+        unique_key = f"{spawnpoint}|{pokemon_id}|{form}|{round_iv}|{level}|{area_id}|{first_seen}"
+        coords = f"{latitude},{longitude}" if latitude is not None and longitude is not None else None
+        return unique_key, spawnpoint, coords
+
+    @classmethod
+    def stage(cls, pipe, event_data: dict) -> bool:
+        """
+        Queue this event's IV line (and its spawnpoint's coords) on the caller's
+        pipeline - no round trip of its own. The leader's flusher drains the
+        buffer every flush_interval; webhook requests never flush inline.
+        """
         try:
-            # Checked before the casts below, which would raise on None and
-            # end up as an anonymous error instead of naming the field.
-            required = ("spawnpoint", "pokemon_id", "iv", "level", "area_id", "first_seen")
-            missing = [name for name in required if event_data.get(name) is None]
-            if missing:
-                logger.warning(
-                    f"❌ IV event missing required fields {missing} "
-                    f"(pokemon_id={event_data.get('pokemon_id')}, encounter_id={event_data.get('encounter_id')}). Skipping."
-                )
-                return
-
-            # Construct a unique key based on event fields
-            spawnpoint = event_data.get("spawnpoint")
-            pokemon_id = int(event_data.get("pokemon_id"))
-            form       = str(event_data.get("form", 0))
-            round_iv   = int(round(event_data.get("iv")))
-            level      = int(event_data.get("level"))
-            area_id    = int(event_data.get("area_id"))
-            first_seen = int(event_data.get("first_seen"))
-            latitude   = _to_float(event_data.get("latitude"))
-            longitude  = _to_float(event_data.get("longitude"))
-
-            # Create a composite unique key string
-            unique_key = f"{spawnpoint}|{pokemon_id}|{form}|{round_iv}|{level}|{area_id}|{first_seen}"
-
-            # Get a working client with retry
-            client = await _get_client_with_retry(redis_client)
-            if not client:
-                logger.error("❌ Pokemon IV buffer: No Redis connection available after retries. Event lost.")
-                return
-
-            # Persist coordinates once per spawnpoint
-            if latitude is not None and longitude is not None:
-                try:
-                    await client.hsetnx(cls.redis_coords_key, spawnpoint, f"{latitude},{longitude}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to cache coords for spawnpoint {spawnpoint}: {e}")
-
-            # Append one event line with retry
-            new_len = None
-            for attempt in range(3):
-                try:
-                    new_len = await client.rpush(cls.redis_key, unique_key)
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        client = await _get_client_with_retry(None)
-                        if not client:
-                            logger.error(f"❌ Pokemon IV buffer: rpush failed, no client available: {e}")
-                            return
-                    else:
-                        logger.error(f"❌ Pokemon IV buffer: rpush failed after retries: {e}")
-                        return
-
-            logger.debug(f"Appended IV event '{unique_key}'. List length now {new_len}.")
-
-            # Check list size
-            current_len = await client.llen(cls.redis_key)
-            logger.debug(f"📊 👻 Current queued pokemon events: {current_len}")
-
-            # Flush if the number of unique lines exceeds the threshold
-            if current_len >= cls.aggregation_threshold:
-                logger.warning(f"📊 👻 Event buffer threshold reached: {current_len}. Flushing…")
-                await cls.flush_if_ready(client)
+            entry = cls.entry(event_data)
         except Exception as e:
-            logger.error(f"❌ Error incrementing aggregated event: {e}")
+            logger.error(f"❌ IV buffer: could not build entry: {e}")
+            return False
+        if entry is None:
+            return False
+        line, spawnpoint, coords = entry
+        if coords:
+            pipe.hsetnx(cls.redis_coords_key, spawnpoint, coords)
+        pipe.rpush(cls.redis_key, line)
+        return True
 
     @staticmethod
     def _parse_iv_lines(lines, coords_raw) -> tuple[list[dict], dict]:
@@ -213,72 +193,51 @@ class ShinyRateRedisBuffer:
     aggregation_threshold = int(AppConfig.shiny_max_threshold)
 
     @classmethod
-    async def increment_event(cls, redis_client: Redis, event_data: dict):
+    def entry(cls, event_data: dict) -> str | None:
+        """The aggregate field this event increments; None (already logged) to skip it."""
+        # Required fields for constructing the unique key
+        username = event_data.get("username")
+        pokemon_id = event_data.get("pokemon_id")
+        form = event_data.get("form", 0)
+        shiny_raw = event_data.get("shiny", 0)
+        if isinstance(shiny_raw, bool):
+            shiny = 1 if shiny_raw else 0
+        else:
+            shiny_num = _safe_int(shiny_raw, 0)
+            shiny = 1 if shiny_num and shiny_num != 0 else 0
+        area_id = event_data.get("area_id")
+        first_seen = event_data.get("first_seen")
+        # Golbat sends username = null when it re-saves a pokemon without a
+        # reporting account - e.g. its weather-change IV recalculation
+        # (ProactiveIVSwitch) with store_username off - so expect ['username'].
+        required = {"username": username, "pokemon_id": pokemon_id, "area_id": area_id, "first_seen": first_seen}
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            logger.warning(
+                f"❌ Shiny event missing required fields {missing} "
+                f"(pokemon_id={pokemon_id}, encounter_id={event_data.get('encounter_id')}). Skipping."
+            )
+            return None
+
+        dt = datetime.fromtimestamp(first_seen)
+        month_year = dt.strftime("%y%m")  # e.g. "2503" for March 2025
+
+        # Construct a composite unique key
+        unique_key = f"{username}|{pokemon_id}|{form}|{shiny}|{area_id}|{month_year}"
+        return unique_key
+
+    @classmethod
+    def stage(cls, pipe, event_data: dict) -> bool:
+        """Queue this event's shiny-rate increment on the caller's pipeline (no own round trip)."""
         try:
-            # Required fields for constructing the unique key
-            username = event_data.get("username")
-            pokemon_id = event_data.get("pokemon_id")
-            form = event_data.get("form", 0)
-            shiny_raw = event_data.get("shiny", 0)
-            if isinstance(shiny_raw, bool):
-                shiny = 1 if shiny_raw else 0
-            else:
-                shiny_num = _safe_int(shiny_raw, 0)
-                shiny = 1 if shiny_num and shiny_num != 0 else 0
-            area_id = event_data.get("area_id")
-            first_seen = event_data.get("first_seen")
-            # Golbat sends username = null when it re-saves a pokemon without a
-            # reporting account - e.g. its weather-change IV recalculation
-            # (ProactiveIVSwitch) with store_username off - so expect ['username'].
-            required = {"username": username, "pokemon_id": pokemon_id, "area_id": area_id, "first_seen": first_seen}
-            missing = [name for name, value in required.items() if value is None]
-            if missing:
-                logger.warning(
-                    f"❌ Shiny event missing required fields {missing} "
-                    f"(pokemon_id={pokemon_id}, encounter_id={event_data.get('encounter_id')}). Skipping."
-                )
-                return
-
-            dt = datetime.fromtimestamp(first_seen)
-            month_year = dt.strftime("%y%m")  # e.g. "2503" for March 2025
-
-            # Construct a composite unique key
-            unique_key = f"{username}|{pokemon_id}|{form}|{shiny}|{area_id}|{month_year}"
-
-            # Get a working client with retry
-            client = await _get_client_with_retry(redis_client)
-            if not client:
-                logger.error("❌ Shiny buffer: No Redis connection available after retries. Event lost.")
-                return
-
-            # Increment the count for this unique key with retry
-            new_count = None
-            for attempt in range(3):
-                try:
-                    new_count = await client.hincrby(cls.redis_key, unique_key, 1)
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        client = await _get_client_with_retry(None)
-                        if not client:
-                            logger.error(f"❌ Shiny buffer: hincrby failed, no client available: {e}")
-                            return
-                    else:
-                        logger.error(f"❌ Shiny buffer: hincrby failed after retries: {e}")
-                        return
-
-            logger.debug(f"Incremented shiny key '{unique_key}' to {new_count}.")
-
-            # Check total unique keys in the hash
-            current_unique_count = await client.hlen(cls.redis_key)
-            logger.debug(f"📊 🌟 Current total unique aggregated shiny keys: {current_unique_count}")
-
-            # Flush if threshold is reached
-            if current_unique_count >= cls.aggregation_threshold:
-                logger.warning(f"📊 🌟 Shiny aggregation threshold reached: {current_unique_count} unique keys. Initiating flush...")
-                await cls.flush_if_ready(client)
+            field = cls.entry(event_data)
         except Exception as e:
-            logger.error(f"❌ Error incrementing aggregated shiny event: {e}")
+            logger.error(f"❌ Shiny buffer: could not build entry: {e}")
+            return False
+        if field is None:
+            return False
+        pipe.hincrby(cls.redis_key, field, 1)
+        return True
 
     @staticmethod
     def _parse_shiny(aggregated_data) -> tuple[list[dict], int]:

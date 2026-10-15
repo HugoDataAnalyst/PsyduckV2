@@ -135,7 +135,8 @@ async def receive_webhook(request: Request):
                             headers={"Retry-After": "1"})
 
     data = await request.json()  # Parse incoming webhook JSON
-    logger.debug(f"📥 Received Webhook: {data}")
+    # Lazy: formatting the whole batch costs real CPU on every POST, so only do it at DEBUG
+    logger.opt(lazy=True).debug("📥 Received Webhook: {}", lambda: data)
 
     if not isinstance(data, list):
         ingest.begin(1)

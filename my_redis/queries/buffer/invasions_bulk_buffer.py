@@ -51,73 +51,53 @@ class InvasionsRedisBuffer:
     aggregation_threshold = int(AppConfig.invasion_max_threshold)
 
     @classmethod
-    async def increment_event(cls, redis_client: Redis, event_data: dict):
+    def entry(cls, event_data: dict) -> str | None:
+        """Validate one event and build its buffer line; None (already logged) to skip it."""
+        pokestop      = _norm_str(event_data.get("invasion_pokestop_id"))
+        pokestop_name = _norm_name(event_data.get("invasion_pokestop_name"))
+        lat           = _to_float(event_data.get("invasion_latitude"))
+        lon           = _to_float(event_data.get("invasion_longitude"))
+
+        display_type  = _safe_int(event_data.get("invasion_type"), 0)
+        character     = _safe_int(event_data.get("invasion_character"), 0)
+        grunt         = _safe_int(event_data.get("invasion_grunt_type"), 0)
+        confirmed     = _safe_int(event_data.get("invasion_confirmed"), 0)
+        area_id       = _safe_int(event_data.get("area_id"), None)
+        first_seen    = _safe_int(event_data.get("invasion_first_seen"), None)
+
+        if not pokestop or area_id is None or first_seen is None:
+            missing = [name for name, bad in (("invasion_pokestop_id", not pokestop), ("area_id", area_id is None),
+                                              ("invasion_first_seen", first_seen is None)) if bad]
+            logger.debug(f"❌ invasions: missing required fields {missing} (pokestop={pokestop!r})")
+            return None
+
+        # Skip if coords are missing/zero/invalid
+        if not _valid_coords(lat, lon):
+            logger.debug(f"↩️  invasions: dropped event for `{pokestop}` due to invalid coords lat={lat} lon={lon}")
+            return None
+
+        line = (
+            f"{pokestop}|{pokestop_name}|{lat}|{lon}|"
+            f"{display_type}|{character}|{grunt}|{confirmed}|{area_id}|{first_seen}"
+        )
+        return line
+
+    @classmethod
+    def stage(cls, pipe, event_data: dict) -> bool:
         """
-        Accepts filtered invasion payload:
-          invasion_pokestop_id, invasion_pokestop_name, invasion_latitude, invasion_longitude,
-          invasion_type, invasion_character, invasion_grunt_type,
-          invasion_confirmed, area_id, invasion_first_seen
+        Queue this event's buffer append on the caller's pipeline - no round
+        trip of its own. Flushing is the leader's flusher's job, every
+        flush_interval seconds; webhook requests never flush inline.
         """
         try:
-            pokestop      = _norm_str(event_data.get("invasion_pokestop_id"))
-            pokestop_name = _norm_name(event_data.get("invasion_pokestop_name"))
-            lat           = _to_float(event_data.get("invasion_latitude"))
-            lon           = _to_float(event_data.get("invasion_longitude"))
-
-            display_type  = _safe_int(event_data.get("invasion_type"), 0)
-            character     = _safe_int(event_data.get("invasion_character"), 0)
-            grunt         = _safe_int(event_data.get("invasion_grunt_type"), 0)
-            confirmed     = _safe_int(event_data.get("invasion_confirmed"), 0)
-            area_id       = _safe_int(event_data.get("area_id"), None)
-            first_seen    = _safe_int(event_data.get("invasion_first_seen"), None)
-
-            if not pokestop or area_id is None or first_seen is None:
-                missing = [name for name, bad in (("invasion_pokestop_id", not pokestop), ("area_id", area_id is None),
-                                                  ("invasion_first_seen", first_seen is None)) if bad]
-                logger.debug(f"❌ invasions: missing required fields {missing} (pokestop={pokestop!r})")
-                return
-
-            # Skip if coords are missing/zero/invalid
-            if not _valid_coords(lat, lon):
-                logger.debug(f"↩️  invasions: dropped event for `{pokestop}` due to invalid coords lat={lat} lon={lon}")
-                return
-
-            line = (
-                f"{pokestop}|{pokestop_name}|{lat}|{lon}|"
-                f"{display_type}|{character}|{grunt}|{confirmed}|{area_id}|{first_seen}"
-            )
-
-            # Get a working client with retry
-            client = await _get_client_with_retry(redis_client)
-            if not client:
-                logger.error("❌ Invasions buffer: No Redis connection available after retries. Event lost.")
-                return
-
-            # Append with retry
-            new_len = None
-            for attempt in range(3):
-                try:
-                    new_len = await client.rpush(cls.redis_key, line)
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        client = await _get_client_with_retry(None)
-                        if not client:
-                            logger.error(f"❌ Invasions buffer: rpush failed, no client available: {e}")
-                            return
-                    else:
-                        logger.error(f"❌ Invasions buffer: rpush failed after retries: {e}")
-                        return
-
-            logger.debug(f"➕ Appended invasion event. len={new_len}")
-
-            queued = await client.llen(cls.redis_key)
-            if queued >= cls.aggregation_threshold:
-                logger.warning(f"📊 🚀 Invasion buffer threshold {queued} reached. Flushing…")
-                await cls.flush_if_ready(client)
-
+            line = cls.entry(event_data)
         except Exception as e:
-            logger.error(f"❌ invasions increment_event error: {e}", exc_info=True)
+            logger.error(f"❌ Invasions buffer: could not build entry: {e}")
+            return False
+        if line is None:
+            return False
+        pipe.rpush(cls.redis_key, line)
+        return True
 
     @classmethod
     async def _consume_list_to_batch(cls, redis_client: Redis, temp_key: str) -> list[dict]:

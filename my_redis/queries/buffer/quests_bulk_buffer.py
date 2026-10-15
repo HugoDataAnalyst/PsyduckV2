@@ -56,94 +56,74 @@ class QuestsRedisBuffer:
     aggregation_threshold = int(AppConfig.quest_max_threshold)
 
     @classmethod
-    async def increment_event(cls, redis_client: Redis, event_data: dict):
+    def entry(cls, event_data: dict) -> str | None:
+        """Validate one event and build its buffer line; None (already logged) to skip it."""
+        pokestop     = _norm_str(event_data.get("pokestop_id"))
+        pokestop_name= _norm_name(event_data.get("pokestop_name"))
+        lat          = _to_float(event_data.get("latitude"))
+        lon          = _to_float(event_data.get("longitude"))
+
+        area_id      = _safe_int(event_data.get("area_id"))
+        first_seen   = _safe_int(event_data.get("first_seen"))
+        mode         = 1 if _safe_int(event_data.get("ar_type"), 0) > 0 else 0
+        task_type    = _safe_int(event_data.get("ar_type") if mode else event_data.get("normal_type"), 0)
+
+        if not pokestop or area_id is None or first_seen is None or task_type == 0:
+            missing = [name for name, bad in (("pokestop_id", not pokestop), ("area_id", area_id is None),
+                                              ("first_seen", first_seen is None), ("task_type", task_type == 0)) if bad]
+            logger.debug(f"❌ quests: missing required fields {missing} (pokestop={pokestop!r})")
+            return None
+
+        # Skip if coords are missing/zero/invalid
+        if not _valid_coords(lat, lon):
+            logger.debug(f"↩️  Quests: dropped event for `{pokestop}` due to invalid coords lat={lat} lon={lon}")
+            return None
+
+        # Reward resolution
+        poke_id   = _safe_int(event_data.get("reward_ar_poke_id" if mode else "reward_normal_poke_id"), 0)
+        poke_form = _norm_str(event_data.get("reward_ar_poke_form" if mode else "reward_normal_poke_form"), "")
+        item_id   = _safe_int(event_data.get("reward_ar_item_id" if mode else "reward_normal_item_id"), 0)
+        item_amt  = _safe_int(event_data.get("reward_ar_item_amount" if mode else "reward_normal_item_amount"), 0)
+
+        if poke_id and poke_id > 0:
+            kind = 1
+            if not poke_form:
+                poke_form = "0"
+            item_id = 0
+            item_amt = 0
+        elif item_id and item_id > 0:
+            kind = 0
+            if item_amt is None or item_amt <= 0:
+                item_amt = 1
+            poke_id = 0
+            poke_form = ""
+        else:
+            logger.debug("❌ quests: no usable reward (item or pokemon)")
+            return None
+
+        # pokestop|name|lat|lon|mode|task_type|area_id|first_seen|kind|item_id|item_amount|poke_id|poke_form
+        line = (
+            f"{pokestop}|{pokestop_name}|{lat}|{lon}|{mode}|{task_type}|{area_id}|{first_seen}|{kind}|"
+            f"{item_id}|{item_amt}|{poke_id}|{poke_form}"
+        )
+        return line
+
+    @classmethod
+    def stage(cls, pipe, event_data: dict) -> bool:
         """
-        Accepts the normalized quest_data.
-        Required keys:
-          pokestop_id, pokestop_name, latitude, longitude, area_id, first_seen,
-          ar_type/normal_type (one of them), reward_* (first reward only)
+        Queue this event's buffer append on the caller's pipeline - no round
+        trip of its own. Flushing is the leader's flusher's job, every
+        flush_interval seconds; webhook requests never flush inline.
         """
         try:
-            pokestop     = _norm_str(event_data.get("pokestop_id"))
-            pokestop_name= _norm_name(event_data.get("pokestop_name"))
-            lat          = _to_float(event_data.get("latitude"))
-            lon          = _to_float(event_data.get("longitude"))
-
-            area_id      = _safe_int(event_data.get("area_id"))
-            first_seen   = _safe_int(event_data.get("first_seen"))
-            mode         = 1 if _safe_int(event_data.get("ar_type"), 0) > 0 else 0
-            task_type    = _safe_int(event_data.get("ar_type") if mode else event_data.get("normal_type"), 0)
-
-            if not pokestop or area_id is None or first_seen is None or task_type == 0:
-                missing = [name for name, bad in (("pokestop_id", not pokestop), ("area_id", area_id is None),
-                                                  ("first_seen", first_seen is None), ("task_type", task_type == 0)) if bad]
-                logger.debug(f"❌ quests: missing required fields {missing} (pokestop={pokestop!r})")
-                return
-
-            # Skip if coords are missing/zero/invalid
-            if not _valid_coords(lat, lon):
-                logger.debug(f"↩️  Quests: dropped event for `{pokestop}` due to invalid coords lat={lat} lon={lon}")
-                return
-
-            # Reward resolution
-            poke_id   = _safe_int(event_data.get("reward_ar_poke_id" if mode else "reward_normal_poke_id"), 0)
-            poke_form = _norm_str(event_data.get("reward_ar_poke_form" if mode else "reward_normal_poke_form"), "")
-            item_id   = _safe_int(event_data.get("reward_ar_item_id" if mode else "reward_normal_item_id"), 0)
-            item_amt  = _safe_int(event_data.get("reward_ar_item_amount" if mode else "reward_normal_item_amount"), 0)
-
-            if poke_id and poke_id > 0:
-                kind = 1
-                if not poke_form:
-                    poke_form = "0"
-                item_id = 0
-                item_amt = 0
-            elif item_id and item_id > 0:
-                kind = 0
-                if item_amt is None or item_amt <= 0:
-                    item_amt = 1
-                poke_id = 0
-                poke_form = ""
-            else:
-                logger.debug("❌ quests: no usable reward (item or pokemon)")
-                return
-
-            # pokestop|name|lat|lon|mode|task_type|area_id|first_seen|kind|item_id|item_amount|poke_id|poke_form
-            line = (
-                f"{pokestop}|{pokestop_name}|{lat}|{lon}|{mode}|{task_type}|{area_id}|{first_seen}|{kind}|"
-                f"{item_id}|{item_amt}|{poke_id}|{poke_form}"
-            )
-
-            # Get a working client with retry
-            client = await _get_client_with_retry(redis_client)
-            if not client:
-                logger.error("❌ Quests buffer: No Redis connection available after retries. Event lost.")
-                return
-
-            # Append with retry
-            new_len = None
-            for attempt in range(3):
-                try:
-                    new_len = await client.rpush(cls.redis_key, line)
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        client = await _get_client_with_retry(None)
-                        if not client:
-                            logger.error(f"❌ Quests buffer: rpush failed, no client available: {e}")
-                            return
-                    else:
-                        logger.error(f"❌ Quests buffer: rpush failed after retries: {e}")
-                        return
-
-            logger.debug(f"➕ Appended quest event. len={new_len}")
-
-            queued = await client.llen(cls.redis_key)
-            if queued >= cls.aggregation_threshold:
-                logger.warning(f"📊 📜 Quest buffer threshold {queued} reached. Flushing…")
-                await cls.flush_if_ready(client)
-
+            line = cls.entry(event_data)
         except Exception as e:
-            logger.error(f"❌ quests increment_event error: {e}", exc_info=True)
+            logger.error(f"❌ Quests buffer: could not build entry: {e}")
+            return False
+        if line is None:
+            return False
+        pipe.rpush(cls.redis_key, line)
+        return True
 
     @classmethod
     async def _consume_list_to_batch(cls, redis_client: Redis, temp_key: str) -> list[dict]:
