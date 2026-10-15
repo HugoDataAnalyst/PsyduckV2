@@ -3,6 +3,8 @@ from utils.safe_values import _safe_int, _to_float
 from utils.logger import logger
 from datetime import datetime
 from sql.tasks.pokemon_processor import PokemonSQLProcessor
+from sql.utils.errors import FlushError
+from my_redis.queries.buffer import flush_guard
 import config as AppConfig
 import asyncio
 
@@ -106,255 +108,97 @@ class PokemonIVRedisBuffer:
         except Exception as e:
             logger.error(f"❌ Error incrementing aggregated event: {e}")
 
+    @staticmethod
+    def _parse_iv_lines(lines, coords_raw) -> tuple[list[dict], dict]:
+        """Turn buffered lines (+ the coords snapshot) into SQL rows."""
+        coords_map = {}
+        for k, v in (coords_raw or {}).items():
+            try:
+                sp = k.decode() if isinstance(k, (bytes, bytearray)) else k
+                s_ = v.decode() if isinstance(v, (bytes, bytearray)) else v
+                la, lo = s_.split(",", 1)
+                coords_map[sp] = (float(la), float(lo))
+            except Exception:
+                pass
+
+        data_batch = []
+        stats = {"lines": len(lines), "malformed": 0, "coords_used": 0, "coords_missing": 0}
+        for b in lines:
+            try:
+                line = b.decode() if isinstance(b, (bytes, bytearray)) else b
+                # spawnpoint|pokemon_id|form|iv|level|area_id|first_seen
+                sp_hex, pid_s, form_s, iv_s, level_s, area_s, fs_s = line.split("|")
+                lat, lon = coords_map.get(sp_hex, (None, None))
+                if lat is None or lon is None:
+                    stats["coords_missing"] += 1
+                else:
+                    stats["coords_used"] += 1
+                data_batch.append({
+                    "spawnpoint": sp_hex,
+                    "pokemon_id": int(pid_s),
+                    "form": form_s,
+                    "iv": int(iv_s),
+                    "level": int(level_s),
+                    "area_id": int(area_s),
+                    "first_seen": int(fs_s),  # epoch secs (local area time)
+                    "latitude": lat,
+                    "longitude": lon,
+                })
+            except Exception:
+                stats["malformed"] += 1
+        return data_batch, stats
+
     @classmethod
-    async def flush_if_ready(cls, redis_client: Redis) -> int:
+    async def _flush(cls, redis_client: Redis, tag: str, label: str) -> int:
         """
-        Flush buffered IV aggregates into MySQL.
-        - Renames both the aggregate hash and its companion coords hash.
-        - Builds a data_batch (skipping malformed keys).
-        - Uses the v2 temp-table path for fast upsert.
-        - Returns the number of aggregated rows consumed by SQL (not unique keys in Redis).
+        Move the event list and its coords hash aside, write them to MySQL, and
+        delete them only on success. A failed write merges both back into the
+        live buffers so the next flush retries them (INSERT IGNORE makes a
+        retried batch safe). Returns the number of rows inserted.
         """
-        # Get a working client with retry
         client = await _get_client_with_retry(redis_client)
         if not client:
-            logger.error("❌ Pokemon IV flush: No Redis connection available after retries.")
+            logger.error(f"❌ {label}: No Redis connection available after retries.")
             return 0
 
-        main_temp = None
+        main_temp = await flush_guard.claim(client, cls.redis_key, tag)
+        if main_temp is None:
+            logger.debug(f"📭 No {label} data to flush.")
+            return 0
+
         coords_temp = None
         try:
-            # 0) Quick check
-            if not await client.exists(cls.redis_key):
-                logger.debug("📭 No aggregated IV data to flush.")
-                return 0
-
-            # 1) Atomically rename the main aggregate hash and the companion coords hash
-            main_temp = cls.redis_key + ":flushing"            # e.g., buffer:pokemon_iv_events:flushing
-            coords_temp = cls.redis_coords_key + ":flushing"   # e.g., buffer:pokemon_iv_coords:flushing
-
-            try:
-                await client.rename(cls.redis_key, main_temp)
-            except Exception as rename_err:
-                if "no such key" in str(rename_err).lower():
-                    logger.debug("📭 IV list disappeared before rename. Nothing to flush.")
-                    return 0
-                raise
-
-            # coords are optional
-            try:
-                await client.rename(cls.redis_coords_key, coords_temp)
-            except Exception as rename_coords_err:
-                if "no such key" in str(rename_coords_err).lower():
-                    coords_temp = None  # proceed without coords
-                else:
-                    raise
-
-            # 2) Read both hashes
+            coords_temp = await flush_guard.claim(client, cls.redis_coords_key, tag)
             lines = await client.lrange(main_temp, 0, -1)
-            if not lines:
-                logger.debug("📭 Temp IV list empty after rename. Skipping")
-                return 0
-
-            total_lines = len(lines)
-
-            # snapshot coords (from temp hash if present)
-            coords_map = {}
-            if coords_temp:
-                coords_raw = await client.hgetall(coords_temp)
-                for k, v in coords_raw.items():
-                    try:
-                        sp = k.decode() if isinstance(k, (bytes, bytearray)) else k
-                        s  = v.decode() if isinstance(v, (bytes, bytearray)) else v
-                        la, lo = s.split(",", 1)
-                        coords_map[sp] = (float(la), float(lo))
-                    except Exception:
-                        pass
-
-            # 3) Build the SQL batch
-            data_batch = []
-            malformed = 0
-            used_coords = 0
-            missing_coords = 0
-
-            for b in lines:
-                try:
-                    line = b.decode() if isinstance(b, (bytes, bytearray)) else b
-                    # spawnpoint|pokemon_id|form|iv|level|area_id|first_seen
-                    sp_hex, pid_s, form_s, iv_s, level_s, area_s, fs_s = line.split("|")
-                    lat, lon = coords_map.get(sp_hex, (None, None))
-                    if lat is None or lon is None:
-                        missing_coords += 1
-                    else:
-                        used_coords += 1
-
-                    data_batch.append({
-                        "spawnpoint": sp_hex,
-                        "pokemon_id": int(pid_s),
-                        "form": form_s,
-                        "iv": int(iv_s),
-                        "level": int(level_s),
-                        "area_id": int(area_s),
-                        "first_seen": int(fs_s),  # epoch secs (local area time)
-                        "latitude": lat,
-                        "longitude": lon,
-                    })
-                except Exception:
-                    malformed += 1
-
+            coords_raw = await client.hgetall(coords_temp) if coords_temp else {}
+            data_batch, st = cls._parse_iv_lines(lines, coords_raw)
             logger.info(
-                f"📤 Flushing IV events: lines={total_lines}, batch={len(data_batch)}, "
-                f"coords_used={used_coords}, coords_missing={missing_coords}, malformed={malformed}"
+                f"📤 {label}: lines={st['lines']}, batch={len(data_batch)}, "
+                f"coords_used={st['coords_used']}, coords_missing={st['coords_missing']}, malformed={st['malformed']}"
             )
-
             if not data_batch:
+                await flush_guard.discard(client, main_temp, coords_temp)
                 return 0
-
-            # 4) Upsert into SQL
             inserted_count = await PokemonSQLProcessor.bulk_insert_iv_daily_events(data_batch)
-            logger.success(f"📬 IV daily-events inserted +{inserted_count} rows into MySQL.")
-            return inserted_count
-
         except Exception as e:
-            logger.error(f"❌ Error during IV events flush: {e}", exc_info=True)
+            logger.error(f"❌ {label} failed, keeping the batch for retry: {e}")
+            await flush_guard.requeue(client, main_temp, cls.redis_key)
+            await flush_guard.requeue(client, coords_temp, cls.redis_coords_key)
             return 0
-        finally:
-            # 5) Cleanup temp keys
-            try:
-                if main_temp and client:
-                    await client.delete(main_temp)
-            except Exception:
-                pass
-            try:
-                if coords_temp and client:
-                    await client.delete(coords_temp)
-            except Exception:
-                pass
 
+        await flush_guard.discard(client, main_temp, coords_temp)
+        logger.success(f"📬 {label} inserted +{inserted_count} rows into MySQL.")
+        return inserted_count
+
+    @classmethod
+    async def flush_if_ready(cls, redis_client: Redis) -> int:
+        """Flush buffered IV events into MySQL. Returns rows inserted."""
+        return await cls._flush(redis_client, "flushing", "IV daily-events")
 
     @classmethod
     async def force_flush(cls, redis_client: Redis) -> int:
-        """
-        Force flush all buffered IV aggregates, regardless of threshold.
-        Mirrors flush_if_ready logic:
-          - rename BOTH main and coords hashes with ':force_flushing'
-          - read + parse 6-part composite key (sp|pid|form|bucket|area|yymm)
-          - join coords if available
-          - upsert via v2 SQL path
-        Returns number of rows consumed by SQL.
-        """
-        # Get a working client with retry
-        client = await _get_client_with_retry(redis_client)
-        if not client:
-            logger.error("❌ Pokemon IV force-flush: No Redis connection available after retries.")
-            return 0
-
-        main_temp = None
-        coords_temp = None
-        try:
-            # quick existence check
-            if not await client.exists(cls.redis_key):
-                logger.debug("📭 No Pokémon IV data to force flush")
-                return 0
-
-            # rename the list to a force temp
-            main_temp = cls.redis_key + ":force_flushing"
-            try:
-                await client.rename(cls.redis_key, main_temp)
-            except Exception as rename_err:
-                if "no such key" in str(rename_err).lower():
-                    logger.debug("📭 IV hash disappeared before force rename. Nothing to flush.")
-                    return 0
-                raise
-
-            # rename coords if present
-            coords_temp = cls.redis_coords_key + ":force_flushing"
-            try:
-                await client.rename(cls.redis_coords_key, coords_temp)
-            except Exception as rename_coords_err:
-                if "no such key" in str(rename_coords_err).lower():
-                    coords_temp = None  # proceed without coords
-                else:
-                    raise
-
-            # read data
-            lines = await client.lrange(main_temp, 0, -1)
-            if not lines:
-                logger.debug("📭 No Pokémon IV list data in force-flush buffer")
-                return 0
-
-            total_lines = len(lines)
-
-            # coords map
-            coords_map = {}
-            if coords_temp:
-                coords_raw = await client.hgetall(coords_temp)
-                for k, v in coords_raw.items():
-                    try:
-                        sp = k.decode() if isinstance(k, (bytes, bytearray)) else k
-                        s  = v.decode() if isinstance(v, (bytes, bytearray)) else v
-                        la, lo = s.split(",", 1)
-                        coords_map[sp] = (float(la), float(lo))
-                    except Exception:
-                        pass
-
-            # build batch
-            data_batch = []
-            malformed = 0
-            used_coords = 0
-            missing_coords = 0
-
-            for b in lines:
-                try:
-                    line = b.decode() if isinstance(b, (bytes, bytearray)) else b
-                    sp_hex, pid_s, form_s, iv_s, level_s, area_s, fs_s = line.split("|")
-                    lat, lon = coords_map.get(sp_hex, (None, None))
-                    if lat is None or lon is None:
-                        missing_coords += 1
-                    else:
-                        used_coords += 1
-
-                    data_batch.append({
-                        "spawnpoint": sp_hex,
-                        "pokemon_id": int(pid_s),
-                        "form": form_s,
-                        "iv": int(iv_s),
-                        "level": int(level_s),
-                        "area_id": int(area_s),
-                        "first_seen": int(fs_s),
-                        "latitude": lat,
-                        "longitude": lon,
-                    })
-                except Exception:
-                    malformed += 1
-
-            logger.info(
-                f"📤 FORCE flushing IV events: batch={len(data_batch)}, "
-                f"coords_used={used_coords}, coords_missing={missing_coords}, malformed={malformed}"
-            )
-
-            if not data_batch:
-                return 0
-
-            inserted_count = await PokemonSQLProcessor.bulk_insert_iv_daily_events(data_batch)
-            logger.success(f"📬 FORCE IV events inserted +{inserted_count} rows into MySQL.")
-            return inserted_count
-
-        except Exception as e:
-            logger.error(f"❌ Pokémon IV force-flush failed: {e}", exc_info=True)
-            return 0
-        finally:
-            # cleanup
-            try:
-                if main_temp and client:
-                    await client.delete(main_temp)
-            except Exception:
-                pass
-            try:
-                if coords_temp and client:
-                    await client.delete(coords_temp)
-            except Exception:
-                pass
+        """Force flush all buffered IV events, regardless of threshold."""
+        return await cls._flush(redis_client, "force_flushing", "FORCE IV daily-events")
 
 
 class ShinyRateRedisBuffer:
@@ -421,149 +265,92 @@ class ShinyRateRedisBuffer:
         except Exception as e:
             logger.error(f"❌ Error incrementing aggregated shiny event: {e}")
 
+    @staticmethod
+    def _parse_shiny(aggregated_data) -> tuple[list[dict], int]:
+        data_batch = []
+        malformed = 0
+        for k, v in aggregated_data.items():
+            try:
+                composite_key = k.decode("utf-8") if isinstance(k, bytes) else k
+                # username|pokemon_id|form|shiny|area_id|YYMM
+                parts = composite_key.split("|")
+                if len(parts) != 6:
+                    malformed += 1
+                    continue
+                username, pid_s, form_s, shiny_s, area_s, yymm_s = parts
+                data_batch.append({
+                    "username": username,
+                    "pokemon_id": int(pid_s),
+                    "form": form_s,
+                    "shiny": int(shiny_s),
+                    "area_id": int(area_s),
+                    "first_seen": int(datetime.strptime(yymm_s, "%y%m").timestamp()),
+                    "increment": int(v),
+                })
+            except Exception:
+                malformed += 1
+        return data_batch, malformed
+
     @classmethod
-    async def flush_if_ready(cls, redis_client: Redis) -> int:
+    async def _flush(cls, redis_client: Redis, tag: str, label: str) -> int:
         """
-        Flush buffered shiny aggregates into MySQL.
-        Returns the number of aggregated rows consumed by SQL.
+        Move the counts aside, upsert them, and delete them only on success.
+
+        total_count is additive, so a retry must never resend rows that were
+        already committed: the upsert commits chunk by chunk and reports the
+        unwritten rows, and only those are added back to the live buffer.
         """
-        # Get a working client with retry
         client = await _get_client_with_retry(redis_client)
         if not client:
-            logger.error("❌ Shiny flush: No Redis connection available after retries.")
+            logger.error(f"❌ {label}: No Redis connection available after retries.")
             return 0
 
-        temp_key = None
+        temp_key = await flush_guard.claim(client, cls.redis_key, tag)
+        if temp_key is None:
+            logger.debug(f"📭 No {label} data to flush.")
+            return 0
+
         try:
-            if not await client.exists(cls.redis_key):
-                logger.debug("📭 No aggregated shiny data to flush.")
-                return 0
-
-            # 1) rename to temp
-            temp_key = cls.redis_key + ":flushing"
-            try:
-                await client.rename(cls.redis_key, temp_key)
-            except Exception as rename_err:
-                if "no such key" in str(rename_err).lower():
-                    logger.debug("📭 Shiny hash disappeared before rename. Nothing to flush.")
-                    return 0
-                raise
-
-            # 2) read
             aggregated_data = await client.hgetall(temp_key)
-            if not aggregated_data:
-                logger.debug("📭 No shiny data in temporary hash; skipping.")
-                return 0
-
-            total_keys = len(aggregated_data)
-            formatted_data = {
-                (k.decode("utf-8") if isinstance(k, bytes) else k): int(v)
-                for k, v in aggregated_data.items()
-            }
-
-            # 3) build batch
-            data_batch = []
-            malformed = 0
-            for composite_key, count in formatted_data.items():
-                try:
-                    # username|pokemon_id|form|shiny|area_id|YYMM
-                    parts = composite_key.split("|")
-                    if len(parts) != 6:
-                        malformed += 1
-                        continue
-                    username, pid_s, form_s, shiny_s, area_s, yymm_s = parts
-                    data_batch.append({
-                        "username": username,
-                        "pokemon_id": int(pid_s),
-                        "form": form_s,
-                        "shiny": int(shiny_s),
-                        "area_id": int(area_s),
-                        "first_seen": int(datetime.strptime(yymm_s, "%y%m").timestamp()),
-                        "increment": int(count),
-                    })
-                except Exception:
-                    malformed += 1
-
-            logger.info(
-                f"📤 Flushing shiny rates: keys={total_keys}, batch={len(data_batch)}, malformed={malformed}"
-            )
-
+            data_batch, malformed = cls._parse_shiny(aggregated_data)
+            logger.info(f"📤 {label}: keys={len(aggregated_data)}, batch={len(data_batch)}, malformed={malformed}")
             if not data_batch:
+                await flush_guard.discard(client, temp_key)
                 return 0
-
-            # 4) upsert
             inserted_count = await PokemonSQLProcessor.bulk_upsert_shiny_username_rate_batch(data_batch)
-            logger.success(f"✨ Shiny rates upserted +{inserted_count} rows into MySQL.")
-            return inserted_count
-
-        except Exception as e:
-            logger.error(f"❌ Error during shiny buffer flush: {e}", exc_info=True)
-            return 0
-        finally:
-            # 5) cleanup
+        except FlushError as e:
+            if e.remaining is None:
+                logger.error(f"❌ {label} failed, keeping the batch for retry: {e}")
+                await flush_guard.requeue(client, temp_key, cls.redis_key)
+                return 0
+            counts = {
+                f"{u}|{pid}|{form}|{shiny}|{area}|{my:04d}": inc
+                for (u, pid, form, shiny, area, my, inc) in e.remaining
+            }
+            logger.error(f"❌ {label} partly written; re-queuing {len(counts)} unwritten entries: {e}")
             try:
-                if temp_key and client:
-                    await client.delete(temp_key)
-            except Exception:
-                pass
+                await flush_guard.requeue_counts(client, cls.redis_key, counts)
+                await flush_guard.discard(client, temp_key)
+            except Exception as re_err:
+                # Keep the temp key: a later orphan recovery may re-add the
+                # committed part too, but losing the unwritten counts is worse.
+                logger.error(f"❌ {label}: could not re-queue unwritten entries ({re_err}); batch left in {temp_key}")
+            return 0
+        except Exception as e:
+            logger.error(f"❌ {label} failed, keeping the batch for retry: {e}")
+            await flush_guard.requeue(client, temp_key, cls.redis_key)
+            return 0
+
+        await flush_guard.discard(client, temp_key)
+        logger.success(f"✨ {label} upserted +{inserted_count} rows into MySQL.")
+        return inserted_count
+
+    @classmethod
+    async def flush_if_ready(cls, redis_client: Redis) -> int:
+        """Flush buffered shiny aggregates into MySQL. Returns rows upserted."""
+        return await cls._flush(redis_client, "flushing", "Shiny rates")
 
     @classmethod
     async def force_flush(cls, redis_client: Redis):
         """Force flush all buffered shiny data regardless of thresholds."""
-        # Get a working client with retry
-        client = await _get_client_with_retry(redis_client)
-        if not client:
-            logger.error("❌ Shiny force-flush: No Redis connection available after retries.")
-            return 0
-
-        temp_key = None
-        try:
-            if not await client.exists(cls.redis_key):
-                logger.debug("📭 No shiny data to force flush")
-                return 0
-
-            # Atomically rename the buffer key
-            temp_key = cls.redis_key + ":force_flushing"
-            await client.rename(cls.redis_key, temp_key)
-
-            aggregated_data = await client.hgetall(temp_key)
-            if not aggregated_data:
-                logger.debug("📭 No shiny data in force-flush buffer")
-                await client.delete(temp_key)
-                return 0
-
-            # Process data
-            formatted_data = {
-                (key.decode("utf-8") if isinstance(key, bytes) else key): int(count)
-                for key, count in aggregated_data.items()
-            }
-
-            data_batch = []
-            for composite_key, count in formatted_data.items():
-                parts = composite_key.split("|")
-                if len(parts) != 6:
-                    continue
-
-                data_batch.append({
-                    "username": parts[0],
-                    "pokemon_id": int(parts[1]),
-                    "form": parts[2],
-                    "shiny": int(parts[3]),
-                    "area_id": int(parts[4]),
-                    "first_seen": int(datetime.strptime(parts[5], "%y%m").timestamp()),
-                    "increment": count
-                })
-
-            inserted_count = await PokemonSQLProcessor.bulk_upsert_shiny_username_rate_batch(data_batch)
-            logger.debug(f"🔚 Force-flushed {inserted_count} shiny records")
-            return inserted_count
-
-        except Exception as e:
-            logger.error(f"❌ Shiny rate force-flush failed: {e}")
-            return 0
-        finally:
-            try:
-                if temp_key and client:
-                    await client.delete(temp_key)
-            except Exception:
-                pass
+        return await cls._flush(redis_client, "force_flushing", "FORCE shiny rates")
