@@ -12,7 +12,7 @@ Part B - rollback after a crash
   Live counters must not be rewound to the snapshot.
 
 Part C - Redis really lost its data
-  Stop the app, restart Redis (persistence off: empty, new run_id), start the
+  Stop the app, restart Redis (persistence off: empty), start the
   app: the restore MUST still run and bring the data back.
 
 Part D - Redis restarts underneath a running app (the Oct 15 prod incident:
@@ -22,8 +22,11 @@ Part D - Redis restarts underneath a running app (the Oct 15 prod incident:
   again nor overwrite the backup with a near-empty Redis.
 
 Part E - first deploy of this version onto production's state after Oct 15
-  No run_id recorded, Redis partly refilled, those keys' backup rows already
+  No dataset id recorded, Redis partly refilled, those keys' backup rows already
   overwritten: restore every missing key, leave the refilled ones alone.
+
+Part F - Redis restarts but reloads its data (RDB persistence, or a dump.rdb
+  restored by hand): new process, same data. Nothing may be merged.
 
   python test/scenario_restore_guard.py
 """
@@ -136,7 +139,7 @@ async def part_b() -> dict:
 
 
 def restart_redis():
-    """A real Redis restart: new run_id, every key gone (persistence is off)."""
+    """A real Redis restart: every key gone (persistence is off, no dump.rdb)."""
     h.compose("restart", "redis")
     r = h.rds()
     for _ in range(30):
@@ -221,7 +224,7 @@ async def part_d() -> dict:
               "live_before_next_cycle": before_cycle, "live_after_next_cycle": after_cycle,
               "backup_after_next_cycle": in_backup,
               "lock_reacquired": "re-acquired" in logs,
-              "merges": logs.count("merging the MySQL backup into Redis")}
+              "merges": logs.count("counter keys restored from MySQL")}
     result["pass"] = (merged_after is not None and right_after == snap
                       and result["lock_reacquired"] and result["merges"] == 1
                       and after_cycle == before_cycle and in_backup == after_cycle)
@@ -238,7 +241,7 @@ async def part_e() -> dict:
     # Production after Oct 15: Redis restarted and refilled for hours while the
     # old code kept backing it up - rows of keys written since the restart now
     # hold partial values, rows of older keys still hold the full history, and
-    # no run_id has been recorded yet. Deploying this version must restore the
+    # no dataset id has been recorded yet. Deploying this version must restore the
     # missing history without double counting the keys Redis already has.
     since = h._now_iso()
     await feed(15, seed=51)
@@ -281,12 +284,44 @@ async def part_e() -> dict:
     return result
 
 
+async def part_f() -> dict:
+    h.banner("Part F - Redis restarts and reloads its data (persistence / RDB restore)")
+    # The case a run_id check gets wrong: the process (and run_id) is new but
+    # the data is all there. Merging the backup on top would count it twice.
+    since = h._now_iso()
+    await feed(15, seed=61)
+    wait_for_backup(since)
+    time.sleep(2)
+    before = counter_totals()
+    r = h.rds()
+    r.save()                                   # what RDB persistence / a restored dump.rdb provides
+    since = h._now_iso()
+    restart_redis()
+    reloaded = h.rds().dbsize() > 0
+    time.sleep(25)                             # heartbeat notices the restart, reconcile runs
+    wait_for_backup(since)
+    time.sleep(2)
+    after = counter_totals()
+    logs = h.app_logs(since)
+    subprocess.run(["docker", "exec", "psyduck-test-redis-1", "rm", "-f", "/data/dump.rdb"],
+                   check=False, capture_output=True)
+    result = {"before": before, "after": after, "data_reloaded": reloaded,
+              "merged": "merging the MySQL backup into Redis" in logs or "restored from MySQL" in logs,
+              "skipped": "still holds the data the backup came from" in logs}
+    result["pass"] = reloaded and after == before and not result["merged"] and result["skipped"]
+    print(f"data reloaded by Redis: {reloaded}; counters before {before} after {after}")
+    print(f"backup merged again: {result['merged']} (want False); recognised as same data: {result['skipped']}")
+    print("PART F:", "PASS" if result["pass"] else "FAIL")
+    return result
+
+
 async def main():
     results = {"part_a_resurrection": await part_a(),
                "part_b_crash_rollback": await part_b(),
                "part_c_empty_redis_restored": await part_c(),
                "part_d_redis_restart_under_app": await part_d(),
-               "part_e_first_deploy_after_incident": await part_e()}
+               "part_e_first_deploy_after_incident": await part_e(),
+               "part_f_redis_reloaded_its_data": await part_f()}
     path = h.write_result("restore_guard", results)
     print(f"\nresults -> {path}")
     ok = all(v["pass"] for v in results.values())
