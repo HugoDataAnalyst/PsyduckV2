@@ -2,8 +2,9 @@
 import asyncio
 import time
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse
 from utils.logger import logger
+from utils.runtime_health import ingest, overload_reason, RateLimitedWarning
 from utils.koji_geofences import KojiGeofences
 from utils.global_state_manager import GlobalStateManager
 from webhook.filter_data import WebhookFilter
@@ -18,6 +19,8 @@ from server_fastapi.utils import secure_api
 import config as AppConfig
 
 router = APIRouter()
+
+_shed_warning = RateLimitedWarning(every=30)
 
 # Do NOT instantiate the semaphore globally. Set it to None -> Otherwise we have a global state outside of each worker..
 _redis_semaphore: asyncio.Semaphore | None = None
@@ -113,27 +116,62 @@ async def process_single_event(event: dict):
 
 @router.post("/webhook", dependencies=[Depends(secure_api.validate_remote_addr)], include_in_schema=False)
 async def receive_webhook(request: Request):
-    """Receives and processes incoming webhooks."""
-    #try:
+    """
+    Receives and processes incoming webhooks.
+
+    Load shedding: while this worker is overloaded (too many events in flight,
+    or over its memory cap) a new batch is refused with 503 instead of being
+    queued. Golbat never times out a webhook POST, so queueing grows memory
+    without bound - this is what took the host down on Oct 14. Golbat ignores
+    the status code, so a shed batch is dropped, never retried.
+    """
+    reason = overload_reason()
+    if reason:
+        body = await request.body()
+        shed = max(1, body.count(b'"message"'))
+        ingest.shed(shed)
+        _shed_warning(f"🚦 Webhook overloaded ({reason}) - shedding batches (latest: {shed} events)")
+        return JSONResponse({"status": "overloaded", "reason": reason}, status_code=503,
+                            headers={"Retry-After": "1"})
+
     data = await request.json()  # Parse incoming webhook JSON
     logger.debug(f"📥 Received Webhook: {data}")
 
     if not isinstance(data, list):
-        return await process_single_event(data)  # Handle single webhook
+        ingest.begin(1)
+        try:
+            return await process_single_event(data)  # Handle single webhook
+        finally:
+            ingest.end(1)
 
+    total_events = len(data)
+    ingest.begin(total_events)
+    try:
+        return await _process_batch(request, data)
+    finally:
+        ingest.end(total_events)
+
+
+async def _process_batch(request: Request, data: list):
     # Group events by type
     grouped_events = {}
     for event in data:
         event_type = event.get("type")
         if event_type:
             grouped_events.setdefault(event_type, []).append(event)
+    del data
 
-    results = {}
+    # Only per-type tallies are kept: holding every event's result until the
+    # whole batch finished multiplied memory per in-flight event, and nobody
+    # reads the body (Golbat ignores the response).
+    summary = {}
+    disconnected = False
 
     # Process each event type **concurrently**, and events within each type also concurrently
     async def process_event_group(event_type, events):
+        nonlocal disconnected
         logger.info(f"🔄 Processing {len(events)} {event_type} events...")
-        results[event_type] = []
+        counts = summary[event_type] = {"processed": 0, "ignored": 0, "error": 0}
 
         start_time = time.perf_counter()
 
@@ -143,6 +181,14 @@ async def receive_webhook(request: Request):
         max_ops = _max_concurrent_ops or _calculate_max_concurrent_ops()
         batch_size = min(max_ops * 2, 50)
         for i in range(0, len(events), batch_size):
+            # A sender that gave up on this request will not see the result;
+            # stop spending Redis capacity on it.
+            if AppConfig.webhook_abort_on_disconnect and (disconnected or await request.is_disconnected()):
+                disconnected = True
+                left = len(events) - i
+                ingest.aborted(left)
+                counts["aborted"] = left
+                break
             batch = events[i:i + batch_size]
             # Process batch concurrently
             batch_results = await asyncio.gather(
@@ -154,13 +200,16 @@ async def receive_webhook(request: Request):
             for result in batch_results:
                 if isinstance(result, Exception):
                     logger.error(f"❌ Error processing event: {result}")
-                    results[event_type].append({"status": "error", "message": str(result)})
-                elif result:
-                    results[event_type].append(result)
+                    counts["error"] += 1
+                elif not result or result.get("status") == "ignored":
+                    counts["ignored"] += 1
+                elif result.get("status") == "error":
+                    counts["error"] += 1
+                else:
+                    counts["processed"] += 1
 
-        valid_count = sum(1 for r in results[event_type] if r.get("status") not in ["ignored", "error"])
         elapsed = time.perf_counter() - start_time  # End stopwatch
-        if valid_count:
+        if counts["processed"]:
             logger.success(f"⏱️ Done processing {len(events)} {event_type} events in {elapsed:.2f} seconds.")
         else:
             logger.debug(f"⏱️ No valid {event_type} events processed in {elapsed:.2f} seconds.")
@@ -168,8 +217,6 @@ async def receive_webhook(request: Request):
     # Run different event types **concurrently**
     await asyncio.gather(*[process_event_group(event_type, events) for event_type, events in grouped_events.items()])
 
-    return {"status": "success", "processed_data": results}
-
-    #except Exception as e:
-    #    logger.error(f"❌ Error processing webhook: {e}")
-    #    return {"status": "error", "message": str(e)}
+    if disconnected:
+        logger.warning(f"✂️ Webhook sender disconnected - aborted the rest of the batch: {summary}")
+    return {"status": "success", "processed": summary}

@@ -160,6 +160,17 @@ log_level = get_env_var("LOG_LEVEL", "INFO").upper()
 log_file = get_env_var("LOG_FILE", "FALSE").upper() == "TRUE"
 log_level_dashboard = get_env_var("LOG_LEVEL_DASHBOARD", "INFO").upper()
 log_file_dashboard = get_env_var("LOG_FILE_DASHBOARD", "FALSE").upper() == "TRUE"
+# Webhook ingest protection (per worker process)
+#   max_inflight_events: shed new POSTs with HTTP 503 while this many events are
+#     still being processed (0 = unlimited). Golbat drops a rejected batch, so
+#     this trades a little data during overload for bounded memory.
+#   max_rss_mb: also shed while process memory is above this (0 = disabled).
+#   abort_on_disconnect: stop processing a batch whose sender has hung up.
+#   health_log_interval_seconds: period of the "🩺 ingest" health line.
+webhook_max_inflight_events = int(config.get("WEBHOOK", {}).get("max_inflight_events", 20000))
+webhook_max_rss_mb = int(config.get("WEBHOOK", {}).get("max_rss_mb", 0))
+webhook_abort_on_disconnect = str(config.get("WEBHOOK", {}).get("abort_on_disconnect", True)).upper() == "TRUE"
+health_log_interval_seconds = int(config.get("WEBHOOK", {}).get("health_log_interval_seconds", 60))
 
 
 # Koji
