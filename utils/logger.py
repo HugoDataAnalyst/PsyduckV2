@@ -56,6 +56,10 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
     keep_total    = int(options.get("keep_total", 5))
     retention     = options.get("retention")  # e.g. "7 days"; overrides keep_total
     compression   = options.get("compression", "gz")
+    # diagnose prints the value of every variable in a traceback - slow, and it
+    # puts whatever was in scope (DB/Redis credentials, payloads) into the log.
+    # Opt in with LOG_DIAGNOSE=true when debugging locally.
+    diagnose      = os.getenv("LOG_DIAGNOSE", "false").strip().lower() == "true"
 
     # FIX: Use the patcher to inject the worker ID dynamically.
     # We now correctly use the get_worker_id() function we defined above.
@@ -85,7 +89,7 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
         format=log_fmt,
         colorize=True,
         backtrace=True,
-        diagnose=True,
+        diagnose=diagnose,
         enqueue=True,
     )
 
@@ -113,7 +117,7 @@ def setup_logging(log_lvl: str = "DEBUG", options: Optional[LoggingOptions] = No
             format=log_fmt,
             colorize=False,
             backtrace=True,
-            diagnose=True,
+            diagnose=diagnose,
             rotation=rotation,
             retention=rotated_keep,
             compression=compression,
