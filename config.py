@@ -86,6 +86,10 @@ clean_raid_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_raid_o
 clean_quest_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_quest_older_than_x_days", 15))
 clean_invasion_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_invasion_older_than_x_days", 15))
 clean_pokemon_shiny_older_than_x_months = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_shiny_older_than_x_months", 3))
+# Expired partitions are dropped this many per ALTER, with a pause between ALTERs,
+# so a big retention cut never locks a table for one long drop.
+partition_drop_batch = int(config.get('CLEAN_SQL', {}).get("partition_drop_batch", 2))
+partition_drop_pause_seconds = float(config.get('CLEAN_SQL', {}).get("partition_drop_pause_seconds", 10))
 
 # Redis
 redis_password = get_env_var("REDIS_PASSWORD", "myveryredisstrongpassword")

@@ -11,7 +11,9 @@
         "clean_raid_older_than_x_days": 15,
         "clean_quest_older_than_x_days": 15,
         "clean_invasion_older_than_x_days": 15,
-        "clean_pokemon_shiny_older_than_x_months": 3
+        "clean_pokemon_shiny_older_than_x_months": 3,
+        "partition_drop_batch": 2,
+        "partition_drop_pause_seconds": 10
     },
     "IN-MEMORY":{
         "store_pokemon_timeseries": true,
