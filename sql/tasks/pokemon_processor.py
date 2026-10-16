@@ -17,7 +17,7 @@ class PokemonSQLProcessor:
     def _row_from_event(d: dict):
         """
         Produce a tuple for tmp table:
-        (spawnpoint, lat, lon, pokemon_id, form, iv, level, area_id, day_date, seen_at_str)
+        (spawnpoint, lat, lon, pokemon_id, form, iv, level, area_id, day_date, seen_at_str, encounter_id)
         """
         try:
             sp_hex = d.get("spawnpoint")
@@ -40,7 +40,16 @@ class PokemonSQLProcessor:
             day_date = seen_at.date().isoformat()              # 'YYYY-MM-DD'
             seen_at_str = seen_at.strftime("%Y-%m-%d %H:%M:%S")
 
-            return (sp, lat, lon, pid, form, iv, level, area, day_date, seen_at_str)
+            # uint64 as stored by Golbat; anything else (missing, old line, junk) -> NULL
+            eid = d.get("encounter_id")
+            try:
+                eid = int(eid) if eid not in (None, "") else None
+                if eid is not None and not (0 < eid < 2 ** 64):
+                    eid = None
+            except (TypeError, ValueError):
+                eid = None
+
+            return (sp, lat, lon, pid, form, iv, level, area, day_date, seen_at_str, eid)
         except Exception:
             return None
 
@@ -58,7 +67,7 @@ class PokemonSQLProcessor:
             return 0
 
         rows.sort()
-        placeholders = "(" + ",".join(["%s"] * 10) + ")"
+        placeholders = "(" + ",".join(["%s"] * 11) + ")"
 
         attempt = 0
         while attempt < max_retries:
@@ -77,9 +86,10 @@ class PokemonSQLProcessor:
                           area_id    SMALLINT NOT NULL,
                           day_date   DATE NOT NULL,
                           seen_at    DATETIME NOT NULL,
-                          INDEX idx_sp (spawnpoint),
-                          INDEX idx_day (day_date),
-                          INDEX idx_seen (seen_at)
+                          encounter_id BIGINT UNSIGNED NULL,
+                          -- only spawnpoint is ever grouped/joined on; the final
+                          -- INSERT ... SELECT reads the whole table
+                          INDEX idx_sp (spawnpoint)
                         ) ENGINE=InnoDB
                     """)
 
@@ -121,8 +131,8 @@ class PokemonSQLProcessor:
                     # 4) final insert (dedupe on PK (day_date, spawnpoint, seen_at))
                     await cur.execute("""
                         INSERT IGNORE INTO pokemon_iv_daily_events
-                          (spawnpoint, pokemon_id, form, iv, level, area_id, seen_at, day_date)
-                        SELECT t.spawnpoint, t.pokemon_id, t.form, t.iv, t.level, t.area_id, t.seen_at, t.day_date
+                          (spawnpoint, pokemon_id, form, iv, level, area_id, seen_at, day_date, encounter_id)
+                        SELECT t.spawnpoint, t.pokemon_id, t.form, t.iv, t.level, t.area_id, t.seen_at, t.day_date, t.encounter_id
                         FROM tmp_ivd t
                     """)
                     inserted = cur.rowcount
