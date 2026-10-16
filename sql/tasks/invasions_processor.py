@@ -68,8 +68,7 @@ class InvasionSQLProcessor:
                           area_id       SMALLINT UNSIGNED NOT NULL,
                           first_seen    BIGINT NOT NULL,
 
-                          INDEX ix_tmp_ide_p (pokestop),
-                          INDEX ix_tmp_ide_s (first_seen)
+                          INDEX ix_tmp_ide_p (pokestop)
                         ) ENGINE=InnoDB
                     """)
 

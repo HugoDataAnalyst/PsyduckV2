@@ -67,8 +67,7 @@ class RaidSQLProcessor:
                           area_id             SMALLINT UNSIGNED NOT NULL,
                           first_seen_epoch    BIGINT NOT NULL,
 
-                          INDEX idx_tmp_rde_gym (gym),
-                          INDEX idx_tmp_rde_seen (first_seen_epoch)
+                          INDEX idx_tmp_rde_gym (gym)
                         ) ENGINE=InnoDB
                     """)
 
