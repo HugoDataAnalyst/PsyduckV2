@@ -146,17 +146,25 @@ Run from `test/` with the stack up. Each one leaves the stack running for the ne
 
 ### Benchmarks
 
-```bash
-python bench_ingest.py --rate 470 --mode realistic --label 1x     # production-shaped traffic
-python bench_ingest.py --rate 2350 --mode realistic --label 5x
-python bench_ingest.py --rate 1500 --label exact                  # every event valid and unique
+`bench_ingest.py` replays webhook traffic at a rate you choose, so start from your own feed's rate. Your running PsyduckV2 logs it once a minute in the `🩺 ingest` line:
+
+```
+🩺 ingest | ... | last 60s: accepted 28,200 ev in 60 POSTs, ...
 ```
 
-- `--rate`: messages per second. 470/s is roughly a busy production feed (about half of the Pokémon messages are non-encounters that get filtered out).
-- `--mode realistic`: the production mix of `seen_type`s plus re-sent encounters. `exact` (the default) sends only valid, unique events.
-- `--seconds` (default 30) and `--label` (names the result file).
+Accepted events ÷ seconds = your rate, here 28,200 / 60 = 470 messages/s. Then benchmark your normal load, and multiples of it to see how much headroom you have:
 
-It reports the app's CPU per 1,000 messages, POST latency, and Redis commands and time per message. Compare two runs (for example before and after a change, rebuilding the image in between) by their `--label`.
+```bash
+python bench_ingest.py --rate <your_rate> --mode realistic --label normal
+python bench_ingest.py --rate <your_rate x 2> --mode realistic --label double
+python bench_ingest.py --rate <your_rate x 5> --mode realistic --label five_times
+```
+
+- `--rate`: messages per second.
+- `--mode realistic`: a production-like mix - about half of the Pokémon messages are non-encounter sightings that get filtered out, plus re-sent encounters. `exact` (the default) sends only valid, unique events, the worst case per message.
+- `--seconds` (default 30) and `--label` (any name; the results go to `test/results/bench_ingest_<label>.json`).
+
+Each run reports the app's CPU per 1,000 messages, POST latency (p50/p95/max) and Redis commands and time per message. Golbat posts once a second, so as long as the slowest POST stays well under 1 s the app keeps up; past that, a backlog builds and it is time for more `UVICORN_WORKERS`. To compare code changes, run the same rate and mode before and after (rebuilding the image in between) under two labels.
 
 ### Focused checks
 
