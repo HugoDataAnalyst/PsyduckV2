@@ -101,6 +101,77 @@ Run the migration locally before pushing to the repository:
 > This command will create a new migration file in the alembic/versions/ directory.
 > Make sure to commit the migration file to the repository.
 
+## Testing
+
+`test/` holds a self-contained test stack and scripts that replay real failure cases (a database outage mid-flush, Redis restarting under the app, a crash during leader election, a slow Redis under heavy load) and benchmark the ingest path. Each script prints `PASS`/`FAIL` and saves its numbers in `test/results/`.
+
+Nothing here touches your own PsyduckV2, Redis or database. The stack is a separate Docker Compose project (`psyduck-test`) with its own containers and ports, built from your working copy:
+
+| Service | What it is | Port on your machine |
+|---------|------------|----------------------|
+| `app` | PsyduckV2 built from this repo (`test/app.env`, `test/config.json`) | 15050 |
+| `redis` | Redis 7, password `testpass`, no persistence (like in-memory mode) | 16379 |
+| `mariadb` | MariaDB 10.11, user/password `psyduck` | 13306 |
+| `fake-koji` | Serves 12 synthetic geofences, so no Koji is needed | 18088 |
+
+Events come from `test/feeder.py`, a stand-in for Golbat: one POST per second with every event since the last one, no timeout and no retry, just like Golbat's webhook sender.
+
+### Requirements
+
+- Docker (Docker Desktop on Windows/macOS) running.
+- The project's Python environment with `requirements.txt` installed. The scripts run on your machine and talk to the containers.
+
+Commands below use `python`; on Windows with the project venv that is `.venv/Scripts/python`, on Linux/macOS `.venv/bin/python`.
+
+### Start the stack
+
+```bash
+docker compose -f test/docker-compose.yml build app      # after every code change you want to test
+cd test
+python -c "import harness as h; h.down(); h.up()"        # fresh stack (empty Redis + DB), waits until the app is ready
+```
+
+`h.down()` removes the test containers and their volumes, so every run starts clean. Stop everything with `python -c "import harness as h; h.down()"`.
+
+### Failure scenarios
+
+Run from `test/` with the stack up. Each one leaves the stack running for the next.
+
+| Script | Takes | Checks |
+|--------|-------|--------|
+| `python scenario_flush_requeue.py` | ~5 min | MariaDB goes down while buffers flush: every event still reaches SQL exactly once, and a batch stranded by a crash is recovered |
+| `python scenario_restore_guard.py` | ~15 min | Restarts, crashes and Redis restarts never rewind live counters, resurrect deleted keys, or count anything twice; a Redis that lost its data gets it back |
+| `python scenario_leader_failover.py` | ~3 min | The app restarted right after a crash still becomes leader and keeps flushing |
+| `python scenario_backpressure.py` | ~4 min | Under a slow Redis the app sheds load with 503s instead of growing memory without bound, then recovers |
+
+### Benchmarks
+
+```bash
+python bench_ingest.py --rate 470 --mode realistic --label 1x     # production-shaped traffic
+python bench_ingest.py --rate 2350 --mode realistic --label 5x
+python bench_ingest.py --rate 1500 --label exact                  # every event valid and unique
+```
+
+- `--rate`: messages per second. 470/s is roughly a busy production feed (about half of the Pokémon messages are non-encounters that get filtered out).
+- `--mode realistic`: the production mix of `seen_type`s plus re-sent encounters. `exact` (the default) sends only valid, unique events.
+- `--seconds` (default 30) and `--label` (names the result file).
+
+It reports the app's CPU per 1,000 messages, POST latency, and Redis commands and time per message. Compare two runs (for example before and after a change, rebuilding the image in between) by their `--label`.
+
+### Focused checks
+
+| Script | Checks |
+|--------|--------|
+| `python check_transaction_autocommit.py` | `transaction()` really runs its block as one transaction |
+| `python check_counter_retrieval.py` | Counter reads (generated key names) return exactly what `KEYS` used to |
+| `python smoke_counter_api.py` | Every counter endpoint answers, and no `KEYS` reaches Redis (feed a little first, e.g. one benchmark run) |
+| `python check_geofence_index.py` | The geofence index picks the same area as a linear scan, and how much faster it is |
+| `python check_incremental_backup.py` | Incremental Redis → MySQL backups leave MySQL identical to Redis, across time zones (stops the test app while it runs) |
+| `python check_reencode_hashes.py` | `reencode_hashes` shrinks closed counter hashes without changing a value |
+| `python check_repair_weekly_totals.py` | `repair_weekly_totals` restores exactly what a mid-week Redis wipe took |
+
+> The `check_*` scripts use Redis databases 2–3 and scratch tables of the test stack only. Run every script from `test/`: it keeps your own `.env` from redirecting them anywhere else.
+
 ## Dashboard
 
 The dashboard is a separate Dash-based analytics application that provides visual analytics for Pokemon GO events.
@@ -193,6 +264,8 @@ Retention for partitioned SQL tables. Old daily/monthly partitions are automatic
 | `clean_quest_older_than_x_days` | `15` | Drop quest partitions older than N days |
 | `clean_invasion_older_than_x_days` | `15` | Drop invasion partitions older than N days |
 | `clean_pokemon_shiny_older_than_x_months` | `3` | Drop shiny partitions older than N months |
+| `partition_drop_batch` | `2` | Expired partitions dropped per `ALTER TABLE`. Small batches keep each table lock short, e.g. after lowering a retention |
+| `partition_drop_pause_seconds` | `10` | Pause between those `ALTER TABLE`s so inserts get through |
 
 ### `IN-MEMORY`
 Controls Redis timeseries storage and the optional MySQL backup/restore feature.
@@ -207,6 +280,7 @@ Controls Redis timeseries storage and the optional MySQL backup/restore feature.
 | `REDIS_MYSQL_BACKUPS` | `false` | **Recommended for production.** Periodically backs up Redis counter and timeseries keys to MySQL, then restores them on startup. This is the optimal way to run PsyduckV2 — it allows Redis to operate without AOF/RDB persistence (lower I/O, faster restarts) while guaranteeing no data loss across restarts. |
 | `backup_interval_seconds` | `3600` | How often (seconds) the backup cycle runs |
 | `redis_restore_timeout_seconds` | `600` | How long follower workers wait for the leader to finish restoring Redis data on startup. Increase if your Redis restore takes longer than 10 minutes. Only applies when `REDIS_MYSQL_BACKUPS` is enabled. |
+| `full_backup_interval_hours` | `24` | Backups normally only rewrite keys that can have changed since the previous one; every N hours (and after any restore) a full backup rewrites everything. `0` = always full |
 
 ### `REDIS`
 
@@ -219,8 +293,18 @@ Controls how buffered events are batch-inserted into MySQL.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `{type}_max_threshold` | `10000` | Flush to MySQL when this many events are buffered (per type) |
-| `{type}_flush_interval` | `15` | Flush to MySQL at least every N seconds even if threshold not reached |
+| `{type}_flush_interval` | `15` | The leader flushes each buffer to MySQL every N seconds |
+| `{type}_max_threshold` | `10000` | No longer used: webhook requests never flush, so buffers only drain on the interval above |
+
+### `WEBHOOK`
+Protects the webhook receiver when it falls behind. Limits apply per uvicorn worker.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `max_inflight_events` | `20000` | While this many events are still being processed, new webhook batches are refused with HTTP 503 and dropped (Golbat does not retry). Keeps memory bounded when Redis or MySQL stall. ~20000 is about 40 s of a busy feed; raise it with your volume. `0` = no limit |
+| `max_rss_mb` | `0` | Also refuse batches while the process uses more than this many MB. A last-resort cap; set it well above normal usage (see the `🩺 ingest` log line), since Python rarely returns memory to the OS. `0` = off |
+| `abort_on_disconnect` | `true` | Stop processing a batch whose sender has hung up |
+| `health_log_interval_seconds` | `60` | How often the `🩺 ingest` line is logged (in-flight events, accepted/shed/aborted, event-loop lag, memory). It is a WARNING when anything was shed or the app lagged |
 
 ### `geofences`
 
