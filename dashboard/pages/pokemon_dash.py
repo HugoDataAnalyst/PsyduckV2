@@ -1205,7 +1205,7 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
             elif iv_range[1] == 100:
                 iv_str = f">={iv_range[0]}"
             else:
-                iv_str = f">={iv_range[0]},<={iv_range[1]}"
+                iv_str = f"{iv_range[0]}-{iv_range[1]}"   # one range item: "a,b" would mean a OR b
 
             # Level filter logic
             if level_range[0] == level_range[1]:
@@ -1215,7 +1215,7 @@ def fetch_data(n, source, area, live_h, start, end, interval, mode, iv_range, le
             elif level_range[1] == 50:
                 level_str = f">={level_range[0]}"
             else:
-                level_str = f">={level_range[0]},<={level_range[1]}"
+                level_str = f"{level_range[0]}-{level_range[1]}"   # one range item: "a,b" would mean a OR b
 
             # Pokemon Selection Logic
             all_options = _load_pokedex_data()
