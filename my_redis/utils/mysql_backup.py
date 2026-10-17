@@ -23,6 +23,7 @@ Performance:
 import asyncio
 import uuid
 import json
+from functools import lru_cache
 from datetime import datetime, timedelta, timezone
 import config as AppConfig
 from utils.logger import logger
@@ -59,6 +60,24 @@ async def _scan_keys(client, patterns: list[str]) -> list[str]:
     return found
 
 
+@lru_cache(maxsize=200_000)
+def _parse_stamp(stamp: str, fmt: str) -> datetime | None:
+    """Key time stamps repeat across areas and families (552k keys, a few thousand distinct stamps)."""
+    try:
+        return datetime.strptime(stamp, fmt)
+    except ValueError:
+        return None
+
+
+async def _filter_yielding(items: list, keep, every: int = 5000) -> list:
+    """[x for x in items if keep(x)], letting the event loop run between slices."""
+    out = []
+    for i in range(0, len(items), every):
+        out.extend(x for x in items[i:i + every] if keep(x))
+        await asyncio.sleep(0)
+    return out
+
+
 def _is_counter_key_recent(key: str, now: datetime) -> bool:
     """
     Returns True if this counter key should be included in the backup.
@@ -88,10 +107,8 @@ def _is_counter_key_recent(key: str, now: datetime) -> bool:
         retention_hours = _retention_map.get(key_type, 168)
         if retention_hours == 0:
             return True   # 0 = keep all for this type
-        try:
-            return datetime.strptime(date_str, "%Y%m%d%H") >= now - timedelta(hours=retention_hours)
-        except ValueError:
-            return True
+        start = _parse_stamp(date_str, "%Y%m%d%H")
+        return True if start is None else start >= now - timedelta(hours=retention_hours)
 
     # 8-digit suffix: could be a *_daily key (apply retention) or *_total/*_weather_iv (always keep)
     if len(date_str) == 8 and date_str.isdigit():
@@ -106,10 +123,8 @@ def _is_counter_key_recent(key: str, now: datetime) -> bool:
             retention_days = _daily_retention[key_type]
             if retention_days == 0:
                 return True
-            try:
-                return datetime.strptime(date_str, "%Y%m%d") >= now - timedelta(days=retention_days)
-            except ValueError:
-                return True
+            start = _parse_stamp(date_str, "%Y%m%d")
+            return True if start is None else start >= now - timedelta(days=retention_days)
         # weekly totals (pokemon_total, raid_total, etc.) and weather — always keep
         return True
 
@@ -182,22 +197,33 @@ def counter_last_write_utc(key: str, offsets: dict[str, int]) -> float | None:
         return None
     family, area = parts[1], parts[2]
     stamp = parts[-2] if family == "pokemon_weather_iv" else parts[-1]
-    try:
-        if len(stamp) == 10:
-            start = datetime.strptime(stamp, "%Y%m%d%H")
-            end = start + timedelta(hours=1)
-        elif len(stamp) == 8:
-            start = datetime.strptime(stamp, "%Y%m%d")
-            end = start + timedelta(days=1 if family in _DAILY_FAMILIES else 7)   # totals: week from Monday
-        elif len(stamp) == 6:
-            start = datetime.strptime(stamp, "%Y%m")
-            end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)       # next month
-        else:
-            return None
-    except ValueError:
+    if len(stamp) == 10:
+        span = "hour"
+    elif len(stamp) == 8:
+        span = "day" if family in _DAILY_FAMILIES else "week"
+    elif len(stamp) == 6:
+        span = "month"
+    else:
         return None
-    end_local = end.replace(tzinfo=timezone.utc).timestamp()
-    return _local_to_utc(end_local, area, offsets)
+    end_local = _bucket_end_local(stamp, span)
+    return None if end_local is None else _local_to_utc(end_local, area, offsets)
+
+
+@lru_cache(maxsize=200_000)
+def _bucket_end_local(stamp: str, span: str) -> float | None:
+    fmt = {"hour": "%Y%m%d%H", "day": "%Y%m%d", "week": "%Y%m%d", "month": "%Y%m"}[span]
+    start = _parse_stamp(stamp, fmt)
+    if start is None:
+        return None
+    if span == "hour":
+        end = start + timedelta(hours=1)
+    elif span == "day":
+        end = start + timedelta(days=1)
+    elif span == "week":
+        end = start + timedelta(days=7)                                    # totals: week from Monday
+    else:
+        end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)   # next month
+    return end.replace(tzinfo=timezone.utc).timestamp()
 
 
 def timeseries_last_write_utc(key: str, data: dict[str, str], offsets: dict[str, int]) -> float | None:
@@ -263,11 +289,14 @@ class MySQLBackup:
             return 0
 
         now  = datetime.now(timezone.utc).replace(tzinfo=None)
-        keys = [k for k in all_keys if _is_counter_key_recent(k, now)]
+        # Both filters walk every counter key (~550k in production): slices,
+        # so webhook processing keeps running in between.
+        keys = await _filter_yielding(all_keys, lambda k: _is_counter_key_recent(k, now))
         in_retention = len(keys)
         if since_utc is not None:
             offsets = area_offsets()
-            keys = [k for k in keys if not unchanged_since(counter_last_write_utc(k, offsets), since_utc)]
+            keys = await _filter_yielding(
+                keys, lambda k: not unchanged_since(counter_last_write_utc(k, offsets), since_utc))
         logger.info(
             "Redis backup: {} counter keys, {} within retention, {} to write ({} closed before the last backup)",
             len(all_keys), in_retention, len(keys), in_retention - len(keys),
