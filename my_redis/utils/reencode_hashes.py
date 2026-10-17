@@ -23,7 +23,7 @@ import argparse
 import asyncio
 import time
 
-from my_redis.utils.mysql_backup import BACKUP_GRACE_S, counter_last_write_utc
+from my_redis.utils.mysql_backup import BACKUP_GRACE_S, area_offsets_from_redis, counter_last_write_utc
 
 SCAN_COUNT = 2000
 CHUNK = 200
@@ -33,6 +33,9 @@ CHUNK_SLEEP_S = 0.05
 async def reencode(client, pattern: str = "counter:*", apply: bool = False, log=print) -> dict:
     limit = int((await client.config_get("hash-max-listpack-entries"))["hash-max-listpack-entries"])
     now = time.time()
+    # Real area offsets mean only truly open buckets are skipped; without them
+    # a daily key counts as open until ~16:00 UTC the next day.
+    offsets = await area_offsets_from_redis(client)
     used_before = int((await client.info("memory"))["used_memory"])
     stats = {"scanned": 0, "hashtable": 0, "too_big": 0, "still_written": 0, "converted": 0}
 
@@ -53,7 +56,7 @@ async def reencode(client, pattern: str = "counter:*", apply: bool = False, log=
             if n > limit:
                 stats["too_big"] += 1
                 continue
-            last = counter_last_write_utc(k, {})          # {}: unknown offsets -> most cautious
+            last = counter_last_write_utc(k, offsets)     # areas without an offset: most cautious
             if last is None or last + BACKUP_GRACE_S >= now:
                 stats["still_written"] += 1
                 continue

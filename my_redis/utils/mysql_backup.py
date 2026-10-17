@@ -184,6 +184,20 @@ def area_offsets() -> dict[str, int]:
         return {}
 
 
+async def area_offsets_from_redis(client) -> dict[str, int]:
+    """
+    Area offsets from the geofences the app publishes in Redis - for the
+    standalone tools, which have no in-process geofences. Empty if not found
+    (every area then gets the cautious unknown-offset treatment).
+    """
+    try:
+        raw = await client.get("koji_geofences")
+        geofences = json.loads(raw) if raw else []
+        return {g["name"]: int(g.get("offset") or 0) for g in geofences if g.get("name")}
+    except Exception:
+        return {}
+
+
 def _local_to_utc(local_epoch: float, area: str | None, offsets: dict[str, int]) -> float:
     if area is not None and area in offsets:
         return local_epoch - offsets[area] * 3600

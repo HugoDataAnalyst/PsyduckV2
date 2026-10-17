@@ -32,7 +32,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta
 
-from my_redis.utils.mysql_backup import BACKUP_GRACE_S, counter_last_write_utc
+from my_redis.utils.mysql_backup import BACKUP_GRACE_S, area_offsets_from_redis, counter_last_write_utc
 
 # weekly family -> its daily family
 FAMILIES = {
@@ -66,6 +66,7 @@ def _as_int(v) -> int:
 
 async def repair(client, families: dict[str, str] = FAMILIES, apply: bool = False, log=print) -> dict:
     now = time.time()
+    offsets = await area_offsets_from_redis(client)   # areas without an offset: most cautious
     stats = {"weeks": 0, "open": 0, "damaged": 0, "fields_raised": 0, "added": 0}
     affected: list[tuple[str, int, int]] = []   # (key, weekly sum, daily sum)
 
@@ -79,7 +80,7 @@ async def repair(client, families: dict[str, str] = FAMILIES, apply: bool = Fals
                 if days is None:
                     continue
                 stats["weeks"] += 1
-                last = counter_last_write_utc(key, {})            # {}: most cautious about open weeks
+                last = counter_last_write_utc(key, offsets)
                 if last is None or last + BACKUP_GRACE_S >= now:
                     stats["open"] += 1
                     continue
