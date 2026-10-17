@@ -19,6 +19,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))   # no repo .env
 os.environ.setdefault("LOG_FILE", "False")
 
 import redis.asyncio as aredis  # noqa: E402
+import time  # noqa: E402
+from my_redis.utils.mysql_backup import BACKUP_GRACE_S, counter_last_write_utc  # noqa: E402
 from my_redis.utils.reencode_hashes import reencode  # noqa: E402
 
 METRICS = ["total", "iv100", "iv0", "pvp_little", "pvp_great", "pvp_ultra", "shiny"]
@@ -51,10 +53,15 @@ async def main() -> int:
             seeded[k] = fields(rng, rng.randint(1300, 2600))
     for k, v in seeded.items():
         await r.hset(k, mapping=v)
+    # No geofences in this db, so the tool treats every area as unknown-offset
+    # (most cautious); "open" is whatever that rule says - today's keys always,
+    # yesterday's too until ~16:00 UTC.
     this_monday = (today - timedelta(days=today.weekday())).strftime("%Y%m%d")
-    open_keys = [k for k in seeded
-                 if (":pokemon_daily:" in k and k.endswith(today.strftime("%Y%m%d")))
-                 or (":pokemon_total:" in k and k.endswith(this_monday))]
+    open_keys = [k for k in seeded if counter_last_write_utc(k, {}) + BACKUP_GRACE_S >= time.time()]
+    must_be_open = [k for k in seeded
+                    if (":pokemon_daily:" in k and k.endswith(today.strftime("%Y%m%d")))
+                    or (":pokemon_total:" in k and k.endswith(this_monday))]
+    assert set(must_be_open) <= set(open_keys)
 
     await r.config_set("hash-max-listpack-entries", 4096)
     dry = await reencode(r, apply=False)
