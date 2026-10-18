@@ -20,7 +20,13 @@ and by the manual tool for large ones:
 
 The new indexes are built online (ALGORITHM=INPLACE, LOCK=NONE: inserts keep
 flowing) before the old ones are dropped, so queries stay fast throughout.
-Needs free disk space for the new indexes while both sets exist.
+Keep PsyduckV2 running: stopping it would only lose the webhooks of the whole
+build. Needs free disk space for the new indexes while both sets exist.
+
+Inserts made during the build are kept in an online-ALTER log; if it outgrows
+innodb_online_alter_log_max_size (default 128 MB), the ALTER fails at the very
+end (error 1799) - nothing is damaged, but the build is wasted. The tool checks
+it and tells you to raise it first (e.g. SET GLOBAL ... = 2 GB) when it is small.
 """
 from __future__ import annotations
 
@@ -40,6 +46,9 @@ CURRENT_INDEXES_SQL = (
     "SELECT DISTINCT index_name FROM information_schema.statistics "
     "WHERE table_schema = DATABASE() AND table_name = %s AND index_name <> 'PRIMARY'"
 )
+ALTER_LOG_SQL = "SELECT @@innodb_online_alter_log_max_size"
+MIN_ALTER_LOG_BYTES = 1 << 30   # 1 GB: hours of inserts at a few hundred rows/s
+
 ROW_ESTIMATE_SQL = (
     "SELECT COALESCE(SUM(table_rows), 0) FROM information_schema.partitions "
     "WHERE table_schema = DATABASE() AND table_name = %s"
@@ -58,7 +67,7 @@ def plan(existing: set[str]) -> list[str]:
     return steps
 
 
-async def _main(apply: bool) -> None:
+async def _main(apply: bool, force: bool = False) -> None:
     import time
     import sql.connect_db as db
 
@@ -74,6 +83,15 @@ async def _main(apply: bool) -> None:
             return
         for s in steps:
             print(("RUN  " if apply else "PLAN ") + s)
+        alter_log = int(await db.fetch_val(ALTER_LOG_SQL) or 0)
+        if any("ADD INDEX" in s for s in steps) and alter_log < MIN_ALTER_LOG_BYTES:
+            print(f"⚠️ innodb_online_alter_log_max_size is {alter_log // 1048576} MB: inserts made during a long build "
+                  "can outgrow it and the ALTER then fails at the end (nothing is damaged, the build is wasted).\n"
+                  "   Raise it first, as root, no restart needed:\n"
+                  "     SET GLOBAL innodb_online_alter_log_max_size = 2147483648;")
+            if apply and not force:
+                print("Not starting. Raise it (or re-run with --force to build anyway).")
+                return
         if not apply:
             print("Dry run. Re-run with --apply (off-peak; the build reads the whole table).")
             return
@@ -91,4 +109,6 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true", help="run the ALTERs (default: show the plan)")
-    asyncio.run(_main(ap.parse_args().apply))
+    ap.add_argument("--force", action="store_true", help="with --apply: build even if the online-ALTER log looks small")
+    args = ap.parse_args()
+    asyncio.run(_main(args.apply, args.force))
