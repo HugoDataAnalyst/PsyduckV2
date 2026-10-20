@@ -1,8 +1,8 @@
 """redis_backup_meta
 
-Records which Redis process (its INFO run_id) the MySQL backup was taken from,
-so a restart of the app can tell "Redis is intact - leave it alone" apart from
-"Redis restarted and lost its data - restore it".
+Records which Redis dataset (a marker key stored in Redis) the MySQL backup
+belongs to, so the app can tell "Redis still holds that data - leave it alone"
+apart from "Redis lost its data - restore it", plus backup bookkeeping.
 
 Revision ID: f3a91c2d7b40
 Revises: e7f2c0a1b3d9

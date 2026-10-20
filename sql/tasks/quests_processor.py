@@ -91,8 +91,7 @@ class QuestSQLProcessor:
                         item_id       SMALLINT UNSIGNED NOT NULL,
                         item_amount   SMALLINT UNSIGNED NOT NULL,
 
-                        INDEX ix_tmp_qide_p (pokestop),
-                        INDEX ix_tmp_qide_s (first_seen)
+                        INDEX ix_tmp_qide_p (pokestop)
                         ) ENGINE=InnoDB
                     """)
                     await cur.execute("""
@@ -111,8 +110,7 @@ class QuestSQLProcessor:
                         poke_form     VARCHAR(15) NOT NULL,
                         inc           INT      UNSIGNED NOT NULL,
 
-                        INDEX ix_tmp_qpde_p (pokestop),
-                        INDEX ix_tmp_qpde_s (first_seen)
+                        INDEX ix_tmp_qpde_p (pokestop)
                         ) ENGINE=InnoDB
                     """)
 

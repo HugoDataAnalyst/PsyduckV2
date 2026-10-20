@@ -71,7 +71,9 @@ class PokemonIVRedisBuffer:
         longitude  = _to_float(event_data.get("longitude"))
 
         # Create a composite unique key string
-        unique_key = f"{spawnpoint}|{pokemon_id}|{form}|{round_iv}|{level}|{area_id}|{first_seen}"
+        # Already normalised to a canonical unsigned int64 string by the filter ("" when absent)
+        encounter_id = event_data.get("encounter_id") or ""
+        unique_key = f"{spawnpoint}|{pokemon_id}|{form}|{round_iv}|{level}|{area_id}|{first_seen}|{encounter_id}"
         coords = f"{latitude},{longitude}" if latitude is not None and longitude is not None else None
         return unique_key, spawnpoint, coords
 
@@ -113,8 +115,12 @@ class PokemonIVRedisBuffer:
         for b in lines:
             try:
                 line = b.decode() if isinstance(b, (bytes, bytearray)) else b
-                # spawnpoint|pokemon_id|form|iv|level|area_id|first_seen
-                sp_hex, pid_s, form_s, iv_s, level_s, area_s, fs_s = line.split("|")
+                # spawnpoint|pokemon_id|form|iv|level|area_id|first_seen[|encounter_id]
+                # (7-field lines were queued by versions before encounter_id)
+                parts = line.split("|")
+                if len(parts) == 7:
+                    parts.append("")
+                sp_hex, pid_s, form_s, iv_s, level_s, area_s, fs_s, eid_s = parts
                 lat, lon = coords_map.get(sp_hex, (None, None))
                 if lat is None or lon is None:
                     stats["coords_missing"] += 1
@@ -128,6 +134,7 @@ class PokemonIVRedisBuffer:
                     "level": int(level_s),
                     "area_id": int(area_s),
                     "first_seen": int(fs_s),  # epoch secs (local area time)
+                    "encounter_id": eid_s or None,
                     "latitude": lat,
                     "longitude": lon,
                 })

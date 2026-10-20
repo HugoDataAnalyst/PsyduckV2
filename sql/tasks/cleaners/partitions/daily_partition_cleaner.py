@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Dict, List
 from sql.connect_db import transaction
+from sql.tasks.cleaners.partitions.drop_batches import drop_partitions
 from utils.logger import logger
 
 
@@ -104,12 +105,9 @@ async def clean_daily_partitions(
                 logger.warning(f"🧹 [DRY-RUN] daily-clean `{table}` would drop: {to_drop}")
                 return {"dropped": to_drop, "kept": kept, "dry_run": 1}
 
-            # Drop in one ALTER when possible
-            part_list = ", ".join(f"`{p}`" for p in to_drop)
-            sql = f"ALTER TABLE `{table}` DROP PARTITION {part_list}"
-            logger.warning(f"🧹 daily-clean `{table}` dropping {len(to_drop)} partition(s): {to_drop}")
-            await cur.execute(sql)
-            dropped.extend(to_drop)
+        # Dropped outside this transaction, a few partitions per ALTER - see drop_batches
+        logger.warning(f"🧹 daily-clean `{table}` dropping {len(to_drop)} partition(s): {to_drop}")
+        await drop_partitions(table, to_drop, "daily-clean", dropped)
 
     except Exception as e:
         logger.error(f"❌ daily-clean failed for `{table}`: {e}", exc_info=True)

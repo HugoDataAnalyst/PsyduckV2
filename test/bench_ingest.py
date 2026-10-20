@@ -41,10 +41,10 @@ def redis_stats() -> dict:
     return stats
 
 
-async def main(rate: float, seconds: int, label: str) -> int:
-    h.banner(f"Ingest benchmark [{label}] - {rate:.0f} ev/s for {seconds}s")
+async def main(rate: float, seconds: int, label: str, mode: str = "exact") -> int:
+    h.banner(f"Ingest benchmark [{label}] - {rate:.0f} ev/s ({mode}) for {seconds}s")
     s0, c0 = redis_stats(), app_cpu_seconds()
-    f = Feeder(h.WEBHOOK_URL, rate=rate, mode="exact", seed=99, timeout=None)
+    f = Feeder(h.WEBHOOK_URL, rate=rate, mode=mode, seed=99, timeout=None)
     t0 = time.time()
     await f.run(seconds)
     await f.drain(120)
@@ -58,7 +58,7 @@ async def main(rate: float, seconds: int, label: str) -> int:
 
     per_event = {k: (s1[k] - s0[k]) / events for k in WATCH}
     result = {
-        "label": label, "rate": rate, "seconds": seconds, "events": events, "wall_s": round(wall, 1),
+        "label": label, "rate": rate, "mode": mode, "seconds": seconds, "events": events, "wall_s": round(wall, 1),
         "status": summ["status"],
         "redis_cmds_per_event": round((s1["_total"] - s0["_total"]) / events, 2),
         "redis_usec_per_event": round((s1["_usec"] - s0["_usec"]) / events, 2),
@@ -79,5 +79,7 @@ if __name__ == "__main__":
     ap.add_argument("--rate", type=float, default=1500)
     ap.add_argument("--seconds", type=int, default=30)
     ap.add_argument("--label", default="run")
+    ap.add_argument("--mode", default="exact", choices=["exact", "realistic"],
+                    help="exact: every event valid and unique; realistic: production seen_type mix + re-sends")
     a = ap.parse_args()
-    sys.exit(asyncio.run(main(a.rate, a.seconds, a.label)))
+    sys.exit(asyncio.run(main(a.rate, a.seconds, a.label, a.mode)))
