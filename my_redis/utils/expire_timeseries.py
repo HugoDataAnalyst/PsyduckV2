@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 from my_redis.connect_redis import RedisManager
+from my_redis.utils import maintenance
 from utils.logger import logger
 import config as AppConfig
 
@@ -410,6 +411,12 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
 
 async def cleanup_timeseries() -> None:
     """Run cleanup for all patterns (non-blocking, processes all keys)"""
+    # Never alongside the Redis -> MySQL backup: both walk the whole keyspace
+    async with maintenance.exclusive("Redis cleanup"):
+        await _cleanup_timeseries()
+
+
+async def _cleanup_timeseries() -> None:
     client = await _client()
     if not client:
         logger.error("❌ Redis not connected; skip cleanup run.")

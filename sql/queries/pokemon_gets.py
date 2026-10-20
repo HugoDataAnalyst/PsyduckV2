@@ -16,12 +16,22 @@ class HeatmapFilters:
     level_expr: Optional[str] = None
 
 _EXPR_RE = re.compile(r"^(>=|<=|==|=|>|<)\s*(\d+)$")
+_RANGE_RE = re.compile(r"^(\d+)\s*-\s*(\d+)$")   # "20-80": inclusive range
 
 def _append_expr_csv(where_parts: List[str], params: List[Any], col: str, expr_csv: Optional[str]) -> None:
     if not expr_csv or expr_csv.lower() == "all":
         return
+    # Comma-separated items are alternatives (OR): ">=90,==0" = 90+ or exactly 0.
+    # A bounded range must be ONE item, "20-80" - as ">=20,<=80" it would read
+    # "iv >= 20 OR iv <= 80", which matches everything.
     inner, vals = [], []
     for raw in (x.strip() for x in expr_csv.split(",") if x.strip()):
+        rng = _RANGE_RE.match(raw)
+        if rng:
+            lo, hi = sorted((int(rng.group(1)), int(rng.group(2))))
+            inner.append(f"{col} BETWEEN %s AND %s")
+            vals.extend([lo, hi])
+            continue
         m = _EXPR_RE.match(raw)
         if not m:
             raise ValueError(f"Invalid expression '{raw}' for column {col}")

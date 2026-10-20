@@ -71,8 +71,7 @@ class InvasionCounterRetrieval(CounterTransformer):
         pattern = "counter:invasion:*" if self.area.lower() in ["global", "all"] \
                   else f"counter:invasion:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -115,8 +114,7 @@ class InvasionCounterRetrieval(CounterTransformer):
         pattern = "counter:invasion_daily:*" if self.area.lower() in ["global", "all"] \
                   else f"counter:invasion_daily:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -158,8 +156,7 @@ class InvasionCounterRetrieval(CounterTransformer):
         pattern = "counter:invasion_hourly:*" if self.area.lower() in ["global", "all"] \
                   else f"counter:invasion_hourly:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 

@@ -52,70 +52,56 @@ class RaidsRedisBuffer:
     aggregation_threshold = int(AppConfig.raid_max_threshold)
 
     @classmethod
-    async def increment_event(cls, redis_client: Redis, event_data: dict):
+    def entry(cls, event_data: dict) -> str | None:
+        """Validate one event and build its buffer line; None (already logged) to skip it."""
+        gym               = event_data.get("raid_gym_id")
+        gym_name          = _norm_name(event_data.get("raid_gym_name"))
+        lat               = _to_float(event_data.get("raid_latitude"))
+        lon               = _to_float(event_data.get("raid_longitude"))
+
+        raid_pokemon      = _safe_int(event_data.get("raid_pokemon"), 0)
+        raid_form         = str(event_data.get("raid_form", "0"))
+        raid_level        = _safe_int(event_data.get("raid_level"), 0)
+        raid_team         = _safe_int(event_data.get("raid_team_id"), 0)
+        raid_costume      = str(event_data.get("raid_costume", "0"))
+        raid_is_exclusive = _safe_int(event_data.get("raid_is_exclusive"), 0)
+        raid_ex_eligible  = _safe_int(event_data.get("raid_ex_raid_eligible"), 0)
+        area_id           = _safe_int(event_data.get("area_id"), None)
+        first_seen        = _safe_int(event_data.get("raid_first_seen"), None)
+
+        if not gym or area_id is None or first_seen is None:
+            missing = [name for name, value in (("gym", gym), ("area_id", area_id), ("raid_first_seen", first_seen))
+                       if value is None or value == ""]
+            logger.warning(f"❌ Raid event missing required fields {missing} (gym={gym!r}). Skipping.")
+            return None
+
+        # Skip if coords are missing/zero/invalid
+        if not _valid_coords(lat, lon):
+            logger.debug(f"↩️  Raid: dropped event for `{gym}` due to invalid coords lat={lat} lon={lon}")
+            return None
+        # gym|gym_name|lat|lon|...|area_id|first_seen
+        unique_key = (
+            f"{gym}|{gym_name}|{lat}|{lon}|{raid_pokemon}|{raid_form}|{raid_level}|{raid_team}|"
+            f"{raid_costume}|{raid_is_exclusive}|{raid_ex_eligible}|{area_id}|{first_seen}"
+        )
+        return unique_key
+
+    @classmethod
+    def stage(cls, pipe, event_data: dict) -> bool:
+        """
+        Queue this event's buffer append on the caller's pipeline - no round
+        trip of its own. Flushing is the leader's flusher's job, every
+        flush_interval seconds; webhook requests never flush inline.
+        """
         try:
-            gym               = event_data.get("raid_gym_id")
-            gym_name          = _norm_name(event_data.get("raid_gym_name"))
-            lat               = _to_float(event_data.get("raid_latitude"))
-            lon               = _to_float(event_data.get("raid_longitude"))
-
-            raid_pokemon      = _safe_int(event_data.get("raid_pokemon"), 0)
-            raid_form         = str(event_data.get("raid_form", "0"))
-            raid_level        = _safe_int(event_data.get("raid_level"), 0)
-            raid_team         = _safe_int(event_data.get("raid_team_id"), 0)
-            raid_costume      = str(event_data.get("raid_costume", "0"))
-            raid_is_exclusive = _safe_int(event_data.get("raid_is_exclusive"), 0)
-            raid_ex_eligible  = _safe_int(event_data.get("raid_ex_raid_eligible"), 0)
-            area_id           = _safe_int(event_data.get("area_id"), None)
-            first_seen        = _safe_int(event_data.get("raid_first_seen"), None)
-
-            if not gym or area_id is None or first_seen is None:
-                logger.warning("❌ Raid event missing required fields (gym/area_id/first_seen). Skipping.")
-                return
-
-            # Skip if coords are missing/zero/invalid
-            if not _valid_coords(lat, lon):
-                logger.debug(f"↩️  Raid: dropped event for `{gym}` due to invalid coords lat={lat} lon={lon}")
-                return
-            # gym|gym_name|lat|lon|...|area_id|first_seen
-            unique_key = (
-                f"{gym}|{gym_name}|{lat}|{lon}|{raid_pokemon}|{raid_form}|{raid_level}|{raid_team}|"
-                f"{raid_costume}|{raid_is_exclusive}|{raid_ex_eligible}|{area_id}|{first_seen}"
-            )
-
-            # Get a working client with retry
-            client = await _get_client_with_retry(redis_client)
-            if not client:
-                logger.error("❌ Raids buffer: No Redis connection available after retries. Event lost.")
-                return
-
-            # Append with retry
-            new_len = None
-            for attempt in range(3):
-                try:
-                    new_len = await client.rpush(cls.redis_key, unique_key)
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        client = await _get_client_with_retry(None)
-                        if not client:
-                            logger.error(f"❌ Raids buffer: rpush failed, no client available: {e}")
-                            return
-                    else:
-                        logger.error(f"❌ Raids buffer: rpush failed after retries: {e}")
-                        return
-
-            logger.debug(f"➕ Appended raid event. List length now {new_len}.")
-
-            queued = await client.llen(cls.redis_key)
-            logger.debug(f"📊 🏰 Current queued raid events: {queued}")
-
-            if queued >= cls.aggregation_threshold:
-                logger.warning(f"📊 🏰 Raid buffer threshold reached: {queued}. Flushing…")
-                await cls.flush_if_ready(client)
-
+            line = cls.entry(event_data)
         except Exception as e:
-            logger.error(f"❌ Error incrementing raid event: {e}")
+            logger.error(f"❌ Raids buffer: could not build entry: {e}")
+            return False
+        if line is None:
+            return False
+        pipe.rpush(cls.redis_key, line)
+        return True
 
     @classmethod
     async def _consume_list_to_batch(cls, redis_client: Redis, temp_key: str) -> list[dict]:

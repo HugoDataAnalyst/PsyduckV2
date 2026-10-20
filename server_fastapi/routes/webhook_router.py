@@ -1,6 +1,7 @@
 # webhook_routes.py
 import asyncio
 import time
+import orjson
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from utils.logger import logger
@@ -134,8 +135,9 @@ async def receive_webhook(request: Request):
         return JSONResponse({"status": "overloaded", "reason": reason}, status_code=503,
                             headers={"Retry-After": "1"})
 
-    data = await request.json()  # Parse incoming webhook JSON
-    logger.debug(f"📥 Received Webhook: {data}")
+    data = orjson.loads(await request.body())  # Parse incoming webhook JSON (orjson: several x faster than json)
+    # Lazy: formatting the whole batch costs real CPU on every POST, so only do it at DEBUG
+    logger.opt(lazy=True).debug("📥 Received Webhook: {}", lambda: data)
 
     if not isinstance(data, list):
         ingest.begin(1)

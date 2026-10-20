@@ -32,6 +32,7 @@ Part F - Redis restarts but reloads its data (RDB persistence, or a dump.rdb
 """
 import asyncio
 import json
+import re
 import subprocess
 import sys
 import time
@@ -71,7 +72,7 @@ async def feed(seconds: int, seed: int):
 def wait_for_backup(since: str, timeout: int = 180) -> float:
     t0 = time.time()
     while time.time() - t0 < timeout:
-        if "Backup cycle complete" in h.app_logs(since):
+        if re.search(r"Backup cycle (\(\w+\) )?complete", h.app_logs(since)):
             return time.time() - t0
         time.sleep(3)
     raise TimeoutError("no backup cycle completed")

@@ -14,6 +14,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# config.py loads ./.env with override=True: run from test/ (no .env there) so the
+# repo's own .env can never redirect these probes away from the test stack.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 os.environ.update(DB_HOST="127.0.0.1", DB_PORT="13306", DB_USER="psyduck", DB_PASSWORD="psyduck",
                   DB_NAME="PsyduckV2", LOG_FILE="False")
 

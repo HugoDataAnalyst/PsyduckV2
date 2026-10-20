@@ -90,8 +90,7 @@ class RaidCounterRetrieval(CounterTransformer):
         pattern = "counter:raid_total:*" if self.area.lower() in ["global", "all"] \
                   else f"counter:raid_total:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -125,8 +124,7 @@ class RaidCounterRetrieval(CounterTransformer):
         pattern = "counter:raid_daily:*" if self.area.lower() in ["global", "all"] \
                   else f"counter:raid_daily:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 
@@ -160,8 +158,7 @@ class RaidCounterRetrieval(CounterTransformer):
         pattern = "counter:raid_hourly:*" if self.area.lower() in ["global", "all"] \
                 else f"counter:raid_hourly:{self.area}:*"
 
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 

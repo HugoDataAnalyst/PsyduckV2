@@ -45,8 +45,9 @@ async def add_pokemon_timeseries_event(data: Dict[str, Any], pipe=None) -> Dict[
 
     # Validate required fields.
     required_fields = ["pokemon_id", "area_name", "first_seen"]
-    if any(field not in data for field in required_fields):
-        logger.error(f"Missing required fields in data: {data}")
+    missing = [field for field in required_fields if field not in data]
+    if missing:
+        logger.error(f"Missing required fields {missing} in data: {data}")
         return {"status": "ERROR", "message": "Missing required fields"}
 
     # Set fixed data type.

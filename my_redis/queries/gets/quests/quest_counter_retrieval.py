@@ -122,8 +122,7 @@ class QuestCounterRetrieval(CounterTransformer):
             pattern = "counter:quest:*"
         else:
             pattern = f"counter:quest:{self.area}:*"
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
@@ -153,8 +152,7 @@ class QuestCounterRetrieval(CounterTransformer):
             pattern = "counter:quest_daily:*"
         else:
             pattern = f"counter:quest_daily:{self.area}:*"
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
         raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
@@ -191,8 +189,7 @@ class QuestCounterRetrieval(CounterTransformer):
             pattern = "counter:quest_hourly:*"
         else:
             pattern = f"counter:quest_hourly:{self.area}:*"
-        keys = await client.keys(pattern)
-        keys = filtering_keys.filter_keys_by_time(keys, time_format, self.start, self.end)
+        keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
 

@@ -23,6 +23,7 @@ Performance:
 import asyncio
 import uuid
 import json
+from functools import lru_cache
 from datetime import datetime, timedelta, timezone
 import config as AppConfig
 from utils.logger import logger
@@ -59,6 +60,24 @@ async def _scan_keys(client, patterns: list[str]) -> list[str]:
     return found
 
 
+@lru_cache(maxsize=200_000)
+def _parse_stamp(stamp: str, fmt: str) -> datetime | None:
+    """Key time stamps repeat across areas and families (552k keys, a few thousand distinct stamps)."""
+    try:
+        return datetime.strptime(stamp, fmt)
+    except ValueError:
+        return None
+
+
+async def _filter_yielding(items: list, keep, every: int = 5000) -> list:
+    """[x for x in items if keep(x)], letting the event loop run between slices."""
+    out = []
+    for i in range(0, len(items), every):
+        out.extend(x for x in items[i:i + every] if keep(x))
+        await asyncio.sleep(0)
+    return out
+
+
 def _is_counter_key_recent(key: str, now: datetime) -> bool:
     """
     Returns True if this counter key should be included in the backup.
@@ -88,10 +107,8 @@ def _is_counter_key_recent(key: str, now: datetime) -> bool:
         retention_hours = _retention_map.get(key_type, 168)
         if retention_hours == 0:
             return True   # 0 = keep all for this type
-        try:
-            return datetime.strptime(date_str, "%Y%m%d%H") >= now - timedelta(hours=retention_hours)
-        except ValueError:
-            return True
+        start = _parse_stamp(date_str, "%Y%m%d%H")
+        return True if start is None else start >= now - timedelta(hours=retention_hours)
 
     # 8-digit suffix: could be a *_daily key (apply retention) or *_total/*_weather_iv (always keep)
     if len(date_str) == 8 and date_str.isdigit():
@@ -106,10 +123,8 @@ def _is_counter_key_recent(key: str, now: datetime) -> bool:
             retention_days = _daily_retention[key_type]
             if retention_days == 0:
                 return True
-            try:
-                return datetime.strptime(date_str, "%Y%m%d") >= now - timedelta(days=retention_days)
-            except ValueError:
-                return True
+            start = _parse_stamp(date_str, "%Y%m%d")
+            return True if start is None else start >= now - timedelta(days=retention_days)
         # weekly totals (pokemon_total, raid_total, etc.) and weather — always keep
         return True
 
@@ -139,6 +154,111 @@ async def _hgetall_pipeline(client, keys: list[str]) -> list[dict[str, str] | No
     return decoded
 
 
+# ── Incremental backup: which keys can still have changed ─────────────────────
+#
+# Counter keys are time buckets (an hour, a day, a week, a month) that stop
+# changing once the bucket is over, and a timeseries hash stops changing once
+# its series goes quiet. A key whose last possible write came before the
+# previous backup started is already in MySQL exactly as it is now, so an
+# incremental backup skips it instead of rewriting all ~550k rows every hour.
+#
+# Bucket times in key names (and timeseries fields) are in the area's local
+# time: UTC + the geofence offset in hours. They are converted back to UTC with
+# the area's offset; for an area not in the geofences, assume the most
+# westerly offset so a key is never judged closed too early.
+
+BACKUP_GRACE_S = 2 * 3600           # writes can trail their bucket (Golbat re-sends, slow batches)
+_UNKNOWN_AREA_SLACK_S = 14 * 3600   # worst case for an area with no known offset (UTC-12, plus margin)
+
+_DAILY_FAMILIES = {"pokemon_daily", "tth_pokemon_daily", "raid_daily", "invasion_daily", "quest_daily"}
+# position of the area in ts:* keys, per family
+_TS_AREA_INDEX = {"pokemon": 3, "tth_pokemon": 2, "raids_total": 3, "invasion": 3, "quests_total": 3}
+
+
+def area_offsets() -> dict[str, int]:
+    """Area name -> UTC offset in hours, from the current geofences (empty if unknown)."""
+    try:
+        from server_fastapi import global_state
+        return {g["name"]: int(g.get("offset") or 0) for g in (global_state.geofences or []) if g.get("name")}
+    except Exception:
+        return {}
+
+
+async def area_offsets_from_redis(client) -> dict[str, int]:
+    """
+    Area offsets from the geofences the app publishes in Redis - for the
+    standalone tools, which have no in-process geofences. Empty if not found
+    (every area then gets the cautious unknown-offset treatment).
+    """
+    try:
+        raw = await client.get("koji_geofences")
+        geofences = json.loads(raw) if raw else []
+        return {g["name"]: int(g.get("offset") or 0) for g in geofences if g.get("name")}
+    except Exception:
+        return {}
+
+
+def _local_to_utc(local_epoch: float, area: str | None, offsets: dict[str, int]) -> float:
+    if area is not None and area in offsets:
+        return local_epoch - offsets[area] * 3600
+    return local_epoch + _UNKNOWN_AREA_SLACK_S
+
+
+def counter_last_write_utc(key: str, offsets: dict[str, int]) -> float | None:
+    """Latest moment (UTC epoch) this counter key can still be written to; None = unknown (always back up)."""
+    parts = key.split(":")
+    if len(parts) < 4:
+        return None
+    family, area = parts[1], parts[2]
+    stamp = parts[-2] if family == "pokemon_weather_iv" else parts[-1]
+    if len(stamp) == 10:
+        span = "hour"
+    elif len(stamp) == 8:
+        span = "day" if family in _DAILY_FAMILIES else "week"
+    elif len(stamp) == 6:
+        span = "month"
+    else:
+        return None
+    end_local = _bucket_end_local(stamp, span)
+    return None if end_local is None else _local_to_utc(end_local, area, offsets)
+
+
+@lru_cache(maxsize=200_000)
+def _bucket_end_local(stamp: str, span: str) -> float | None:
+    fmt = {"hour": "%Y%m%d%H", "day": "%Y%m%d", "week": "%Y%m%d", "month": "%Y%m"}[span]
+    start = _parse_stamp(stamp, fmt)
+    if start is None:
+        return None
+    if span == "hour":
+        end = start + timedelta(hours=1)
+    elif span == "day":
+        end = start + timedelta(days=1)
+    elif span == "week":
+        end = start + timedelta(days=7)                                    # totals: week from Monday
+    else:
+        end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)   # next month
+    return end.replace(tzinfo=timezone.utc).timestamp()
+
+
+def timeseries_last_write_utc(key: str, data: dict[str, str], offsets: dict[str, int]) -> float | None:
+    """UTC epoch of the newest minute bucket in a ts:* hash; None = unknown (always back up)."""
+    parts = key.split(":")
+    idx = _TS_AREA_INDEX.get(parts[1]) if len(parts) > 1 else None
+    area = parts[idx] if idx is not None and len(parts) > idx else None
+    try:
+        newest = max(int(field) for field in data)
+    except ValueError:
+        return None
+    return _local_to_utc(newest + 60, area, offsets)
+
+
+def unchanged_since(last_write_utc: float | None, since_utc: float | None) -> bool:
+    """True when the key's final value was already captured by the backup that started at since_utc."""
+    if since_utc is None or last_write_utc is None:
+        return False
+    return last_write_utc + BACKUP_GRACE_S < since_utc
+
+
 # ── Backup count check ────────────────────────────────────────────────────────
 
 async def check_backup_counts() -> tuple[int, int] | None:
@@ -166,10 +286,13 @@ class MySQLBackup:
     """Redis → MySQL backup of counter and timeseries hashes."""
 
     @staticmethod
-    async def counters(client, *, yield_between_chunks: bool = True) -> int:
+    async def counters(client, *, yield_between_chunks: bool = True, since_utc: float | None = None) -> int:
         """
         SCAN counter:* → pipelined HGETALL → upsert into redis_counter_backup.
         Returns number of keys backed up.
+
+        since_utc: start of the previous successful backup (incremental mode) -
+        keys whose bucket closed before it are skipped; None backs up everything.
 
         yield_between_chunks: set False during startup seeding (we want to finish
         fast); leave True for periodic background backups so webhooks keep flowing.
@@ -180,10 +303,17 @@ class MySQLBackup:
             return 0
 
         now  = datetime.now(timezone.utc).replace(tzinfo=None)
-        keys = [k for k in all_keys if _is_counter_key_recent(k, now)]
-        logger.debug(
-            "Redis backup: {} counter keys total, {} within retention ({} outside window skipped)",
-            len(all_keys), len(keys), len(all_keys) - len(keys),
+        # Both filters walk every counter key (~550k in production): slices,
+        # so webhook processing keeps running in between.
+        keys = await _filter_yielding(all_keys, lambda k: _is_counter_key_recent(k, now))
+        in_retention = len(keys)
+        if since_utc is not None:
+            offsets = area_offsets()
+            keys = await _filter_yielding(
+                keys, lambda k: not unchanged_since(counter_last_write_utc(k, offsets), since_utc))
+        logger.info(
+            "Redis backup: {} counter keys, {} within retention, {} to write ({} closed before the last backup)",
+            len(all_keys), in_retention, len(keys), in_retention - len(keys),
         )
 
         if not keys:
@@ -225,11 +355,19 @@ class MySQLBackup:
         return backed_up
 
     @staticmethod
-    async def timeseries(client, *, yield_between_chunks: bool = True) -> int:
+    async def timeseries(client, *, yield_between_chunks: bool = True, since_utc: float | None = None) -> int:
         """
         SCAN ts:* patterns → pipelined HGETALL → upsert into redis_timeseries_backup.
         Returns number of keys backed up.
+
+        since_utc: start of the previous successful backup (incremental mode) -
+        series with no bucket written after it are skipped; None writes all.
+        A skipped row may still hold buckets that cleanup has since removed
+        from Redis; they are past retention and are cleaned again after any
+        restore, and the row itself expires via MySQLCleanup.timeseries.
         """
+        offsets = area_offsets() if since_utc is not None else {}
+        unchanged = 0
         keys = await _scan_keys(client, TIMESERIES_PATTERNS)
         if not keys:
             logger.debug("Redis backup: no timeseries keys found")
@@ -254,6 +392,8 @@ class MySQLBackup:
             for key, data in zip(chunk_keys, results):
                 if data is None:
                     skipped += 1
+                elif unchanged_since(timeseries_last_write_utc(key, data, offsets), since_utc):
+                    unchanged += 1
                 else:
                     rows.append((key, json.dumps(data)))
 
@@ -264,9 +404,9 @@ class MySQLBackup:
             if yield_between_chunks:
                 await asyncio.sleep(0)
 
-        logger.debug(
-            "Redis backup: {} timeseries keys saved ({} empty skipped)",
-            backed_up, skipped,
+        logger.info(
+            "Redis backup: {} timeseries keys, {} written, {} unchanged since the last backup, {} empty",
+            len(keys), backed_up, unchanged, skipped,
         )
         return backed_up
 
@@ -409,6 +549,26 @@ async def set_backup_dataset_id(dataset_id: str) -> None:
         "INSERT INTO redis_backup_meta (name, value) VALUES (%s, %s) "
         "ON DUPLICATE KEY UPDATE value = VALUES(value)",
         (META_DATASET_ID, dataset_id),
+    )
+
+
+META_LAST_BACKUP = "backup_last_started_at"   # epoch of the last complete backup's start
+META_LAST_FULL = "backup_last_full_at"          # epoch of the last complete full backup's start
+
+
+async def get_meta(name: str) -> str | None:
+    return await fetch_val("SELECT value FROM redis_backup_meta WHERE name = %s", (name,))
+
+
+async def set_meta(name: str, value: str | None) -> None:
+    """Set (or, with None, remove) one redis_backup_meta entry."""
+    if value is None:
+        await execute("DELETE FROM redis_backup_meta WHERE name = %s", (name,))
+        return
+    await execute(
+        "INSERT INTO redis_backup_meta (name, value) VALUES (%s, %s) "
+        "ON DUPLICATE KEY UPDATE value = VALUES(value)",
+        (name, value),
     )
 
 
