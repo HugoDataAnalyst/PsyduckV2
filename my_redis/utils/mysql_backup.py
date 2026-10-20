@@ -21,11 +21,12 @@ Performance:
 """
 
 import asyncio
+import uuid
 import json
 from datetime import datetime, timedelta, timezone
 import config as AppConfig
 from utils.logger import logger
-from sql.connect_db import execute, executemany, fetch_all, fetch_val
+from sql.connect_db import execute, executemany, fetch_val, stream_rows
 
 # ── Key patterns to back up ───────────────────────────────────────────────────
 
@@ -371,57 +372,139 @@ class MySQLCleanup:
         return total
 
 
-# ── Restore ───────────────────────────────────────────────────────────────────
+# ── Backup provenance ─────────────────────────────────────────────────────────
+#
+# Which Redis dataset the MySQL backup belongs to. The id lives in Redis itself
+# (DATASET_KEY) and is recorded in redis_backup_meta, so it travels with the
+# data: a Redis that restarts and reloads its data (RDB/AOF persistence, or an
+# RDB restored by hand) keeps the key and still matches, while a Redis that
+# lost its data no longer has it. Redis's run_id can't tell these apart - it
+# changes on every restart, data or not, and merging the backup into a Redis
+# that still holds the data would count everything twice.
 
-async def restore_counters(client) -> int:
-    """
-    Load all rows from redis_counter_backup → pipelined HSET into Redis.
-    Returns number of keys restored.
-    """
-    rows = await fetch_all("SELECT redis_key, hash_data FROM redis_counter_backup", ())
-    if not rows:
-        logger.info("Redis restore: redis_counter_backup is empty — nothing to restore")
-        return 0
+META_DATASET_ID = "redis_dataset_id"
+DATASET_KEY = "psyduckv2:dataset_id"
+DATA_PATTERNS = ("counter:*", "ts:*")
 
-    restored = 0
-    for i in range(0, len(rows), _CHUNK_SIZE):
-        chunk = rows[i:i + _CHUNK_SIZE]
-        pipe  = client.pipeline(transaction=False)
-        for row in chunk:
-            data = row["hash_data"]
-            if isinstance(data, str):
-                data = json.loads(data)
-            if data:
-                pipe.hset(row["redis_key"], mapping=data)
+
+async def redis_dataset_id(client) -> str | None:
+    return await client.get(DATASET_KEY)
+
+
+async def redis_uptime_s(client) -> int | None:
+    try:
+        info = await client.info("server")
+        return int(info.get("uptime_in_seconds"))
+    except Exception as e:
+        logger.warning("Could not read Redis uptime: {}", e)
+        return None
+
+
+async def get_backup_dataset_id() -> str | None:
+    return await fetch_val("SELECT value FROM redis_backup_meta WHERE name = %s", (META_DATASET_ID,))
+
+
+async def set_backup_dataset_id(dataset_id: str) -> None:
+    await execute(
+        "INSERT INTO redis_backup_meta (name, value) VALUES (%s, %s) "
+        "ON DUPLICATE KEY UPDATE value = VALUES(value)",
+        (META_DATASET_ID, dataset_id),
+    )
+
+
+async def mint_dataset_id(client, dataset_id: str | None = None) -> str:
+    """Tag the current Redis data with a dataset id and record it as the backup's source."""
+    dataset_id = dataset_id or uuid.uuid4().hex
+    await set_backup_dataset_id(dataset_id)
+    await client.set(DATASET_KEY, dataset_id)
+    return dataset_id
+
+
+async def first_data_key(client) -> str | None:
+    """Any counter:/ts: key in Redis, or None when Redis holds no PsyduckV2 data."""
+    for pattern in DATA_PATTERNS:
+        cursor = 0
+        while True:
+            cursor, keys = await client.scan(cursor=cursor, match=pattern, count=1000)
+            if keys:
+                return keys[0]
+            if cursor == 0:
+                break
+    return None
+
+
+# ── Restore (merge) ───────────────────────────────────────────────────────────
+
+async def _merge_rows(client, rows, only_absent: bool = False) -> tuple[int, int]:
+    """
+    Merge backup rows into Redis without ever overwriting a live value:
+      key absent  -> HSET the backed-up hash (restores it)
+      key present -> HINCRBY each backed-up field: counts from before a Redis
+                     restart are added to counts written since. Every backed-up
+                     family is a pure counter, so the two never overlap.
+                     Skipped entirely when only_absent is set.
+    Returns (keys_restored, keys_merged).
+    """
+    parsed = []
+    for row in rows:
+        data = row["hash_data"]
+        if isinstance(data, (str, bytes)):
+            data = json.loads(data)
+        if data:
+            parsed.append((row["redis_key"], data))
+    if not parsed:
+        return 0, 0
+
+    async with client.pipeline(transaction=False) as pipe:
+        for key, _ in parsed:
+            pipe.exists(key)
+        present = await pipe.execute()
+
+    restored = merged = 0
+    async with client.pipeline(transaction=False) as pipe:
+        for (key, data), is_present in zip(parsed, present):
+            if is_present:
+                if only_absent:
+                    continue
+                for field, value in data.items():
+                    pipe.hincrby(key, field, int(value))
+                merged += 1
+            else:
+                pipe.hset(key, mapping=data)
                 restored += 1
         await pipe.execute()
-
-    logger.info("Redis restore: {} counter keys restored from MySQL", restored)
-    return restored
+    return restored, merged
 
 
-async def restore_timeseries(client) -> int:
+async def _merge_table(client, table: str, older_than_s: int | None, only_absent: bool) -> tuple[int, int]:
     """
-    Load all rows from redis_timeseries_backup → pipelined HSET into Redis.
-    Returns number of keys restored.
+    Stream a backup table (bounded memory) and merge it into Redis.
+
+    older_than_s limits the merge to rows last backed up more than that many
+    seconds ago - i.e. before the current Redis process started. Newer rows
+    were taken from this same Redis, so their counts are already live and
+    merging them would count them twice.
     """
-    rows = await fetch_all("SELECT redis_key, hash_data FROM redis_timeseries_backup", ())
-    if not rows:
-        logger.info("Redis restore: redis_timeseries_backup is empty — nothing to restore")
-        return 0
+    sql, params = f"SELECT redis_key, hash_data FROM {table}", None
+    if older_than_s is not None:
+        sql += " WHERE backed_up_at < NOW() - INTERVAL %s SECOND"
+        params = (int(older_than_s),)
+    restored = merged = 0
+    async for rows in stream_rows(sql, params, batch=_CHUNK_SIZE):
+        r, m = await _merge_rows(client, rows, only_absent)
+        restored += r
+        merged += m
+        await asyncio.sleep(0)   # keep the event loop responsive during long restores
+    return restored, merged
 
-    restored = 0
-    for i in range(0, len(rows), _CHUNK_SIZE):
-        chunk = rows[i:i + _CHUNK_SIZE]
-        pipe  = client.pipeline(transaction=False)
-        for row in chunk:
-            data = row["hash_data"]
-            if isinstance(data, str):
-                data = json.loads(data)
-            if data:
-                pipe.hset(row["redis_key"], mapping=data)
-                restored += 1
-        await pipe.execute()
 
-    logger.info("Redis restore: {} timeseries keys restored from MySQL", restored)
-    return restored
+async def restore_counters(client, older_than_s: int | None = None, only_absent: bool = False) -> tuple[int, int]:
+    restored, merged = await _merge_table(client, "redis_counter_backup", older_than_s, only_absent)
+    logger.info("Redis restore: {} counter keys restored from MySQL, {} merged into live keys", restored, merged)
+    return restored, merged
+
+
+async def restore_timeseries(client, older_than_s: int | None = None, only_absent: bool = False) -> tuple[int, int]:
+    restored, merged = await _merge_table(client, "redis_timeseries_backup", older_than_s, only_absent)
+    logger.info("Redis restore: {} timeseries keys restored from MySQL, {} merged into live keys", restored, merged)
+    return restored, merged

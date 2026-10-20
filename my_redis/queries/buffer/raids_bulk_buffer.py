@@ -4,6 +4,7 @@ from datetime import datetime
 from utils.logger import logger
 from utils.safe_values import _safe_int, _valid_coords, _to_float, _norm_name
 from sql.tasks.raids_processor import RaidSQLProcessor
+from my_redis.queries.buffer import flush_guard
 import config as AppConfig
 import asyncio
 
@@ -157,90 +158,29 @@ class RaidsRedisBuffer:
         return data_batch
 
     @classmethod
-    async def flush_if_ready(cls, redis_client: Redis) -> int:
+    async def _flush(cls, redis_client: Redis, tag: str, label: str) -> int:
         """
-        Flush buffered raid events (if any).
-        Returns number of rows inserted into MySQL.
+        Move the buffer aside, write it to MySQL, and delete it only on success.
+        A failed write puts the batch back into the live buffer for the next flush.
         """
-        # Get a working client with retry
         client = await _get_client_with_retry(redis_client)
         if not client:
-            logger.error("❌ Raids flush: No Redis connection available after retries.")
+            logger.error(f"❌ {label}: No Redis connection available after retries.")
             return 0
+        inserted = await flush_guard.flush_list_buffer(
+            client, cls.redis_key, tag, cls._consume_list_to_batch,
+            RaidSQLProcessor.bulk_insert_raid_daily_events, label,
+        )
+        if inserted:
+            logger.success(f"📬 {label} inserted +{inserted} rows into MySQL.")
+        return inserted
 
-        temp_key = None
-        try:
-            if not await client.exists(cls.redis_key):
-                logger.debug("📭 No raid data to flush.")
-                return 0
-
-            temp_key = cls.redis_key + ":flushing"
-            try:
-                await client.rename(cls.redis_key, temp_key)
-            except Exception as rename_err:
-                if "no such key" in str(rename_err).lower():
-                    logger.debug("📭 Raid list disappeared before rename. Nothing to flush.")
-                    return 0
-                raise
-
-            data_batch = await cls._consume_list_to_batch(client, temp_key)
-            if not data_batch:
-                return 0
-
-            inserted = await RaidSQLProcessor.bulk_insert_raid_daily_events(data_batch)
-            logger.success(f"📬 Raids daily-events inserted +{inserted} rows into MySQL.")
-            return inserted
-
-        except Exception as e:
-            logger.error(f"❌ Error during raids flush: {e}", exc_info=True)
-            return 0
-        finally:
-            try:
-                if temp_key and client:
-                    await client.delete(temp_key)
-            except Exception:
-                pass
+    @classmethod
+    async def flush_if_ready(cls, redis_client: Redis) -> int:
+        """Flush buffered raid events (if any). Returns rows inserted into MySQL."""
+        return await cls._flush(redis_client, "flushing", "Raids daily-events")
 
     @classmethod
     async def force_flush(cls, redis_client: Redis) -> int:
-        """
-        Force flush regardless of threshold.
-        """
-        # Get a working client with retry
-        client = await _get_client_with_retry(redis_client)
-        if not client:
-            logger.error("❌ Raids force-flush: No Redis connection available after retries.")
-            return 0
-
-        temp_key = None
-        try:
-            if not await client.exists(cls.redis_key):
-                logger.debug("📭 No raid data to force flush.")
-                return 0
-
-            temp_key = cls.redis_key + ":force_flushing"
-            try:
-                await client.rename(cls.redis_key, temp_key)
-            except Exception as rename_err:
-                if "no such key" in str(rename_err).lower():
-                    logger.debug("📭 Raid list disappeared before force rename. Nothing to flush.")
-                    return 0
-                raise
-
-            data_batch = await cls._consume_list_to_batch(client, temp_key)
-            if not data_batch:
-                return 0
-
-            inserted = await RaidSQLProcessor.bulk_insert_raid_daily_events(data_batch)
-            logger.success(f"📬 FORCE raids daily-events inserted +{inserted} rows into MySQL.")
-            return inserted
-
-        except Exception as e:
-            logger.error(f"❌ Raids force-flush failed: {e}", exc_info=True)
-            return 0
-        finally:
-            try:
-                if temp_key and client:
-                    await client.delete(temp_key)
-            except Exception:
-                pass
+        """Force flush regardless of threshold."""
+        return await cls._flush(redis_client, "force_flushing", "FORCE raids daily-events")

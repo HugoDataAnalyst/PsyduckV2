@@ -130,7 +130,10 @@ async def transaction(dict_cursor: bool = True, isolation: str | None = None, lo
         if lock_wait_timeout is not None:
             async with conn.cursor() as c:
                 await c.execute("SET SESSION innodb_lock_wait_timeout = %s", (int(lock_wait_timeout),))
-        conn.autocommit = False
+        # autocommit is a coroutine in aiomysql: assigning `conn.autocommit = False`
+        # only shadowed the method, so every statement committed on its own and
+        # a rollback undid nothing (see test/check_transaction_autocommit.py).
+        await conn.autocommit(False)
         cursor_cls = aiomysql.DictCursor if dict_cursor else aiomysql.Cursor
         async with conn.cursor(cursor_cls) as cur:
             try:
@@ -141,9 +144,10 @@ async def transaction(dict_cursor: bool = True, isolation: str | None = None, lo
                 raise
     finally:
         try:
-            conn.autocommit = True
+            await conn.autocommit(True)
         except Exception:
-            pass
+            # Never hand the pool a connection stuck outside autocommit
+            conn.close()
         pool.release(conn)
 
 
@@ -157,6 +161,26 @@ async def fetch_all(sql: str, params: Optional[Iterable[Any]] = None) -> list[di
     async with acquire_cursor() as cur:
         await cur.execute(sql, params or ())
         return list(await cur.fetchall())
+
+
+async def stream_rows(sql: str, params: Optional[Iterable[Any]] = None, batch: int = 1000):
+    """
+    Yield lists of dict rows from an unbuffered (server-side) cursor, so a large
+    result set is never held in memory at once - unlike fetch_all.
+    """
+    pool = _require_pool()
+    conn = await pool.acquire()
+    try:
+        await conn.ping(reconnect=True)
+        async with conn.cursor(aiomysql.SSDictCursor) as cur:
+            await cur.execute(sql, params or ())
+            while True:
+                rows = await cur.fetchmany(batch)
+                if not rows:
+                    break
+                yield rows
+    finally:
+        pool.release(conn)
 
 
 async def fetch_one(sql: str, params: Optional[Iterable[Any]] = None) -> Optional[dict]:

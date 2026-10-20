@@ -15,6 +15,7 @@ HSCAN_COUNT_DEFAULT      = 500        # fields per hscan step inside script
 HDEL_BATCH_DEFAULT       = 1000       # max fields HDEL per call
 CHUNK_SIZE_DEFAULT       = 100        # keys per Lua chunk
 CHUNK_SLEEP_DEFAULT      = 0.15       # sleep between chunks (seconds)
+SLOW_CHUNK_WARN_SEC      = 0.5        # a chunk this slow is logged as a warning
 LOCK_KEY                 = "ts:cleanup:lock"
 LOCK_TTL_SEC             = 300        # prevents overlapping runs (5 minutes)
 
@@ -366,6 +367,8 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
 
     total_removed = 0
     total_emptied = 0
+    failed_chunks = 0
+    slowest_chunk = 0.0
 
     # Step 3: Process chunks with sleep intervals
     for i, chunk in enumerate(chunks):
@@ -377,9 +380,11 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
             total_emptied += emptied
 
             chunk_elapsed = time.monotonic() - chunk_start
+            slowest_chunk = max(slowest_chunk, chunk_elapsed)
             logger.debug(f"♻️ Chunk {i+1}/{len(chunks)} cleaned {len(chunk)} keys: {removed} fields removed, {emptied} keys deleted in {chunk_elapsed:.3f}s")
 
         except Exception as e:
+            failed_chunks += 1
             if "BUSY" in str(e).upper():
                 logger.warning(f"⚠️ Redis BUSY while cleaning chunk {i+1}/{len(chunks)} (will retry next cycle)")
             else:
@@ -390,13 +395,18 @@ async def cleanup_timeseries_for_pattern(pattern: str, retention_sec: int) -> No
             await asyncio.sleep(CHUNK_SLEEP_DEFAULT)
 
     duration = time.time() - started
-    logger.success(
-        f"♻️ Cleanup ✅ completed for {pattern}\n"
-        f"• Keys processed: {len(all_keys)}\n"
-        f"• Fields 🗑️ removed: {total_removed}\n"
-        f"• Empty keys 🔥 deleted: {total_emptied}\n"
-        f"• Duration ⏱️: {duration:.2f}s"
+    # One line per pattern so a slow or failing cleanup can be grepped and
+    # compared across runs. The slowest chunk is roughly how long one Lua call
+    # held Redis - every webhook write waits that long behind it.
+    line = (
+        f"♻️ Cleanup {pattern}: {len(all_keys)} keys in {len(chunks)} chunks, "
+        f"{total_removed} fields removed, {total_emptied} keys deleted, "
+        f"{failed_chunks} chunks failed, slowest chunk {slowest_chunk * 1000:.0f} ms, took {duration:.2f}s"
     )
+    if failed_chunks or slowest_chunk >= SLOW_CHUNK_WARN_SEC:
+        logger.warning(line)
+    else:
+        logger.success(line)
 
 async def cleanup_timeseries() -> None:
     """Run cleanup for all patterns (non-blocking, processes all keys)"""

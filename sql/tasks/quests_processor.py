@@ -2,6 +2,7 @@ import asyncio
 import random
 import aiomysql
 from sql.connect_db import transaction
+from sql.utils.errors import FlushError
 from datetime import datetime
 import time
 from utils.safe_values import _to_int, _to_float, _form_str
@@ -227,11 +228,11 @@ class QuestSQLProcessor:
                     )
                     await asyncio.sleep(backoff)
                     continue
-                logger.error(f"❌ DB error (quests daily-events): {e}", exc_info=True)
-                return 0
+                logger.error(f"❌ DB error (quests daily-events): {e}")
+                raise FlushError(f"quests daily-events DB error: {e}") from e
             except Exception as e:
                 logger.error(f"❌ Unexpected (quests daily-events): {e}", exc_info=True)
-                return 0
+                raise FlushError(f"quests daily-events unexpected error: {e}") from e
 
         logger.error("❌ quests daily-events: max retries reached")
-        return 0
+        raise FlushError("quests daily-events: max retries reached")

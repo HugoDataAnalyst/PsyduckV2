@@ -36,3 +36,6 @@ __pycache__/
 
 data/
 database/
+
+# Local test stack output
+test/results/

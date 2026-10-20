@@ -15,6 +15,7 @@ from my_redis.connect_redis import RedisManager
 from my_redis.utils.mysql_backup import (
     MySQLBackup, MySQLCleanup,
     check_backup_counts, restore_counters, restore_timeseries,
+    redis_dataset_id, mint_dataset_id, redis_uptime_s, get_backup_dataset_id, first_data_key,
 )
 from utils.logger import logger
 
@@ -81,6 +82,8 @@ class RedisBackupService:
                     continue
 
                 t0 = time.perf_counter()
+                if not await self._reconcile(client, "backup cycle"):
+                    continue
                 await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
                 await _run_with_retry("Cleanup timeseries backup", MySQLCleanup.timeseries, self._interval)
                 await _run_with_retry("Backup counters",           MySQLBackup.counters,    client)
@@ -95,6 +98,21 @@ class RedisBackupService:
                 break
             except Exception as e:
                 logger.error("❌ Redis backup cycle failed: {}", e)
+
+    @staticmethod
+    async def _reconcile(client, context: str) -> bool:
+        """
+        Before writing a backup, make sure Redis has not restarted underneath
+        us: backing up a freshly emptied Redis would overwrite good rows with
+        partial data. Returns False (skip this backup) if that cannot be checked.
+        """
+        try:
+            await reconcile_with_backup(client, context)
+            return True
+        except Exception as e:
+            logger.error("❌ Redis backup ({}): could not check Redis against the backup ({}) "
+                         "- skipping so existing backup rows are not overwritten", context, e)
+            return False
 
     async def start(self) -> None:
         if self._running:
@@ -113,7 +131,7 @@ class RedisBackupService:
         # Final backup before shutdown
         try:
             client = await self._redis_manager.check_redis_connection()
-            if client:
+            if client and await self._reconcile(client, "final backup"):
                 t0 = time.perf_counter()
                 logger.info("🔚 Final Redis backup on shutdown...")
                 await _run_with_retry("Cleanup counter backup",    MySQLCleanup.counters)
@@ -132,15 +150,104 @@ class RedisBackupService:
                 pass
 
 
+_reconcile_lock = asyncio.Lock()
+
+
+async def reconcile_with_backup(client, context: str) -> str:
+    """
+    Bring Redis and the MySQL backup back in step, without ever overwriting
+    live data. Decided by the dataset id stored in Redis (DATASET_KEY) against
+    the one recorded with the backup:
+
+      same id            Redis still holds the data the backup came from - an
+                         app restart or crash, or a Redis restart that reloaded
+                         its data -> leave Redis alone. Restoring here is what
+                         rewound live counters and resurrected cleaned keys.
+      other id           Redis holds a different dataset (an older RDB restored
+                         by hand): it is what the operator chose, so adopt it -
+                         merging would add the backup's counts on top of it.
+      no id, empty Redis Redis lost everything -> restore the backup in full.
+      no id, data        Redis lost its data and has refilled since (Redis
+                         restarted under the running app) -> merge: missing
+                         keys restored, live keys incremented. Only rows backed
+                         up before this Redis started are used; newer rows were
+                         taken from this same Redis and are already live.
+                         First run of this version (nothing recorded yet): the
+                         app before it may already have restored keys Redis
+                         holds, so only missing keys are restored.
+
+    Serialised: two concurrent calls could both find no id and merge the same
+    backup twice.
+
+    Returns a short label for logs and tests.
+    """
+    async with _reconcile_lock:
+        return await _reconcile_unlocked(client, context)
+
+
+async def _reconcile_unlocked(client, context: str) -> str:
+    current = await redis_dataset_id(client)
+    recorded = await get_backup_dataset_id()
+
+    if current and current == recorded:
+        logger.info("Redis restore ({}): Redis still holds the data the backup came from "
+                    "(dataset {}) - nothing to restore", context, current[:8])
+        return "skip:same-dataset"
+
+    if current:
+        logger.warning("Redis restore ({}): Redis holds dataset {} but the backup is from {} "
+                       "(an RDB restored by hand?) - adopting the Redis data, not merging",
+                       context, current[:8], recorded[:8] if recorded else "none")
+        await mint_dataset_id(client, current)
+        return "skip:adopted"
+
+    uptime = await redis_uptime_s(client)
+    only_absent = False
+    sample = await first_data_key(client)
+    if not sample:
+        uptime = None   # empty Redis: every backed-up row is missing
+        logger.warning("Redis restore ({}): Redis holds no data - restoring the MySQL backup", context)
+    elif recorded is None:
+        only_absent = True
+        logger.warning("Redis restore ({}): no backup provenance yet and Redis already holds data "
+                       "(e.g. {}) - restoring only keys backed up before Redis started {}s ago "
+                       "and missing now; live keys are left alone", context, sample, uptime)
+    else:
+        logger.warning("Redis restore ({}): Redis lost the data the backup came from (dataset {}) "
+                       "and refilled since it started {}s ago - merging the MySQL backup into Redis",
+                       context, recorded[:8], uptime)
+
+    # Tag first: if the merge is interrupted, the next attempt must not add
+    # the same counts a second time.
+    await mint_dataset_id(client)
+    t0 = time.perf_counter()
+    await restore_counters(client, older_than_s=uptime, only_absent=only_absent)
+    await restore_timeseries(client, older_than_s=uptime, only_absent=only_absent)
+    logger.success("✅ Redis restore complete in {:.2f}s", time.perf_counter() - t0)
+    return "recovered-missing" if only_absent else "restored"
+
+
+async def reconcile_now(redis_manager: RedisManager, context: str) -> None:
+    """Fire-and-forget reconcile (e.g. right after a Redis restart is noticed)."""
+    if not AppConfig.redis_mysql_backups:
+        return
+    try:
+        client = await redis_manager.check_redis_connection()
+        if client:
+            await reconcile_with_backup(client, context)
+    except Exception as e:
+        logger.error("Redis restore ({}): reconciliation failed: {} - the next backup cycle retries", context, e)
+
+
 class RedisRestoreService:
     """
-    One-shot MySQL → Redis restore, called once at leader startup before services begin.
-    Only active when REDIS_MYSQL_BACKUPS = true.
+    One-shot MySQL → Redis reconciliation, called once at leader startup before
+    services begin. Only active when REDIS_MYSQL_BACKUPS = true.
 
-    Three outcomes from check_backup_counts():
-      None    → MySQL unreachable          — skip restore, warn
-      (0, 0)  → backup tables empty        — skip restore (fresh start)
-      (n, m)  → data present               — restore counters + timeseries
+      MySQL unreachable      skip (warn)
+      backup tables empty    skip (fresh start)
+      otherwise              reconcile_with_backup(): restore only when Redis
+                             actually lost its data
     """
 
     def __init__(self, redis_manager: RedisManager):
@@ -161,17 +268,13 @@ class RedisRestoreService:
             logger.info("Redis restore: backup tables empty — no restore needed (fresh start)")
             return
 
-        logger.info(
-            "Redis restore: starting — {} counter rows, {} timeseries rows",
-            counter_rows, ts_rows,
-        )
-
         client = await self._redis_manager.check_redis_connection()
         if not client:
             logger.error("Redis restore: Redis connection unavailable — skipping restore")
             return
 
-        t0 = time.perf_counter()
-        await restore_counters(client)
-        await restore_timeseries(client)
-        logger.success("✅ Redis restore complete in {:.2f}s", time.perf_counter() - t0)
+        logger.info("Redis restore: backup holds {} counter rows, {} timeseries rows", counter_rows, ts_rows)
+        try:
+            await reconcile_with_backup(client, "startup")
+        except Exception as e:
+            logger.error("Redis restore: reconciliation failed: {}", e)

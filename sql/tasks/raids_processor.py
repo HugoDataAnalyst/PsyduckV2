@@ -2,6 +2,7 @@ import asyncio
 import random
 import aiomysql
 from sql.connect_db import transaction
+from sql.utils.errors import FlushError
 from datetime import datetime
 import time
 from utils.logger import logger
@@ -155,11 +156,11 @@ class RaidSQLProcessor:
                     )
                     await asyncio.sleep(backoff)
                     continue
-                logger.error(f"❌ DB error (raids daily-events): {e}", exc_info=True)
-                return 0
+                logger.error(f"❌ DB error (raids daily-events): {e}")
+                raise FlushError(f"raids daily-events DB error: {e}") from e
             except Exception as e:
                 logger.error(f"❌ Unexpected (raids daily-events): {e}", exc_info=True)
-                return 0
+                raise FlushError(f"raids daily-events unexpected error: {e}") from e
 
         logger.error("❌ raids daily-events: max retries reached")
-        return 0
+        raise FlushError("raids daily-events: max retries reached")

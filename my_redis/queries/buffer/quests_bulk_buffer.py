@@ -3,6 +3,7 @@ from redis.asyncio.client import Redis
 from utils.logger import logger
 from utils.safe_values import _safe_int, _norm_str, _norm_name, _valid_coords, _to_float
 from sql.tasks.quests_processor import QuestSQLProcessor
+from my_redis.queries.buffer import flush_guard
 import config as AppConfig
 import asyncio
 
@@ -182,79 +183,27 @@ class QuestsRedisBuffer:
         return batch
 
     @classmethod
-    async def flush_if_ready(cls, redis_client: Redis) -> int:
-        # Get a working client with retry
+    async def _flush(cls, redis_client: Redis, tag: str, label: str) -> int:
+        """
+        Move the buffer aside, write it to MySQL, and delete it only on success.
+        A failed write puts the batch back into the live buffer for the next flush.
+        """
         client = await _get_client_with_retry(redis_client)
         if not client:
-            logger.error("❌ Quests flush: No Redis connection available after retries.")
+            logger.error(f"❌ {label}: No Redis connection available after retries.")
             return 0
+        inserted = await flush_guard.flush_list_buffer(
+            client, cls.redis_key, tag, cls._consume_list_to_batch,
+            QuestSQLProcessor.bulk_insert_quests_daily_events, label,
+        )
+        if inserted:
+            logger.success(f"📬 {label} inserted +{inserted} rows.")
+        return inserted
 
-        temp_key = None
-        try:
-            if not await client.exists(cls.redis_key):
-                return 0
-
-            temp_key = cls.redis_key + ":flushing"
-            try:
-                await client.rename(cls.redis_key, temp_key)
-            except Exception as e:
-                if "no such key" in str(e).lower():
-                    return 0
-                raise
-
-            data_batch = await cls._consume_list_to_batch(client, temp_key)
-            if not data_batch:
-                return 0
-
-            inserted = await QuestSQLProcessor.bulk_insert_quests_daily_events(data_batch)
-            logger.success(f"📬 Quests daily-events inserted +{inserted} rows.")
-            return inserted
-
-        except Exception as e:
-            logger.error(f"❌ quests flush error: {e}", exc_info=True)
-            return 0
-        finally:
-            try:
-                if temp_key and client:
-                    await client.delete(temp_key)
-            except Exception:
-                pass
+    @classmethod
+    async def flush_if_ready(cls, redis_client: Redis) -> int:
+        return await cls._flush(redis_client, "flushing", "Quests daily-events")
 
     @classmethod
     async def force_flush(cls, redis_client: Redis) -> int:
-        # Get a working client with retry
-        client = await _get_client_with_retry(redis_client)
-        if not client:
-            logger.error("❌ Quests force-flush: No Redis connection available after retries.")
-            return 0
-
-        temp_key = None
-        try:
-            if not await client.exists(cls.redis_key):
-                return 0
-
-            temp_key = cls.redis_key + ":force_flushing"
-            try:
-                await client.rename(cls.redis_key, temp_key)
-            except Exception as e:
-                if "no such key" in str(e).lower():
-                    return 0
-                raise
-
-            data_batch = await cls._consume_list_to_batch(client, temp_key)
-            if not data_batch:
-                return 0
-
-            inserted = await QuestSQLProcessor.bulk_insert_quests_daily_events(data_batch)
-            logger.success(f"📬 FORCE quests daily-events inserted +{inserted} rows.")
-            return inserted
-
-        except Exception as e:
-            logger.error(f"❌ quests force-flush error: {e}")
-            return 0
-        finally:
-            try:
-                if temp_key and client:
-                    await client.delete(temp_key)
-            except Exception:
-                pass
+        return await cls._flush(redis_client, "force_flushing", "FORCE quests daily-events")

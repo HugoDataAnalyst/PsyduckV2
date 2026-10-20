@@ -5,6 +5,7 @@ from datetime import datetime
 from utils.logger import logger
 from utils.safe_values import _to_int, _form_str, _username_str
 from sql.connect_db import transaction
+from sql.utils.errors import FlushError
 
 VALID_IV_BUCKETS = {0, 25, 50, 75, 90, 95, 100}
 
@@ -140,14 +141,14 @@ class PokemonSQLProcessor:
                     logger.warning(f"⚠️ IV daily-events deadlock/timeout; retry {attempt}/{max_retries} in {backoff:.2f}s")
                     await asyncio.sleep(backoff)
                     continue
-                logger.error(f"❌ IV daily-events DB error: {e}", exc_info=True)
-                return 0
+                logger.error(f"❌ IV daily-events DB error: {e}")
+                raise FlushError(f"IV daily-events DB error: {e}") from e
             except Exception as e:
                 logger.error(f"❌ IV daily-events unexpected error: {e}", exc_info=True)
-                return 0
+                raise FlushError(f"IV daily-events unexpected error: {e}") from e
 
         logger.error("❌ IV daily-events: max retries reached")
-        return 0
+        raise FlushError("IV daily-events: max retries reached")
 
     @staticmethod
     def _parse_shiny_row(d: dict):
@@ -253,15 +254,17 @@ class PokemonSQLProcessor:
                         )
                         await asyncio.sleep(backoff)
                         continue
-                    logger.error(f"❌ shiny upsert failed: {e}", exc_info=True)
-                    return inserted
+                    logger.error(f"❌ shiny upsert failed on rows {i}-{i+len(chunk)}: {e}")
+                    # Chunks before i are committed; total_count is additive, so
+                    # only the unwritten rows may be retried.
+                    raise FlushError(f"shiny upsert failed: {e}", remaining=rows[i:]) from e
                 except Exception as e:
-                    logger.error(f"❌ shiny upsert unexpected: {e}", exc_info=True)
-                    return inserted
+                    logger.error(f"❌ shiny upsert unexpected on rows {i}-{i+len(chunk)}: {e}", exc_info=True)
+                    raise FlushError(f"shiny upsert unexpected: {e}", remaining=rows[i:]) from e
 
             if attempt >= max_retries:
                 logger.error(f"❌ shiny upsert exceeded retries on rows {i}-{i+len(chunk)}")
-                break
+                raise FlushError("shiny upsert exceeded retries", remaining=rows[i:])
 
         logger.debug(f"✅ Upserted {inserted} shiny rows (multi-VALUES).")
         return inserted

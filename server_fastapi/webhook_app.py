@@ -25,7 +25,9 @@ from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
 from sql.tasks.quest_stops_flusher import QuestsBufferFlusher
 from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
-from my_redis.utils.redis_backup_service import RedisBackupService, RedisRestoreService
+from my_redis.utils.redis_backup_service import RedisBackupService, RedisRestoreService, reconcile_now
+from my_redis.queries.buffer import flush_guard
+from utils.runtime_health import HealthReporter
 from tzlocal import get_localzone
 from datetime import datetime, timedelta
 from utils.supersivor import Service, start_services, stop_services
@@ -38,8 +40,8 @@ setup_logging(
     {
         "to_file": AppConfig.log_file,
         "file_path": "logs/psyduckv2.log",
-        "rotation": "5 MB",
-        "keep_total": 5,
+        "rotation": AppConfig.log_rotation,
+        "retention": AppConfig.log_retention,
         "compression": "gz",
         "show_file": True,
         "show_function": True,
@@ -139,20 +141,34 @@ async def lifespan(app: FastAPI):
     # Track background tasks and services only populated for leader
     background_tasks: list[tuple[asyncio.Task, str]] = []
     services: list[Service] = []
+    leader_started = False
 
-    if is_leader:
-        # LEADER: Initialize state and start background tasks
+    async def start_leader_duties(takeover: bool):
+        """
+        Everything only the leader runs. takeover=True when a follower inherits
+        the role from a leader that died: other workers are already serving
+        with the published geofences, so they are not cleared, and the current
+        set is kept if Koji is unreachable.
+        """
+        nonlocal background_tasks, services, leader_started
 
-        logger.info(f"[{worker_id}] [LEADER] This worker is the leader - starting background services")
-
-        # Clear any stale geofences key from the previous run so followers are forced
-        # to wait until we set fresh geofences after full setup (partitions + services)
-        await GlobalStateManager.clear_geofences()
+        if not takeover:
+            # Clear any stale geofences key from the previous run so followers are forced
+            # to wait until we set fresh geofences after full setup (partitions + services)
+            await GlobalStateManager.clear_geofences()
 
         # Initialize Koji geofences - always fetch fresh from Koji on startup
         # This ensures new areas added to Koji are immediately detected
         koji_instance = KojiGeofences(AppConfig.geofence_refresh_cache_seconds)
-        geofences = await retry_call(koji_instance.get_fresh_geofences)
+        try:
+            geofences = await retry_call(koji_instance.get_fresh_geofences)
+        except Exception:
+            if not takeover:
+                raise
+            geofences = None
+        if not geofences and takeover:
+            geofences = await GlobalStateManager.get_geofences() or global_state.geofences
+            logger.warning(f"[{worker_id}] [LEADER] Koji unavailable during takeover - keeping the current geofences")
         if not geofences:
             logger.error("⚠️ No geofences available at startup. Exiting application.")
             raise Exception("❌ No geofences available at startup, stopping application.")
@@ -166,6 +182,17 @@ async def lifespan(app: FastAPI):
         # Restore Redis from MySQL backup before starting services leader only
         # Followers remain blocked on wait_for_state() until set_geofences() is called below
         await RedisRestoreService(redis_manager).restore()
+
+        # Return batches stranded by a flush that died mid-way (crash, OOM kill,
+        # restart) to their buffers before the flushers start.
+        client = await redis_manager.check_redis_connection()
+        if client:
+            recovered = await flush_guard.recover_orphans(
+                client, min_age_s=flush_guard.startup_orphan_age_s(AppConfig.uvicorn_workers),
+                include_legacy=True,
+            )
+            if recovered:
+                logger.warning(f"[{worker_id}] [LEADER] 🛟 Recovered {recovered} unflushed buffer batch(es) left by a previous run")
 
         # Start background refresh tasks leader only
 
@@ -192,6 +219,7 @@ async def lifespan(app: FastAPI):
         quests_buffer_flusher = QuestsBufferFlusher(flush_interval=AppConfig.quest_flush_interval)
         raids_buffer_flusher = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
         invasions_buffer_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
+        orphan_sweeper = flush_guard.OrphanSweeper(redis_manager)
 
         # Initialize partition ensurers leader only
 
@@ -271,6 +299,8 @@ async def lifespan(app: FastAPI):
                     partition_invasions_ensurer.start, partition_invasions_ensurer.stop),
             Service("flusher:invasions_daily", AppConfig.store_sql_invasion_aggregation,
                     invasions_buffer_flusher.start, invasions_buffer_flusher.stop),
+            # Batches stranded by failed flushes
+            Service("buffers:orphan_sweeper", True, orphan_sweeper.start, orphan_sweeper.stop),
             # Partition Cleaner
             Service("partitions:cleaner", True, partition_cleaner.start, partition_cleaner.stop),
             # Redis → MySQL Backup
@@ -279,11 +309,23 @@ async def lifespan(app: FastAPI):
         ]
 
         await start_services(services)
+        leader_started = True
+
+        # Redis restarted under us (the lock vanished with it): merge the
+        # backup back in now instead of at the next backup cycle.
+        leader.on_reacquired = lambda: reconcile_now(redis_manager, "Redis restart detected")
 
         # Now that all services and partitions are ready, publish geofences in Redis.
         # Followers are blocked on wait_for_state() until this key exists.
         await GlobalStateManager.set_geofences(geofences, expiry=AppConfig.geofence_expire_cache_seconds)
         logger.info(f"[{worker_id}] [LEADER] Geofences published — followers may now proceed")
+
+    takeover_task: asyncio.Task | None = None
+
+    if is_leader:
+        # LEADER: Initialize state and start background tasks
+        logger.info(f"[{worker_id}] [LEADER] This worker is the leader - starting background services")
+        await start_leader_duties(takeover=False)
 
     else:
 
@@ -291,11 +333,26 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"[{worker_id}] [FOLLOWER] This worker is a follower - waiting for leader state")
 
-        # Wait for leader to populate global state in Redis
+        # Wait for leader to populate global state in Redis. No state and no
+        # live leader means the previous leader died holding the lock (it
+        # expires within 30s): take over instead of exiting.
         state_available = await GlobalStateManager.wait_for_state(timeout=30.0)
         if not state_available:
-            logger.error("❌ Timeout waiting for leader to populate state. Exiting.")
-            raise Exception("❌ Timeout waiting for leader state, stopping application.")
+            if await leader.try_acquire():
+                logger.warning(f"[{worker_id}] [LEADER] No leader published state - taking over")
+                await start_leader_duties(takeover=False)
+            else:
+                logger.error("❌ Timeout waiting for leader to populate state. Exiting.")
+                raise Exception("❌ Timeout waiting for leader state, stopping application.")
+
+        if not leader.is_leader:
+            async def _on_takeover():
+                try:
+                    await start_leader_duties(takeover=True)
+                except Exception as e:
+                    logger.opt(exception=True).error(f"[{worker_id}] [LEADER] Takeover failed to start leader services: {e}")
+
+            takeover_task = asyncio.create_task(leader.watch_for_takeover(_on_takeover))
 
 
     # Sync global state from Redis to local all workers
@@ -303,6 +360,9 @@ async def lifespan(app: FastAPI):
 
     await GlobalStateManager.sync_to_legacy_global_state()
     logger.info(f"[{worker_id}] Global state synced from Redis")
+
+    health = HealthReporter(AppConfig.health_log_interval_seconds)
+    await health.start()
 
     # YIELD. Application runs
 
@@ -313,8 +373,16 @@ async def lifespan(app: FastAPI):
     # Shutdown
 
     logger.info(f"[{worker_id}] 👋 Shutting down Webhook Receiver application.")
+    await health.stop()
 
-    if is_leader:
+    if takeover_task:
+        takeover_task.cancel()
+        try:
+            await takeover_task
+        except asyncio.CancelledError:
+            pass
+
+    if leader_started:
         # Stop services leader only
         await stop_services(services)
 
@@ -326,8 +394,8 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 logger.info(f"[{worker_id}] 🛑 {name} task cancelled.")
 
-        # Release leadership
-        await leader.release()
+    # Release leadership (no-op unless this worker holds it)
+    await leader.release()
 
     # Clean up semaphore to prevent "leaked semaphore" warnings
     cleanup_semaphore()
