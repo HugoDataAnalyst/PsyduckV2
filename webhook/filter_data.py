@@ -337,6 +337,10 @@ class WebhookFilter:
             invasion_data = await self.handle_invasion_data(message, geofence_id, geofence_name, offset)
             if invasion_data:
                 return invasion_data
+        elif data_type == "weather":
+            weather_data = await self.handle_weather_data(message, geofence_id, geofence_name, offset)
+            if weather_data:
+                return weather_data
         else:
             logger.debug(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
@@ -639,3 +643,46 @@ class WebhookFilter:
 
         logger.debug(f"✅ Invasion Type: {invasion_data['invasion_type']}, Character: {invasion_data['invasion_character']} in Area {invasion_data['area_name']}. First seen at: {invasion_data['invasion_first_seen']}")
         return invasion_data
+
+    async def handle_weather_data(self, message, geofence_id, geofence_name, offset):
+        """
+        Process a Golbat weather webhook: one S2 level-10 cell whose condition
+        (or warning) just changed. The cell is assigned to the area containing
+        its centre (latitude/longitude in the payload).
+        """
+        required_weather_fields = ["s2_cell_id", "gameplay_condition", "updated", "latitude", "longitude"]
+        missing = [field for field in required_weather_fields if message.get(field) is None]
+        if missing:
+            logger.debug(f"⚠️ Skipping Weather data due to missing fields {missing}: {message}")
+            return None
+
+        # ✅ Adjust the update timestamp to local time, like every other event table
+        machine_offset = self.get_machine_offset(self.user_timezone)
+        true_utc, local_area_utc = self.correct_and_convert_timestamp(
+            int(message["updated"]),
+            machine_offset,
+            offset,
+            geofence_name
+        )
+
+        weather_data = {
+            "weather_s2_cell_id": message["s2_cell_id"],
+            "weather_gameplay_condition": message["gameplay_condition"],
+            "weather_warn_weather": message.get("warn_weather"),
+            "weather_severity": message.get("severity"),
+            "weather_wind_direction": message.get("wind_direction"),
+            "weather_cloud_level": message.get("cloud_level"),
+            "weather_rain_level": message.get("rain_level"),
+            "weather_wind_level": message.get("wind_level"),
+            "weather_snow_level": message.get("snow_level"),
+            "weather_fog_level": message.get("fog_level"),
+            "weather_special_effect_level": message.get("special_effect_level"),
+            "weather_latitude": message["latitude"],
+            "weather_longitude": message["longitude"],
+            "weather_updated": local_area_utc,
+            "area_id": geofence_id,
+            "area_name": geofence_name,
+        }
+
+        logger.debug(f"✅ Weather cell {weather_data['weather_s2_cell_id']} -> condition {weather_data['weather_gameplay_condition']} in Area {geofence_name}")
+        return weather_data

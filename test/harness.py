@@ -163,6 +163,7 @@ def db_counts() -> dict:
         "raids": int(sql_val("SELECT COUNT(*) FROM raids_daily_events") or 0),
         "quests": int(sql_val("SELECT COUNT(*) FROM quests_item_daily_events") or 0),
         "invasions": int(sql_val("SELECT COUNT(*) FROM invasions_daily_events") or 0),
+        "weather": int(sql_val("SELECT COUNT(*) FROM weather_daily_events") or 0),
     }
 
 

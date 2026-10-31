@@ -261,6 +261,7 @@ Controls which event types are persisted to MySQL long-term storage.
 | `store_sql_raid_aggregation` | `true` | Write raid events to SQL |
 | `store_sql_quest_aggregation` | `true` | Write quest events to SQL |
 | `store_sql_invasion_aggregation` | `true` | Write invasion events to SQL |
+| `store_sql_weather` | `true` | Write Golbat `weather` webhooks (one row per S2 cell weather change) to `weather_daily_events`. Golbat must send the `weather` webhook type |
 
 ### `CLEAN_SQL`
 Retention for partitioned SQL tables. Old daily/monthly partitions are automatically dropped.
@@ -271,6 +272,7 @@ Retention for partitioned SQL tables. Old daily/monthly partitions are automatic
 | `clean_raid_older_than_x_days` | `15` | Drop raid partitions older than N days |
 | `clean_quest_older_than_x_days` | `15` | Drop quest partitions older than N days |
 | `clean_invasion_older_than_x_days` | `15` | Drop invasion partitions older than N days |
+| `clean_weather_older_than_x_days` | `90` | Drop weather partitions older than N days |
 | `clean_pokemon_shiny_older_than_x_months` | `3` | Drop shiny partitions older than N months |
 | `partition_drop_batch` | `2` | Expired partitions dropped per `ALTER TABLE`. Small batches keep each table lock short, e.g. after lowering a retention |
 | `partition_drop_pause_seconds` | `10` | Pause between those `ALTER TABLE`s so inserts get through |
@@ -301,7 +303,7 @@ Controls how buffered events are batch-inserted into MySQL.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `{type}_flush_interval` | `15` | The leader flushes each buffer to MySQL every N seconds |
+| `{type}_flush_interval` | `15` | The leader flushes each buffer to MySQL every N seconds (`weather_flush_interval` defaults to `60`) |
 | `{type}_max_threshold` | `10000` | No longer used: webhook requests never flush, so buffers only drain on the interval above |
 
 ### `WEBHOOK`

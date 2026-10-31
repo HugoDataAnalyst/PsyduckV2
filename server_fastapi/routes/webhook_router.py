@@ -13,7 +13,8 @@ from webhook.parser_data import (
     process_pokemon_data,
     process_raid_data,
     process_quest_data,
-    process_invasion_data
+    process_invasion_data,
+    process_weather_data
 )
 from server_fastapi import global_state
 from server_fastapi.utils import secure_api
@@ -109,6 +110,11 @@ async def process_single_event(event: dict):
             result = await process_invasion_data(filtered_data)
             if result:
                 logger.debug(f"✅ 🕴️ Invasion Webhook processed successfully:\n{result}")
+                return {"status": "success", "processed_data": result}
+        elif data_type == "weather":
+            logger.debug("✅ Processing 🌦️ Weather data.")
+            result = await process_weather_data(filtered_data)
+            if result:
                 return {"status": "success", "processed_data": result}
         else:
             logger.debug(f"⚠️ Webhook type '{data_type}' not handled by parser yet.")

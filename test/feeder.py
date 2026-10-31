@@ -41,7 +41,7 @@ DEFAULT_URL = "http://127.0.0.1:15050/webhook"
 
 # seen_type split observed in production's sample feed (547 messages)
 REALISTIC_SEEN_TYPES = [("encounter", 270), ("wild", 145), ("nearby_cell", 70), ("nearby_stop", 62)]
-DEFAULT_MIX = {"pokemon": 0.95, "raid": 0.02, "quest": 0.02, "invasion": 0.01}
+DEFAULT_MIX = {"pokemon": 0.945, "raid": 0.02, "quest": 0.02, "invasion": 0.01, "weather": 0.005}
 
 
 @dataclass
@@ -52,6 +52,7 @@ class Expected:
     raids: int = 0            # raids_daily_events rows
     quests: int = 0           # quests_item_daily_events rows
     invasions: int = 0        # invasions_daily_events rows
+    weather: int = 0          # weather_daily_events rows
 
 
 @dataclass
@@ -185,6 +186,17 @@ class Feeder:
             "grunt_type": self.rng.randint(4, 50), "confirmed": True,
         }
 
+    def weather(self) -> dict:
+        lat, lon, _ = random_point(self.rng)
+        cell = int(self._hex_id(), 16)          # unique per event, so every one is a new row
+        return {
+            "s2_cell_id": cell, "latitude": lat, "longitude": lon,
+            "polygon": [[lat, lon]] * 4, "gameplay_condition": self.rng.randint(1, 7),
+            "wind_direction": self.rng.randint(0, 359), "cloud_level": 1, "rain_level": 0,
+            "wind_level": 2, "snow_level": 0, "fog_level": 0, "special_effect_level": 0,
+            "severity": 0, "warn_weather": False, "updated": int(time.time()),
+        }
+
     def build_batch(self, n: int) -> tuple[list, Expected]:
         """Return (payload, expected-if-accepted) for one POST."""
         exp = Expected()
@@ -212,6 +224,8 @@ class Feeder:
                 batch.append({"type": "raid", "message": self.raid()}); exp.raids += 1
             elif kind == "quest":
                 batch.append({"type": "quest", "message": self.quest()}); exp.quests += 1
+            elif kind == "weather":
+                batch.append({"type": "weather", "message": self.weather()}); exp.weather += 1
             else:
                 batch.append({"type": "invasion", "message": self.invasion()}); exp.invasions += 1
         return batch, exp
@@ -232,6 +246,7 @@ class Feeder:
             e = self.stats.expected
             e.iv_rows += exp.iv_rows; e.shiny_total += exp.shiny_total
             e.raids += exp.raids; e.quests += exp.quests; e.invasions += exp.invasions
+            e.weather += exp.weather
         else:
             self.stats.events_rejected += len(payload)
 
