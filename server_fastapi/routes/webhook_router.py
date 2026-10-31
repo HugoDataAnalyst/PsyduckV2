@@ -14,7 +14,9 @@ from webhook.parser_data import (
     process_raid_data,
     process_quest_data,
     process_invasion_data,
-    process_weather_data
+    process_weather_data,
+    process_max_battle_data,
+    process_tappable_data
 )
 from server_fastapi import global_state
 from server_fastapi.utils import secure_api
@@ -114,6 +116,14 @@ async def process_single_event(event: dict):
         elif data_type == "weather":
             logger.debug("✅ Processing 🌦️ Weather data.")
             result = await process_weather_data(filtered_data)
+            if result:
+                return {"status": "success", "processed_data": result}
+        elif data_type == "max_battle":
+            result = await process_max_battle_data(filtered_data)
+            if result:
+                return {"status": "success", "processed_data": result}
+        elif data_type == "tappable":
+            result = await process_tappable_data(filtered_data)
             if result:
                 return {"status": "success", "processed_data": result}
         else:

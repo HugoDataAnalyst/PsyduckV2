@@ -103,6 +103,7 @@ def _is_counter_key_recent(key: str, now: datetime) -> bool:
             "raid_hourly":        AppConfig.counter_raid_hourly_retention_hours,
             "invasion_hourly":    AppConfig.counter_invasion_hourly_retention_hours,
             "quest_hourly":       AppConfig.counter_quest_hourly_retention_hours,
+            "tappable_hourly":    AppConfig.counter_tappable_hourly_retention_hours,
         }
         retention_hours = _retention_map.get(key_type, 168)
         if retention_hours == 0:
@@ -118,6 +119,8 @@ def _is_counter_key_recent(key: str, now: datetime) -> bool:
             "raid_daily":        AppConfig.counter_raid_daily_retention_days,
             "invasion_daily":    AppConfig.counter_invasion_daily_retention_days,
             "quest_daily":       AppConfig.counter_quest_daily_retention_days,
+            "max_battle_daily":  AppConfig.counter_max_battle_daily_retention_days,
+            "tappable_daily":    AppConfig.counter_tappable_daily_retention_days,
         }
         if key_type in _daily_retention:
             retention_days = _daily_retention[key_type]
@@ -170,7 +173,8 @@ async def _hgetall_pipeline(client, keys: list[str]) -> list[dict[str, str] | No
 BACKUP_GRACE_S = 2 * 3600           # writes can trail their bucket (Golbat re-sends, slow batches)
 _UNKNOWN_AREA_SLACK_S = 14 * 3600   # worst case for an area with no known offset (UTC-12, plus margin)
 
-_DAILY_FAMILIES = {"pokemon_daily", "tth_pokemon_daily", "raid_daily", "invasion_daily", "quest_daily"}
+_DAILY_FAMILIES = {"pokemon_daily", "tth_pokemon_daily", "raid_daily", "invasion_daily", "quest_daily",
+                   "max_battle_daily", "tappable_daily"}
 # position of the area in ts:* keys, per family
 _TS_AREA_INDEX = {"pokemon": 3, "tth_pokemon": 2, "raids_total": 3, "invasion": 3, "quests_total": 3}
 
@@ -432,6 +436,7 @@ class MySQLCleanup:
             ("counter:raid_hourly:%",        AppConfig.counter_raid_hourly_retention_hours),
             ("counter:invasion_hourly:%",    AppConfig.counter_invasion_hourly_retention_hours),
             ("counter:quest_hourly:%",       AppConfig.counter_quest_hourly_retention_hours),
+            ("counter:tappable_hourly:%",    AppConfig.counter_tappable_hourly_retention_hours),
         ]
         daily: list[tuple[str, int]] = [
             ("counter:pokemon_daily:%",     AppConfig.counter_pokemon_daily_retention_days),
@@ -439,6 +444,8 @@ class MySQLCleanup:
             ("counter:raid_daily:%",        AppConfig.counter_raid_daily_retention_days),
             ("counter:invasion_daily:%",    AppConfig.counter_invasion_daily_retention_days),
             ("counter:quest_daily:%",       AppConfig.counter_quest_daily_retention_days),
+            ("counter:max_battle_daily:%",  AppConfig.counter_max_battle_daily_retention_days),
+            ("counter:tappable_daily:%",    AppConfig.counter_tappable_daily_retention_days),
         ]
 
         for prefix, hours in hourly:

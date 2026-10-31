@@ -341,6 +341,14 @@ class WebhookFilter:
             invasion_data = await self.handle_invasion_data(message, geofence_id, geofence_name, offset)
             if invasion_data:
                 return invasion_data
+        elif data_type == "max_battle":
+            max_battle_data = await self.handle_max_battle_data(message, geofence_id, geofence_name, offset)
+            if max_battle_data:
+                return max_battle_data
+        elif data_type == "tappable":
+            tappable_data = await self.handle_tappable_data(message, geofence_id, geofence_name, offset)
+            if tappable_data:
+                return tappable_data
         else:
             logger.debug(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
@@ -706,3 +714,63 @@ class WebhookFilter:
         machine_offset = self.get_machine_offset(self.user_timezone)
         _, local_area_utc = self.correct_and_convert_timestamp(int(ts), machine_offset, offset, geofence_name)
         return local_area_utc
+
+    async def handle_max_battle_data(self, message, geofence_id, geofence_name, offset):
+        """
+        Process a Golbat max_battle (station) webhook. Every battle in its
+        `battles` list is kept (a station can hold more than one); older
+        Golbat payloads without the list fall back to the top-level battle.
+        """
+        station_id = message.get("id")
+        if not station_id:
+            logger.debug(f"⚠️ Skipping Max Battle without station id: {message}")
+            return None
+
+        raw_battles = message.get("battles") or ([message] if message.get("battle_level") is not None else [])
+        battles = []
+        for b in raw_battles:
+            if b.get("battle_level") is None or b.get("battle_start") is None or b.get("battle_end") is None:
+                continue
+            if b.get("battle_pokemon_id") is None:
+                logger.debug(f"⚠️ Skipping Max Battle at {station_id}: boss not known yet")
+                continue
+            battles.append({
+                # Golbat's unique battle id; level+start identify a battle without it
+                "seed": b.get("bread_battle_seed") or f"{b['battle_level']}-{b['battle_start']}",
+                "level": int(b["battle_level"]),
+                "pokemon_id": int(b["battle_pokemon_id"]),
+                "form": int(b.get("battle_pokemon_form") or 0),
+                "costume": int(b.get("battle_pokemon_costume") or 0),
+                "bread_mode": int(b.get("battle_pokemon_bread_mode") or 0),
+                "start_local": self._local_time(b["battle_start"], offset, geofence_name),
+                "end_utc": int(b["battle_end"]),
+            })
+        if not battles:
+            return None
+
+        logger.debug(f"✅ Max Battle station {station_id}: {len(battles)} battle(s) in Area {geofence_name}")
+        return {"station_id": station_id, "battles": battles, "area_id": geofence_id, "area_name": geofence_name}
+
+    async def handle_tappable_data(self, message, geofence_id, geofence_name, offset):
+        """Process a Golbat tappable webhook (sent once its reward is known)."""
+        encounter_id = message.get("encounter_id")
+        reward_type = message.get("reward_type")
+        if not encounter_id or not reward_type or message.get("updated") is None:
+            logger.debug(f"⚠️ Skipping Tappable without encounter_id/reward_type/updated: {message}")
+            return None
+
+        tappable_type = str(message.get("type") or "UNKNOWN").removeprefix("TAPPABLE_TYPE_")
+        reward_id = message.get("item_id") or message.get("reward_pokemon_id") or 0
+        tappable_data = {
+            "encounter_id": str(encounter_id),
+            "type": tappable_type,
+            "reward_type": str(reward_type),
+            "reward_id": int(reward_id),
+            "count": int(message.get("count") or 1),
+            "seen_local": self._local_time(message["updated"], offset, geofence_name),
+            "disappear_utc": int(message.get("disappear_time") or 0),
+            "area_id": geofence_id,
+            "area_name": geofence_name,
+        }
+        logger.debug(f"✅ Tappable {tappable_type} {reward_type}:{reward_id} x{tappable_data['count']} in Area {geofence_name}")
+        return tappable_data

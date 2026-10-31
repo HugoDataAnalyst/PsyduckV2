@@ -37,6 +37,8 @@ from my_redis.queries.buffer.quests_bulk_buffer import QuestsRedisBuffer
 from my_redis.queries.buffer.raids_bulk_buffer import RaidsRedisBuffer
 from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsRedisBuffer
 from my_redis.queries.buffer.weather_bulk_buffer import WeatherRedisBuffer
+from my_redis.queries.updates.max_battles.max_battle_counterseries import stage_max_battle_counters
+from my_redis.queries.updates.tappables.tappable_counterseries import stage_tappable_counters
 from utils.logger import logger
 from utils.retry_functions import retry
 
@@ -269,3 +271,37 @@ async def process_weather_data(filtered_data):
     except Exception as e:
         logger.error(f"❌ Error processing Weather event data in parser_data: {e}")
         return None
+
+
+async def _stage_and_run(label: str, stage, filtered_data):
+    """Max battles and tappables: Redis counters only, one pipeline per event."""
+    client = await redis_manager.get_connection_with_retry(max_attempts=3, delay=0.3)
+    if not client:
+        logger.error(f"❌ Redis is not connected after retries. Cannot process {label} data.")
+        return None
+    try:
+        async with client.pipeline(transaction=False) as pipe:
+            result = stage(filtered_data, pipe)
+            await _execute(pipe)
+        return "OK" if not _DEBUG else f"{label} in {filtered_data['area_name']}: {result}"
+    except Exception as e:
+        logger.error(f"❌ Error processing {label} event data in parser_data: {e}")
+        return None
+
+
+async def process_max_battle_data(filtered_data):
+    """Count each battle of a max-battle station once (Redis daily + weekly counters)."""
+    if not filtered_data:
+        return None
+    if not AppConfig.store_max_battles:
+        return "DISABLED"
+    return await _stage_and_run("Max Battle", stage_max_battle_counters, filtered_data)
+
+
+async def process_tappable_data(filtered_data):
+    """Count each tappable once (Redis hourly, daily + weekly counters)."""
+    if not filtered_data:
+        return None
+    if not AppConfig.store_tappables:
+        return "DISABLED"
+    return await _stage_and_run("Tappable", stage_tappable_counters, filtered_data)

@@ -96,6 +96,7 @@ def get_counter_hourly_retention_mapping() -> Dict[str, int]:
         "counter:raid_hourly:*":        AppConfig.counter_raid_hourly_retention_hours,
         "counter:invasion_hourly:*":    AppConfig.counter_invasion_hourly_retention_hours,
         "counter:quest_hourly:*":       AppConfig.counter_quest_hourly_retention_hours,
+        "counter:tappable_hourly:*":    AppConfig.counter_tappable_hourly_retention_hours,
     }
 
 def get_retention_mapping() -> Dict[str, int]:
@@ -254,6 +255,8 @@ def get_counter_daily_retention_mapping() -> Dict[str, int]:
         "counter:raid_daily:*":        AppConfig.counter_raid_daily_retention_days,
         "counter:invasion_daily:*":    AppConfig.counter_invasion_daily_retention_days,
         "counter:quest_daily:*":       AppConfig.counter_quest_daily_retention_days,
+        "counter:max_battle_daily:*":  AppConfig.counter_max_battle_daily_retention_days,
+        "counter:tappable_daily:*":    AppConfig.counter_tappable_daily_retention_days,
     }
 
 

@@ -77,6 +77,16 @@ TAGS_METADATA = [
         "summary": "Get active Pokémon counts per area.",
     },
     {
+        "name": "Max Battle Counter Series",
+        "description": "Obtain Max Battle (Dynamax / Gigantamax) counters from Redis.",
+        "summary": "Get Max Battle counter series data.",
+    },
+    {
+        "name": "Tappable Counter Series",
+        "description": "Obtain Tappable counters (count and reward amount) from Redis.",
+        "summary": "Get Tappable counter series data.",
+    },
+    {
         "name": "Pokémon HeatMap Data",
         "description": "Obtain Pokémon HeatMap Data from SQL.",
         "summary": "Get Pokémon HeatMap data.",
@@ -100,5 +110,10 @@ TAGS_METADATA = [
         "name": "Quest SQL Data",
         "description": "Obtain Quest Data from SQL.",
         "summary": "Get Quest data.",
+    },
+    {
+        "name": "Weather SQL Data",
+        "description": "Obtain weather per area (time under each condition) and per S2 cell from SQL.",
+        "summary": "Get Weather data.",
     },
 ]

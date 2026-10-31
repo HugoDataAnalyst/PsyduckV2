@@ -41,7 +41,8 @@ DEFAULT_URL = "http://127.0.0.1:15050/webhook"
 
 # seen_type split observed in production's sample feed (547 messages)
 REALISTIC_SEEN_TYPES = [("encounter", 270), ("wild", 145), ("nearby_cell", 70), ("nearby_stop", 62)]
-DEFAULT_MIX = {"pokemon": 0.945, "raid": 0.02, "quest": 0.02, "invasion": 0.01, "weather": 0.005}
+DEFAULT_MIX = {"pokemon": 0.935, "raid": 0.02, "quest": 0.02, "invasion": 0.01, "weather": 0.005,
+               "max_battle": 0.005, "tappable": 0.005}
 
 
 @dataclass
@@ -53,6 +54,8 @@ class Expected:
     quests: int = 0           # quests_item_daily_events rows
     invasions: int = 0        # invasions_daily_events rows
     weather: int = 0          # weather_daily_events rows
+    max_battles: int = 0      # distinct battles (counter total)
+    tappables: int = 0        # distinct tappables (counter total)
 
 
 @dataclass
@@ -200,6 +203,35 @@ class Feeder:
             "severity": 0, "warn_weather": False, "updated": int(time.time()),
         }
 
+    def max_battle(self) -> dict:
+        now = int(time.time())
+        lat, lon, _ = random_point(self.rng)
+        start = now - 3600
+        battle = {
+            "bread_battle_seed": int(self._hex_id(), 16), "battle_level": self.rng.choice([1, 2, 3, 5]),
+            "battle_start": start, "battle_end": start + 86400,
+            "battle_pokemon_id": self.rng.randint(1, 900), "battle_pokemon_form": 0,
+            "battle_pokemon_costume": 0, "battle_pokemon_gender": 1, "battle_pokemon_alignment": 0,
+            "battle_pokemon_bread_mode": self.rng.choice([1, 1, 1, 2]),
+            "battle_pokemon_move_1": 1, "battle_pokemon_move_2": 2, "battle_pokemon_stamina": 15000,
+        }
+        return {"id": f"st{self._hex_id()}.16", "name": "Test Station", "latitude": lat, "longitude": lon,
+                "start_time": start, "end_time": start + 86400, "is_battle_available": True,
+                **{k: v for k, v in battle.items() if k != "bread_battle_seed"},
+                "total_stationed_pokemon": 0, "total_stationed_gmax": 0,
+                "battles": [battle], "updated": now}
+
+    def tappable(self) -> dict:
+        now = int(time.time())
+        lat, lon, _ = random_point(self.rng)
+        candy = self.rng.random() < 0.75
+        return {"encounter_id": str(int(self._hex_id(), 16)), "spawnpoint_id": self._hex_id(),
+                "pokestop_id": "None", "pokestop_name": None, "latitude": lat, "longitude": lon,
+                "type": "TAPPABLE_TYPE_BOX", "reward_type": "pokemon_candy" if candy else "item",
+                "item_id": None if candy else 1301, "reward_pokemon_id": self.rng.choice([25, 41, 854]) if candy else None,
+                "count": 6 if candy else 1, "rewards": [], "disappear_time": now + 1800,
+                "disappear_time_verified": True, "updated": now}
+
     def build_batch(self, n: int) -> tuple[list, Expected]:
         """Return (payload, expected-if-accepted) for one POST."""
         exp = Expected()
@@ -229,6 +261,15 @@ class Feeder:
                 batch.append({"type": "quest", "message": self.quest()}); exp.quests += 1
             elif kind == "weather":
                 batch.append({"type": "weather", "message": self.weather()}); exp.weather += 1
+            elif kind == "max_battle":
+                msg = self.max_battle()
+                batch.append({"type": "max_battle", "message": msg}); exp.max_battles += 1
+                # Golbat re-sends a station when its battle details change: must not count twice
+                batch.append({"type": "max_battle", "message": dict(msg, total_stationed_pokemon=1)})
+            elif kind == "tappable":
+                msg = self.tappable()
+                batch.append({"type": "tappable", "message": msg}); exp.tappables += 1
+                batch.append({"type": "tappable", "message": dict(msg)})   # re-send
             else:
                 batch.append({"type": "invasion", "message": self.invasion()}); exp.invasions += 1
         return batch, exp
@@ -250,6 +291,7 @@ class Feeder:
             e.iv_rows += exp.iv_rows; e.shiny_total += exp.shiny_total
             e.raids += exp.raids; e.quests += exp.quests; e.invasions += exp.invasions
             e.weather += exp.weather
+            e.max_battles += exp.max_battles; e.tappables += exp.tappables
         else:
             self.stats.events_rejected += len(payload)
 

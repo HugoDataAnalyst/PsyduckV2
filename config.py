@@ -135,6 +135,7 @@ counter_tth_pokemon_hourly_retention_hours = int(config.get("retention_hours", {
 counter_raid_hourly_retention_hours        = int(config.get("retention_hours", {}).get("counter_raid_hourly",        168))
 counter_invasion_hourly_retention_hours    = int(config.get("retention_hours", {}).get("counter_invasion_hourly",    168))
 counter_quest_hourly_retention_hours       = int(config.get("retention_hours", {}).get("counter_quest_hourly",       168))
+counter_tappable_hourly_retention_hours    = int(config.get("retention_hours", {}).get("counter_tappable_hourly",    168))
 
 # Counter daily retention (days; 0 = disabled — no cleanup, no backup filtering)
 counter_pokemon_daily_retention_days     = int(config.get("retention_days", {}).get("counter_pokemon_daily",     30))
@@ -142,6 +143,8 @@ counter_tth_pokemon_daily_retention_days = int(config.get("retention_days", {}).
 counter_raid_daily_retention_days        = int(config.get("retention_days", {}).get("counter_raid_daily",        30))
 counter_invasion_daily_retention_days    = int(config.get("retention_days", {}).get("counter_invasion_daily",    30))
 counter_quest_daily_retention_days       = int(config.get("retention_days", {}).get("counter_quest_daily",       30))
+counter_max_battle_daily_retention_days  = int(config.get("retention_days", {}).get("counter_max_battle_daily",  30))
+counter_tappable_daily_retention_days    = int(config.get("retention_days", {}).get("counter_tappable_daily",    30))
 
 #Store in Redis
 store_pokemon_timeseries = str(config.get('IN-MEMORY', {}).get('store_pokemon_timeseries', True)).upper() == "TRUE"
@@ -150,6 +153,8 @@ store_raids_timeseries = str(config.get('IN-MEMORY', {}).get('store_raids_timese
 store_invasions_timeseries = str(config.get('IN-MEMORY', {}).get('store_invasions_timeseries', True)).upper() == "TRUE"
 store_quests_timeseries = str(config.get('IN-MEMORY', {}).get('store_quests_timeseries', True)).upper() == "TRUE"
 store_active_pokemon = str(config.get('IN-MEMORY', {}).get('store_active_pokemon', True)).upper() == "TRUE"
+store_max_battles = str(config.get('IN-MEMORY', {}).get('store_max_battles', True)).upper() == "TRUE"
+store_tappables = str(config.get('IN-MEMORY', {}).get('store_tappables', True)).upper() == "TRUE"
 
 # Cleanup Redis Timeseries
 cleanup_interval_seconds = int(config.get("CLEAN_REDIS_TS", {}).get("cleanup_interval_seconds", 1800))
