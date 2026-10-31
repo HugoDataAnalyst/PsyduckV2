@@ -1466,7 +1466,7 @@ async def get_quest_data(
         lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
                      f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
     lines.append(f"[pokemon] rows={result['pokemon']['rows']}")
-    for r in result["pokemon']['data"]:
+    for r in result["pokemon"]["data"]:
         lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
                      f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
     return "\n".join(lines)
