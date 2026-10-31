@@ -88,8 +88,9 @@ async def weather_maths() -> list[str]:
     got = {k: v["cell_hours"] for k, v in day.items() if k != "changes"}
     if got != want:
         errors.append(f"sum cell_hours {got} != {want}")
-    if day.get("changes") != 3:          # B's evening FOG lies before the window
-        errors.append(f"sum changes {day.get('changes')} != 3")
+    # A: CLEAR is its first row (no change), RAINY is one; B: FOG -> CLEAR is one
+    if day.get("changes") != 2:
+        errors.append(f"sum changes {day.get('changes')} != 2")
     if s["cells"] != 2:
         errors.append(f"cells {s['cells']} != 2")
     h12 = g["data"].get(y.replace(hour=12).strftime("%Y-%m-%d %H:00"), {})

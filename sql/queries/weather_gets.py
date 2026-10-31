@@ -8,7 +8,8 @@ split them per hour:
 
   cell_hours   hours a condition was in force, summed over cells (an area with
                6 cells has 6 cell-hours per hour)
-  changes      rows (weather changes) inside the window
+  changes      condition changes inside the window (a first row or a repeat
+               of the previous condition is not one)
 
 The condition in force when the window opens comes from each cell's last row
 before it (looked up to LOOKBACK_DAYS back). A cell's latest condition is taken
@@ -65,6 +66,20 @@ def _intervals(events: list, start: datetime, end: datetime, now: datetime):
             yield a, b, cond
 
 
+def _change_times(events: list, start: datetime, end: datetime) -> list[datetime]:
+    """
+    Times in [start, end) where a cell's condition really changed. A cell's
+    first row (a seed or first sighting) and a row repeating the previous
+    condition (a warning change, or a sync row next to its webhook) are not
+    changes.
+    """
+    out = []
+    for (_, prev, *_), (t, cond, *_) in zip(events, events[1:]):
+        if cond != prev and start <= t < end:
+            out.append(t)
+    return out
+
+
 def _hour_pieces(a: datetime, b: datetime):
     """Split [a, b) at hour boundaries: yield (hour_start, hours)."""
     h = a.replace(minute=0, second=0, microsecond=0)
@@ -103,10 +118,9 @@ async def fetch_weather_summary(*, area_ids: list[int] | None, offsets: dict[int
             for hour, h in _hour_pieces(a, b):
                 key = hour.strftime("%Y-%m-%d %H:00") if mode == "grouped" else _bucket(hour, interval)
                 hours[key][cond] += h
-        for t, *_ in events:
-            if start <= t < end:
-                key = t.strftime("%Y-%m-%d %H:00") if mode == "grouped" else _bucket(t, interval)
-                changes[key] += 1
+        for t in _change_times(events, start, end):
+            key = t.strftime("%Y-%m-%d %H:00") if mode == "grouped" else _bucket(t, interval)
+            changes[key] += 1
 
     data = {}
     for key in sorted(set(hours) | set(changes)):
@@ -138,14 +152,13 @@ async def fetch_weather_cells(*, area_id: int, offset: int, start: datetime, end
         if not summary:
             continue
         total = sum(summary.values())
-        in_window = [e for e in events if start <= e[0] < end]
         last = events[-1]
         out[str(cell)] = {
             "latitude": last[2],
             "longitude": last[3],
             "first_seen": events[0][0].strftime("%Y-%m-%d %H:%M"),
             "last_change": last[0].strftime("%Y-%m-%d %H:%M"),
-            "changes": len(in_window),
+            "changes": len(_change_times(events, start, end)),
             "summary": {_name(c, raw): {"hours": round(v, 2), "pct": round(100 * v / total, 1)}
                         for c, v in sorted(summary.items(), key=lambda kv: -kv[1])},
             "hourly": {h: (_name(next(iter(by)), raw) if len(by) == 1
