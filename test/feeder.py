@@ -191,7 +191,10 @@ class Feeder:
         cell = int(self._hex_id(), 16)          # unique per event, so every one is a new row
         return {
             "s2_cell_id": cell, "latitude": lat, "longitude": lon,
-            "polygon": [[lat, lon]] * 4, "gameplay_condition": self.rng.randint(1, 7),
+            # smaller than random_point's edge margin, so it stays inside one area
+            "polygon": [[lat - 0.0002, lon - 0.0002], [lat - 0.0002, lon + 0.0002],
+                        [lat + 0.0002, lon + 0.0002], [lat + 0.0002, lon - 0.0002]],
+            "gameplay_condition": self.rng.randint(1, 7),
             "wind_direction": self.rng.randint(0, 359), "cloud_level": 1, "rain_level": 0,
             "wind_level": 2, "snow_level": 0, "fog_level": 0, "special_effect_level": 0,
             "severity": 0, "warn_weather": False, "updated": int(time.time()),

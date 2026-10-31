@@ -23,11 +23,11 @@ class WeatherRedisBuffer:
     redis_key = "buffer:weather_events"
 
     @classmethod
-    def entry(cls, event_data: dict) -> str | None:
-        """Validate one event and build its buffer line; None (already logged) to skip it."""
+    def entry(cls, event_data: dict, area: dict) -> str | None:
+        """Validate one event for one of its areas and build the buffer line; None (already logged) to skip it."""
         s2_cell_id = _safe_int(event_data.get("weather_s2_cell_id"), None)
-        area_id    = _safe_int(event_data.get("area_id"), None)
-        updated    = _safe_int(event_data.get("weather_updated"), None)
+        area_id    = _safe_int(area.get("area_id"), None)
+        updated    = _safe_int(area.get("updated"), None)
         lat        = _to_float(event_data.get("weather_latitude"))
         lon        = _to_float(event_data.get("weather_longitude"))
 
@@ -46,15 +46,16 @@ class WeatherRedisBuffer:
 
     @classmethod
     def stage(cls, pipe, event_data: dict) -> bool:
-        """Queue this event's buffer append on the caller's pipeline (no own round trip)."""
+        """Queue one buffer line per overlapping area on the caller's pipeline (no own round trip)."""
         try:
-            line = cls.entry(event_data)
+            lines = [cls.entry(event_data, area) for area in event_data.get("areas", [])]
         except Exception as e:
             logger.error(f"❌ Weather buffer: could not build entry: {e}")
             return False
-        if line is None:
+        lines = [line for line in lines if line is not None]
+        if not lines:
             return False
-        pipe.rpush(cls.redis_key, line)
+        pipe.rpush(cls.redis_key, *lines)
         return True
 
     @classmethod

@@ -14,13 +14,13 @@ import time
 # changes (GlobalStateManager hands out the same list object until it refreshes).
 # Before, every event built a shapely Polygon for each geofence in turn - all of
 # them for a point outside every area.
-_geofence_index: dict = {"source": None, "tree": None}
+_geofence_index: dict = {"source": None, "tree": None, "polygons": []}
 
 
 def _geofence_tree(geofences: list) -> STRtree:
     if _geofence_index["source"] is not geofences:
         polygons = [Polygon(g["coordinates"][0]) for g in geofences]
-        _geofence_index.update(source=geofences, tree=STRtree(polygons))
+        _geofence_index.update(source=geofences, tree=STRtree(polygons), polygons=polygons)
     return _geofence_index["tree"]
 
 
@@ -316,6 +316,10 @@ class WebhookFilter:
             )
             return None
 
+        # Weather cells are areas, not points: matched by their polygon instead
+        if data_type == "weather":
+            return await self.handle_weather_data(message)
+
         inside_geofence, geofence_id, geofence_name, offset = await self.is_inside_geofence(latitude, longitude)
         if not inside_geofence:
             return None  # ❌ Reject if outside geofence
@@ -337,10 +341,6 @@ class WebhookFilter:
             invasion_data = await self.handle_invasion_data(message, geofence_id, geofence_name, offset)
             if invasion_data:
                 return invasion_data
-        elif data_type == "weather":
-            weather_data = await self.handle_weather_data(message, geofence_id, geofence_name, offset)
-            if weather_data:
-                return weather_data
         else:
             logger.debug(f"⚠️ Unhandled webhook type: {data_type}")
             return None  # ❌ Ignore unknown types
@@ -644,11 +644,20 @@ class WebhookFilter:
         logger.debug(f"✅ Invasion Type: {invasion_data['invasion_type']}, Character: {invasion_data['invasion_character']} in Area {invasion_data['area_name']}. First seen at: {invasion_data['invasion_first_seen']}")
         return invasion_data
 
-    async def handle_weather_data(self, message, geofence_id, geofence_name, offset):
+    def _areas_overlapping(self, shape) -> list[dict]:
+        """Geofences sharing a positive area with `shape` (touching an edge only does not count)."""
+        if not self.geofences:
+            return []
+        hits = sorted(int(i) for i in _geofence_tree(self.geofences).query(shape, predicate="intersects"))
+        polygons = _geofence_index["polygons"]
+        return [self.geofences[i] for i in hits if not shape.touches(polygons[i])]
+
+    async def handle_weather_data(self, message):
         """
         Process a Golbat weather webhook: one S2 level-10 cell whose condition
-        (or warning) just changed. The cell is assigned to the area containing
-        its centre (latitude/longitude in the payload).
+        (or warning) just changed. The cell counts for every area it overlaps,
+        even slightly - a Pokémon at the edge of an area is boosted by whichever
+        cell it stands in - so it yields one row per overlapping area.
         """
         required_weather_fields = ["s2_cell_id", "gameplay_condition", "updated", "latitude", "longitude"]
         missing = [field for field in required_weather_fields if message.get(field) is None]
@@ -656,14 +665,16 @@ class WebhookFilter:
             logger.debug(f"⚠️ Skipping Weather data due to missing fields {missing}: {message}")
             return None
 
-        # ✅ Adjust the update timestamp to local time, like every other event table
-        machine_offset = self.get_machine_offset(self.user_timezone)
-        true_utc, local_area_utc = self.correct_and_convert_timestamp(
-            int(message["updated"]),
-            machine_offset,
-            offset,
-            geofence_name
-        )
+        # Golbat's polygon is the cell's 4 corners as [lat, lon]
+        corners = message.get("polygon")
+        if corners and len(corners) >= 3:
+            shape = Polygon([(float(lon), float(lat)) for lat, lon in corners])
+        else:
+            shape = Point(float(message["longitude"]), float(message["latitude"]))
+        areas = self._areas_overlapping(shape)
+        if not areas:
+            logger.debug(f"❌ Weather cell {message['s2_cell_id']} overlaps no geofence. Ignoring.")
+            return None
 
         weather_data = {
             "weather_s2_cell_id": message["s2_cell_id"],
@@ -679,10 +690,19 @@ class WebhookFilter:
             "weather_special_effect_level": message.get("special_effect_level"),
             "weather_latitude": message["latitude"],
             "weather_longitude": message["longitude"],
-            "weather_updated": local_area_utc,
-            "area_id": geofence_id,
-            "area_name": geofence_name,
+            # one entry per overlapping area, each with the update time in that
+            # area's local time like every other event table
+            "areas": [{"area_id": g["id"], "area_name": g["name"],
+                       "updated": self._local_time(message["updated"], g.get("offset", 0), g["name"])}
+                      for g in areas],
         }
 
-        logger.debug(f"✅ Weather cell {weather_data['weather_s2_cell_id']} -> condition {weather_data['weather_gameplay_condition']} in Area {geofence_name}")
+        logger.debug(f"✅ Weather cell {weather_data['weather_s2_cell_id']} -> condition "
+                     f"{weather_data['weather_gameplay_condition']} in {[g['name'] for g in areas]}")
         return weather_data
+
+    def _local_time(self, ts: int, offset: int, geofence_name: str) -> int:
+        """Webhook epoch -> area-local epoch, the frame every counter key uses."""
+        machine_offset = self.get_machine_offset(self.user_timezone)
+        _, local_area_utc = self.correct_and_convert_timestamp(int(ts), machine_offset, offset, geofence_name)
+        return local_area_utc
