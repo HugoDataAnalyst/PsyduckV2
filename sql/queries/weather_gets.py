@@ -13,7 +13,8 @@ split them per hour:
 The condition in force when the window opens comes from each cell's last row
 before it (looked up to LOOKBACK_DAYS back). A cell's latest condition is taken
 to last until the window's end or now, whichever is earlier. seen_at, like
-every event table, is in the area's local time.
+every event table, is in the area's local time. A cell overlapping several
+areas has rows in each; area=global counts it once.
 """
 from __future__ import annotations
 
@@ -85,6 +86,12 @@ async def fetch_weather_summary(*, area_ids: list[int] | None, offsets: dict[int
                                 end: datetime, interval: str, mode: str, raw: bool = False) -> dict:
     """mode=sum: cell-hours and % per condition per day/week/month; mode=grouped: per hour."""
     cells = await _cell_rows(area_ids, start, end)
+    if area_ids is None:
+        # a cell overlapping several areas is stored once per area: count it once
+        first = {}
+        for area_id, cell in sorted(cells):
+            first.setdefault(cell, area_id)
+        cells = {k: v for k, v in cells.items() if first[k[1]] == k[0]}
     utc_now = datetime.utcnow()
     hours = defaultdict(lambda: defaultdict(float))      # bucket -> condition -> cell_hours
     changes = defaultdict(int)

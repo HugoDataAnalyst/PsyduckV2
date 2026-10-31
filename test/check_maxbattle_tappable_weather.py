@@ -9,6 +9,8 @@ Max battles, tappables and the weather API, end to end on the test stack.
      cell B: FOG from the evening before (carried in), CLEAR from 11:00
    window 10:00-14:00 -> CLEAR 5.5, RAINY 1.5, FOG 1.0 cell-hours (2 cells x 4 h)
 3. The weather endpoints answer for a real area and refuse 'global' for cells.
+4. A weather cell straddling two areas (centre in one, a sliver in the other)
+   is stored for both.
 
   python test/check_maxbattle_tappable_weather.py      (stack up)
 """
@@ -101,9 +103,24 @@ async def weather_maths() -> list[str]:
     return errors
 
 
+def send_straddling_cell() -> int:
+    from areas import AREAS
+    a1 = AREAS[0]
+    edge, lat = a1["lon1"], (a1["lat0"] + a1["lat1"]) / 2
+    cell = 987654321012345
+    body = json.dumps([{"type": "weather", "message": {
+        "s2_cell_id": cell, "gameplay_condition": 6, "updated": int(time.time()),
+        "latitude": lat, "longitude": edge - 0.002,
+        "polygon": [[lat - .001, edge - .005], [lat - .001, edge + .0002],
+                    [lat + .001, edge + .0002], [lat + .001, edge - .005]]}}]).encode()
+    urllib.request.urlopen(urllib.request.Request(h.WEBHOOK_URL, data=body, headers={"Content-Type": "application/json"}))
+    return cell
+
+
 def main() -> int:
     errors = []
     expected = asyncio.run(feed())
+    straddling = send_straddling_cell()
     print(f"fed (each sent twice): {expected['max_battles']} max battles, {expected['tappables']} tappables, "
           f"{expected['weather']} weather changes")
     time.sleep(70)   # weather flush interval is 60 s
@@ -129,7 +146,14 @@ def main() -> int:
         if code != 200:
             errors.append(f"tappables {mode}/{interval} HTTP {code}")
 
-    rows = int(h.sql_val("SELECT COUNT(*) FROM weather_daily_events") or 0)
+    areas_of_cell = sorted(r[0] for r in h.sql(
+        "SELECT n.name FROM weather_daily_events w JOIN area_names n ON n.id = w.area_id WHERE w.s2_cell_id = %s",
+        (straddling,)))
+    print(f"straddling cell stored for: {areas_of_cell}")
+    if areas_of_cell != ["TestArea01", "TestArea02"]:
+        errors.append(f"straddling cell areas {areas_of_cell}")
+
+    rows = int(h.sql_val("SELECT COUNT(*) FROM weather_daily_events WHERE s2_cell_id <> %s", (straddling,)) or 0)
     area = h.sql_val("SELECT n.name FROM weather_daily_events w JOIN area_names n ON n.id = w.area_id LIMIT 1")
     print(f"weather rows: {rows} (want >= {expected['weather']}), sample area {area}")
     if rows < expected["weather"]:
