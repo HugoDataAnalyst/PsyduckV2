@@ -115,6 +115,9 @@ quest_flush_interval = config.get("flusher", {}).get("quest_flush_interval", 60)
 raid_flush_interval = config.get("flusher", {}).get("raid_flush_interval", 60)
 invasion_flush_interval = config.get("flusher", {}).get("invasion_flush_interval", 60)
 weather_flush_interval = config.get("flusher", {}).get("weather_flush_interval", 60)
+# Weather sync from Golbat's weather table (seeds cells, recovers missed changes). 0 minutes = off
+weather_golbat_sync_minutes = int(config.get("weather", {}).get("golbat_sync_minutes", 15))
+weather_golbat_sync_max_age_hours = float(config.get("weather", {}).get("golbat_sync_max_age_hours", 2))
 shiny_flush_interval = config.get("flusher", {}).get("shiny_flush_interval", 60)
 pokemon_flush_interval = config.get("flusher", {}).get("pokemon_flush_interval", 60)
 

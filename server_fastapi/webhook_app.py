@@ -23,6 +23,7 @@ from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
 from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
 from sql.tasks.weather_flusher import WeatherBufferFlusher
+from sql.tasks.weather_golbat_sync import WeatherGolbatSync
 from sql.tasks.quest_stops_flusher import QuestsBufferFlusher
 from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
@@ -221,6 +222,8 @@ async def lifespan(app: FastAPI):
         raids_buffer_flusher = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
         invasions_buffer_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
         weather_buffer_flusher = WeatherBufferFlusher(flush_interval=AppConfig.weather_flush_interval)
+        weather_golbat_sync = WeatherGolbatSync(AppConfig.weather_golbat_sync_minutes,
+                                                AppConfig.weather_golbat_sync_max_age_hours)
         orphan_sweeper = flush_guard.OrphanSweeper(redis_manager)
 
         # Initialize partition ensurers leader only
@@ -311,6 +314,10 @@ async def lifespan(app: FastAPI):
                     partition_weather_ensurer.start, partition_weather_ensurer.stop),
             Service("flusher:weather_daily", AppConfig.store_sql_weather,
                     weather_buffer_flusher.start, weather_buffer_flusher.stop),
+            Service("weather:golbat_sync",
+                    AppConfig.store_sql_weather and AppConfig.weather_golbat_sync_minutes > 0
+                    and bool(AppConfig.golbat_db_name),
+                    weather_golbat_sync.start, weather_golbat_sync.stop),
             # Batches stranded by failed flushes
             Service("buffers:orphan_sweeper", True, orphan_sweeper.start, orphan_sweeper.stop),
             # Partition Cleaner

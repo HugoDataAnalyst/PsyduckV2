@@ -316,6 +316,14 @@ Protects the webhook receiver when it falls behind. Limits apply per uvicorn wor
 | `abort_on_disconnect` | `true` | Stop processing a batch whose sender has hung up |
 | `health_log_interval_seconds` | `60` | How often the `🩺 ingest` line is logged (in-flight events, accepted/shed/aborted, event-loop lag, memory). It is a WARNING when anything was shed or the app lagged |
 
+### `weather`
+Weather sync from Golbat's own `weather` table (needs the `GOLBAT_DB_*` connection). Golbat only sends a weather webhook when a cell's weather changes, so without it a cell has no data until its first change, and changes missed while PsyduckV2 was down are lost. Each pass writes a row for every cell overlapping an area that has none yet, or whose stored weather differs from Golbat's, timed at the start of the hour Golbat last read the cell (weather only changes on the hour).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `golbat_sync_minutes` | `15` | How often the sync runs. `0` = off |
+| `golbat_sync_max_age_hours` | `2` | Skip cells Golbat has not refreshed for this long (no scanner reads them, so their stored weather is a guess). Golbat refreshes a cell about once an hour. `0` = trust every cell |
+
 ### `geofences`
 
 | Key | Default | Description |
