@@ -22,6 +22,8 @@ from sql.tasks.cleaners.global_partition_cleaner import build_default_cleaner
 from sql.tasks.pokemon_heatmap_flusher import PokemonIVBufferFlusher
 from sql.tasks.pokemon_shiny_flusher import ShinyRateBufferFlusher
 from sql.tasks.invasion_stops_flusher import InvasionsBufferFlusher
+from sql.tasks.weather_flusher import WeatherBufferFlusher
+from sql.tasks.weather_golbat_sync import WeatherGolbatSync
 from sql.tasks.quest_stops_flusher import QuestsBufferFlusher
 from sql.tasks.raid_gyms_flusher import RaidsBufferFlusher
 from my_redis.utils.expire_timeseries import periodic_cleanup
@@ -219,6 +221,9 @@ async def lifespan(app: FastAPI):
         quests_buffer_flusher = QuestsBufferFlusher(flush_interval=AppConfig.quest_flush_interval)
         raids_buffer_flusher = RaidsBufferFlusher(flush_interval=AppConfig.raid_flush_interval)
         invasions_buffer_flusher = InvasionsBufferFlusher(flush_interval=AppConfig.invasion_flush_interval)
+        weather_buffer_flusher = WeatherBufferFlusher(flush_interval=AppConfig.weather_flush_interval)
+        weather_golbat_sync = WeatherGolbatSync(AppConfig.weather_golbat_sync_minutes,
+                                                AppConfig.weather_golbat_sync_max_age_hours)
         orphan_sweeper = flush_guard.OrphanSweeper(redis_manager)
 
         # Initialize partition ensurers leader only
@@ -243,6 +248,10 @@ async def lifespan(app: FastAPI):
             ensure_interval=86400, days_back=2, days_forward=30,
             table="invasions_daily_events", column="day_date",
         )
+        partition_weather_ensurer = DailyPartitionEnsurer(
+            ensure_interval=86400, days_back=2, days_forward=30,
+            table="weather_daily_events", column="day_date",
+        )
         partition_shiny_rates_ensurer = MonthlyPartitionEnsurer(
             ensure_interval=86400, months_back=2, months_forward=12,
             table="shiny_username_rates", column="month_year",
@@ -261,6 +270,7 @@ async def lifespan(app: FastAPI):
             "quests_pokemon_daily_events",
             "raids_daily_events",
             "invasions_daily_events",
+            "weather_daily_events",
         ):
             await ensure_daily_partitions(tbl, "day_date", days_back=2, days_forward=30)
 
@@ -299,6 +309,15 @@ async def lifespan(app: FastAPI):
                     partition_invasions_ensurer.start, partition_invasions_ensurer.stop),
             Service("flusher:invasions_daily", AppConfig.store_sql_invasion_aggregation,
                     invasions_buffer_flusher.start, invasions_buffer_flusher.stop),
+            # Weather (S2 cells)
+            Service("partitions:weather_daily", AppConfig.store_sql_weather,
+                    partition_weather_ensurer.start, partition_weather_ensurer.stop),
+            Service("flusher:weather_daily", AppConfig.store_sql_weather,
+                    weather_buffer_flusher.start, weather_buffer_flusher.stop),
+            Service("weather:golbat_sync",
+                    AppConfig.store_sql_weather and AppConfig.weather_golbat_sync_minutes > 0
+                    and bool(AppConfig.golbat_db_name),
+                    weather_golbat_sync.start, weather_golbat_sync.stop),
             # Batches stranded by failed flushes
             Service("buffers:orphan_sweeper", True, orphan_sweeper.start, orphan_sweeper.stop),
             # Partition Cleaner

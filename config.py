@@ -79,12 +79,14 @@ store_sql_pokemon_shiny = str(config.get('SQL', {}).get('store_sql_pokemon_shiny
 store_sql_raid_aggregation = str(config.get('SQL', {}).get('store_sql_raid_aggregation', True)).upper() == "TRUE"
 store_sql_quest_aggregation = str(config.get('SQL', {}).get('store_sql_quest_aggregation', True)).upper() == "TRUE"
 store_sql_invasion_aggregation = str(config.get('SQL', {}).get('store_sql_invasion_aggregation', True)).upper() == "TRUE"
+store_sql_weather = str(config.get('SQL', {}).get('store_sql_weather', True)).upper() == "TRUE"
 
 # Clean SQL Settings
 clean_pokemon_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_older_than_x_days", 15))
 clean_raid_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_raid_older_than_x_days", 15))
 clean_quest_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_quest_older_than_x_days", 15))
 clean_invasion_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_invasion_older_than_x_days", 15))
+clean_weather_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_weather_older_than_x_days", 90))
 clean_pokemon_shiny_older_than_x_months = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_shiny_older_than_x_months", 3))
 # Expired partitions are dropped this many per ALTER, with a pause between ALTERs,
 # so a big retention cut never locks a table for one long drop.
@@ -112,6 +114,10 @@ invasion_max_threshold = config.get("flusher", {}).get("invasion_max_threshold",
 quest_flush_interval = config.get("flusher", {}).get("quest_flush_interval", 60)
 raid_flush_interval = config.get("flusher", {}).get("raid_flush_interval", 60)
 invasion_flush_interval = config.get("flusher", {}).get("invasion_flush_interval", 60)
+weather_flush_interval = config.get("flusher", {}).get("weather_flush_interval", 60)
+# Weather sync from Golbat's weather table (seeds cells, recovers missed changes). 0 minutes = off
+weather_golbat_sync_minutes = int(config.get("weather", {}).get("golbat_sync_minutes", 15))
+weather_golbat_sync_max_age_hours = float(config.get("weather", {}).get("golbat_sync_max_age_hours", 2))
 shiny_flush_interval = config.get("flusher", {}).get("shiny_flush_interval", 60)
 pokemon_flush_interval = config.get("flusher", {}).get("pokemon_flush_interval", 60)
 

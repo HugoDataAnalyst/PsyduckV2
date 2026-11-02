@@ -24,7 +24,7 @@ sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.abspath(_
 import harness as h  # noqa: E402
 from feeder import Feeder  # noqa: E402
 
-KEYS = ("iv_rows", "shiny_total", "raids", "quests", "invasions")
+KEYS = ("iv_rows", "shiny_total", "raids", "quests", "invasions", "weather")
 
 
 def delta(after: dict, before: dict) -> dict:

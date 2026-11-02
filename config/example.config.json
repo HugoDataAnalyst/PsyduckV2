@@ -4,7 +4,8 @@
         "store_sql_pokemon_shiny": true,
         "store_sql_raid_aggregation": true,
         "store_sql_quest_aggregation": true,
-        "store_sql_invasion_aggregation": true
+        "store_sql_invasion_aggregation": true,
+        "store_sql_weather": true
     },
     "CLEAN_SQL": {
         "clean_pokemon_older_than_x_days": 15,
@@ -12,6 +13,7 @@
         "clean_quest_older_than_x_days": 15,
         "clean_invasion_older_than_x_days": 15,
         "clean_pokemon_shiny_older_than_x_months": 3,
+        "clean_weather_older_than_x_days": 90,
         "partition_drop_batch": 2,
         "partition_drop_pause_seconds": 10
     },
@@ -46,7 +48,12 @@
         "pokemon_flush_interval": 15,
         "raid_flush_interval": 15,
         "invasion_flush_interval": 15,
-        "quest_flush_interval": 15
+        "quest_flush_interval": 15,
+        "weather_flush_interval": 60
+    },
+    "weather": {
+        "golbat_sync_minutes": 15,
+        "golbat_sync_max_age_hours": 2
     },
     "geofences": {
         "expire_cache_seconds": 3600,

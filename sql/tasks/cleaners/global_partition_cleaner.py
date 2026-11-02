@@ -65,6 +65,7 @@ def build_default_cleaner() -> PeriodicCleaner:
       - clean_raid_older_than_x_days
       - clean_quest_older_than_x_days
       - clean_invasion_older_than_x_days
+      - clean_weather_older_than_x_days
       - clean_pokemon_shiny_older_than_x_months  (monthly)
     """
     cleaner = PeriodicCleaner(interval_sec=12 * 60 * 60, initial_jitter_s=10.0)  # run twice a day by default
@@ -131,6 +132,13 @@ def build_default_cleaner() -> PeriodicCleaner:
             AppConfig.store_sql_invasion_aggregation,
             "invasions_daily_events",
             lambda: daily_job("invasions_daily_events", AppConfig.clean_invasion_older_than_x_days),
+        )
+
+    if not _skip_if_nonpositive(AppConfig.clean_weather_older_than_x_days, "days", "weather_daily_events"):
+        _maybe_add(
+            AppConfig.store_sql_weather,
+            "weather_daily_events",
+            lambda: daily_job("weather_daily_events", AppConfig.clean_weather_older_than_x_days),
         )
 
     # MONTHLY table

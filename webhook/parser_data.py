@@ -36,6 +36,7 @@ from my_redis.queries.buffer.pokemon_bulk_buffer import PokemonIVRedisBuffer, Sh
 from my_redis.queries.buffer.quests_bulk_buffer import QuestsRedisBuffer
 from my_redis.queries.buffer.raids_bulk_buffer import RaidsRedisBuffer
 from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsRedisBuffer
+from my_redis.queries.buffer.weather_bulk_buffer import WeatherRedisBuffer
 from utils.logger import logger
 from utils.retry_functions import retry
 
@@ -45,6 +46,7 @@ shiny_buffer = ShinyRateRedisBuffer()
 quests_buffer = QuestsRedisBuffer()
 raids_buffer = RaidsRedisBuffer()
 invasions_buffer = InvasionsRedisBuffer()
+weather_buffer = WeatherRedisBuffer()
 
 # The per-event summary (ten json.dumps per Pokémon) is only ever logged at
 # DEBUG, so it is only built at DEBUG.
@@ -239,4 +241,31 @@ async def process_invasion_data(filtered_data):
 
     except Exception as e:
         logger.error(f"❌ Error processing Invasion event data in parser_data: {e}")
+        return None
+
+
+async def process_weather_data(filtered_data):
+    """
+    Process one weather change (S2 cell): SQL buffer only - weather has no
+    Redis counters or timeseries.
+    """
+    if not filtered_data:
+        logger.error("❌ No data provided to process_weather_data.")
+        return None
+    if not AppConfig.store_sql_weather:
+        return "DISABLED"
+
+    client = await redis_manager.get_connection_with_retry(max_attempts=3, delay=0.3)
+    if not client:
+        logger.error("❌ Redis is not connected after retries. Cannot process Weather data.")
+        return None
+
+    try:
+        async with client.pipeline(transaction=False) as pipe:
+            staged = weather_buffer.stage(pipe, filtered_data)
+            await _execute(pipe)
+        return "OK" if staged else None
+
+    except Exception as e:
+        logger.error(f"❌ Error processing Weather event data in parser_data: {e}")
         return None
