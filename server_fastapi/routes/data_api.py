@@ -1,6 +1,6 @@
 from urllib import response
 import config as AppConfig
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
 from server_fastapi.utils import secure_api
 from sql.utils.time_parser import parse_time_input, month_parse_time_input, parse_time_to_datetime
@@ -14,6 +14,8 @@ from my_redis.queries.gets.pokemons.pokemon_counter_retrieval import PokemonCoun
 from my_redis.queries.gets.raids.raid_counter_retrieval import RaidCounterRetrieval
 from my_redis.queries.gets.invasions.invasion_counter_retrieval import InvasionCounterRetrieval
 from my_redis.queries.gets.quests.quest_counter_retrieval import QuestCounterRetrieval
+from my_redis.queries.gets.max_battles.max_battle_counter_retrieval import MaxBattleCounterRetrieval
+from my_redis.queries.gets.tappables.tappable_counter_retrieval import TappableCounterRetrieval
 from my_redis.queries.gets.pokemons.pokemon_active_retrieval import PokemonActiveRetrieval
 from my_redis.queries.gets.pokemons.pokemon_timeseries_retrieval import PokemonTimeSeries
 from my_redis.queries.gets.pokemons.pokemon_tth_timeseries_retrieval import PokemonTTHTimeSeries
@@ -26,6 +28,7 @@ from sql.queries.pokemon_shiny_gets import fetch_shiny_rates_range
 from sql.queries.raid_gets import RaidFilters, fetch_raids_range
 from sql.queries.invasion_gets import InvasionFilters, fetch_invasions_range
 from sql.queries.quest_gets import QuestItemFilters, QuestMonFilters, fetch_quests_range
+from sql.queries.weather_gets import fetch_weather_summary, fetch_weather_cells
 
 router = APIRouter()
 
@@ -1463,7 +1466,215 @@ async def get_quest_data(
         lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
                      f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
     lines.append(f"[pokemon] rows={result['pokemon']['rows']}")
-    for r in result["pokemon']['data"]:
+    for r in result["pokemon"]["data"]:
         lines.append(f"{r['latitude']},{r['longitude']} -> {r['count']} "
                      f"(pokestop={r['pokestop']} mode={r['mode']} task_type={r['task_type']})")
     return "\n".join(lines)
+
+
+def _counter_area_offsets(area: str) -> dict:
+    """Area param of the Redis counter endpoints: 'global', one area or a CSV list -> {name: offset}."""
+    if area.strip().lower() in ("global", "all"):
+        return filtering_keys.get_area_offset("global", global_state.geofences)
+    names = list(_parse_csv_param(area) or [])
+    resolved = filtering_keys.get_area_offsets_for_list(names, global_state.geofences)
+    if not resolved:
+        raise HTTPException(400, f"❌ Area not found: {area}")
+    return resolved
+
+
+@router.get(
+    "/api/redis/get_max_battles_counterseries",
+    tags=["Max Battle Counter Series"],
+    dependencies=dependencies_list
+)
+@time_execution(label="MAX_BATTLE_GET_COUNTERSERIES")
+async def get_counter_max_battles(
+    interval: str = Query(..., description="Interval: daily or weekly."),
+    start_time: str = Query(..., description="Start time as ISO format (e.g., 2023-03-05T00:00:00) or relative (e.g., '1 month', '10 days')"),
+    end_time: str = Query(..., description="End time as ISO format or relative (e.g., 'now')"),
+    mode: str = Query("sum", description="Aggregation mode: 'sum' or 'grouped' (per day / per week)."),
+    response_format: str = Query("json", description="Response format: json or text"),
+    area: str = Query("global", description="Area, CSV of areas, or 'global'"),
+    battle_pokemon: str = Query("all", description="CSV of boss Pokémon IDs or 'all'"),
+    battle_form: str = Query("all", description="CSV of form IDs or 'all'"),
+    battle_level: str = Query("all", description="CSV of battle levels or 'all'"),
+    battle_costume: str = Query("all", description="CSV of costume IDs or 'all'"),
+    bread_mode: str = Query("all", description="CSV of bread modes (Dynamax/Gigantamax) or 'all'"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+):
+    """Max battles counted once per battle, per area: daily or weekly buckets (by battle start)."""
+    await secure_api.check_secret_header_value(api_secret_header)
+    interval, mode, resp_fmt = interval.lower(), mode.lower(), response_format.lower()
+    if interval not in ("daily", "weekly"):
+        raise HTTPException(status_code=400, detail="❌ Interval must be daily or weekly.")
+    if mode not in ("sum", "grouped"):
+        raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be 'sum' or 'grouped'.")
+    if resp_fmt not in ("json", "text"):
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+
+    results = {}
+    for area_name, offset in _counter_area_offsets(area).items():
+        try:
+            retr = MaxBattleCounterRetrieval(
+                area=area_name,
+                start=filtering_keys.parse_time_input(start_time, offset),
+                end=filtering_keys.parse_time_input(end_time, offset),
+                mode=mode,
+                battle_pokemon=_parse_csv_param(battle_pokemon),
+                battle_form=_parse_csv_param(battle_form),
+                battle_level=_parse_csv_param(battle_level),
+                battle_costume=_parse_csv_param(battle_costume),
+                bread_mode=_parse_csv_param(bread_mode),
+            )
+            results[area_name] = await retr.retrieve(interval)
+        except Exception as e:
+            results[area_name] = {"error": str(e)}
+
+    if resp_fmt == "json":
+        return results if len(results) != 1 else next(iter(results.values()))
+    return "\n".join(f"{k}: {v}" for k, v in results.items())
+
+
+@router.get(
+    "/api/redis/get_tappables_counterseries",
+    tags=["Tappable Counter Series"],
+    dependencies=dependencies_list
+)
+@time_execution(label="TAPPABLE_GET_COUNTERSERIES")
+async def get_counter_tappables(
+    interval: str = Query(..., description="Interval: hourly, daily or weekly."),
+    start_time: str = Query(..., description="Start time as ISO format or relative (e.g., '1 month', '10 days')"),
+    end_time: str = Query(..., description="End time as ISO format or relative (e.g., 'now')"),
+    mode: str = Query("sum", description="Aggregation mode: 'sum', 'grouped' or (hourly only) 'surged'."),
+    response_format: str = Query("json", description="Response format: json or text"),
+    area: str = Query("global", description="Area, CSV of areas, or 'global'"),
+    tappable_type: str = Query("all", description="CSV of tappable types (e.g. BOX, MAPLE) or 'all'"),
+    reward_type: str = Query("all", description="CSV of reward types (e.g. item, pokemon_candy) or 'all'"),
+    reward_id: str = Query("all", description="CSV of item IDs / candy Pokémon IDs or 'all'"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+):
+    """Tappables counted once each, per area: number of tappables (total) and reward amount (amount)."""
+    await secure_api.check_secret_header_value(api_secret_header)
+    interval, mode, resp_fmt = interval.lower(), mode.lower(), response_format.lower()
+    if interval not in ("hourly", "daily", "weekly"):
+        raise HTTPException(status_code=400, detail="❌ Interval must be hourly, daily or weekly.")
+    if mode not in ("sum", "grouped", "surged"):
+        raise HTTPException(status_code=400, detail="❌ Invalid mode. Must be 'sum', 'grouped' or 'surged'.")
+    if mode == "surged" and interval != "hourly":
+        raise HTTPException(status_code=400, detail="❌ Surged mode is only supported for hourly intervals.")
+    if resp_fmt not in ("json", "text"):
+        raise HTTPException(status_code=400, detail="❌ Invalid response_format. Must be json or text.")
+
+    results = {}
+    for area_name, offset in _counter_area_offsets(area).items():
+        try:
+            retr = TappableCounterRetrieval(
+                area=area_name,
+                start=filtering_keys.parse_time_input(start_time, offset),
+                end=filtering_keys.parse_time_input(end_time, offset),
+                mode=mode,
+                tappable_type=_parse_csv_param(tappable_type),
+                reward_type=_parse_csv_param(reward_type),
+                reward_id=_parse_csv_param(reward_id),
+            )
+            results[area_name] = await retr.retrieve(interval)
+        except Exception as e:
+            results[area_name] = {"error": str(e)}
+
+    if resp_fmt == "json":
+        return results if len(results) != 1 else next(iter(results.values()))
+    return "\n".join(f"{k}: {v}" for k, v in results.items())
+
+
+WEATHER_CELLS_MAX_DAYS = 31
+
+
+def _weather_window(start_time: str, end_time: str):
+    try:
+        start = parse_time_to_datetime(start_time)
+        end = parse_time_to_datetime(end_time)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"❌ Invalid time range: {e}")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="❌ end_time must be after start_time.")
+    return start, end
+
+
+@router.get(
+    "/api/sql/get_weather_data",
+    tags=["Weather SQL Data"],
+    dependencies=dependencies_list
+)
+@time_execution(label="WEATHER_SQL_DATA")
+async def get_weather_data(
+    start_time: str = Query(..., description="ISO or relative (e.g., '7 days')"),
+    end_time: str = Query("now", description="ISO or 'now' / relative"),
+    area: str = Query(..., description="One area name, or 'global' for all areas"),
+    interval: str = Query("day", description="Buckets for mode=sum: day, week or month"),
+    mode: str = Query("sum", description="sum: cell-hours and % per condition per bucket; grouped: per hour"),
+    raw: bool = Query(False, description="Return condition numbers (0-7) instead of names"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+):
+    """How long each weather condition was in force, from Golbat's per-S2-cell weather changes."""
+    await secure_api.check_secret_header_value(api_secret_header)
+    interval, mode = interval.lower(), mode.lower()
+    if interval not in ("day", "week", "month"):
+        raise HTTPException(status_code=400, detail="❌ interval must be day, week or month.")
+    if mode not in ("sum", "grouped"):
+        raise HTTPException(status_code=400, detail="❌ mode must be sum or grouped.")
+    start, end = _weather_window(start_time, end_time)
+
+    offsets = {int(g["id"]): int(g.get("offset") or 0) for g in (global_state.geofences or []) if g.get("id") is not None}
+    area_norm = (area or "").strip()
+    if area_norm.lower() in ("global", "all"):
+        area_ids, area_label = None, "global"
+    else:
+        if "," in area_norm:
+            raise HTTPException(status_code=400, detail="❌ Provide one area name or 'global'.")
+        try:
+            area_ids, area_label = [int(await resolve_area_id_by_name(area_norm))], area_norm
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"❌ Unknown area: {area_norm}")
+
+    result = await fetch_weather_summary(area_ids=area_ids, offsets=offsets, start=start, end=end,
+                                         interval=interval, mode=mode, raw=raw)
+    head = {"area": area_label, "mode": mode}
+    if mode == "sum":
+        head["interval"] = interval
+    return {**head, **result}
+
+
+@router.get(
+    "/api/sql/get_weather_cells",
+    tags=["Weather SQL Data"],
+    dependencies=dependencies_list
+)
+@time_execution(label="WEATHER_SQL_CELLS")
+async def get_weather_cells(
+    start_time: str = Query(..., description="ISO or relative (e.g., '2 days')"),
+    end_time: str = Query("now", description="ISO or 'now' / relative"),
+    area: str = Query(..., description="One area name or a CSV of areas (no 'global')"),
+    raw: bool = Query(False, description="Return condition numbers (0-7) instead of names"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param()
+):
+    """Full per-S2-cell breakdown of an area: every cell, its summary and its condition hour by hour."""
+    await secure_api.check_secret_header_value(api_secret_header)
+    start, end = _weather_window(start_time, end_time)
+    if end - start > timedelta(days=WEATHER_CELLS_MAX_DAYS):
+        raise HTTPException(status_code=400, detail=f"❌ At most {WEATHER_CELLS_MAX_DAYS} days per request.")
+    names = sorted(_parse_csv_param(area) or [])
+    if not names or any(n.lower() in ("global", "all") for n in names):
+        raise HTTPException(status_code=400, detail="❌ Provide one or more area names ('global' is not supported).")
+
+    offsets = {g["name"].lower(): int(g.get("offset") or 0) for g in (global_state.geofences or [])}
+    results = {}
+    for name in names:
+        try:
+            area_id = int(await resolve_area_id_by_name(name))
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"❌ Unknown area: {name}")
+        cells = await fetch_weather_cells(area_id=area_id, offset=offsets.get(name.lower(), 0),
+                                          start=start, end=end, raw=raw)
+        results[name] = {"area": name, **cells}
+    return results if len(results) != 1 else next(iter(results.values()))

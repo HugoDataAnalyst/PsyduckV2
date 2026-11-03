@@ -41,6 +41,8 @@ FAMILIES = {
     "raid_total": "raid_daily",
     "invasion": "invasion_daily",
     "quest": "quest_daily",
+    "max_battle_total": "max_battle_daily",
+    "tappable_total": "tappable_daily",
 }
 CHUNK = 100   # weeks per pipeline round (8 HGETALLs each)
 

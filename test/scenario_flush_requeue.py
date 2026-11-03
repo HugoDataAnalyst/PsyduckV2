@@ -52,7 +52,7 @@ async def part_a() -> dict:
 
     h.start("mariadb")
     print("MariaDB started; waiting for flushers to catch up ...")
-    expected = s["expected"]
+    expected = {k: s["expected"][k] for k in KEYS}   # SQL-backed counts only
     got = {}
     for _ in range(36):  # up to 3 min
         time.sleep(5)

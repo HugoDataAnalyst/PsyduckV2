@@ -287,6 +287,8 @@ Controls Redis timeseries storage and the optional MySQL backup/restore feature.
 | `store_raids_timeseries` | `true` | Store raid timeseries in Redis |
 | `store_invasions_timeseries` | `true` | Store invasion timeseries in Redis |
 | `store_quests_timeseries` | `true` | Store quest timeseries in Redis |
+| `store_max_battles` | `true` | Count Golbat `max_battle` webhooks in Redis (daily/weekly, each battle once). Golbat must send the `max_battle` webhook type |
+| `store_tappables` | `true` | Count Golbat `tappable` webhooks in Redis (hourly/daily/weekly, each tappable once). Golbat must send the `tappable` webhook type |
 | `REDIS_MYSQL_BACKUPS` | `false` | **Recommended for production.** Periodically backs up Redis counter and timeseries keys to MySQL, then restores them on startup. This is the optimal way to run PsyduckV2 — it allows Redis to operate without AOF/RDB persistence (lower I/O, faster restarts) while guaranteeing no data loss across restarts. |
 | `backup_interval_seconds` | `3600` | How often (seconds) the backup cycle runs |
 | `redis_restore_timeout_seconds` | `600` | How long follower workers wait for the leader to finish restoring Redis data on startup. Increase if your Redis restore takes longer than 10 minutes. Only applies when `REDIS_MYSQL_BACKUPS` is enabled. |
@@ -353,6 +355,7 @@ How long Redis keeps hourly counter keys and timeseries keys. Set to `0` to keep
 | `counter_raid_hourly` | `168` | Hourly raid counter key retention (hours) |
 | `counter_invasion_hourly` | `168` | Hourly invasion counter key retention (hours) |
 | `counter_quest_hourly` | `168` | Hourly quest counter key retention (hours) |
+| `counter_tappable_hourly` | `168` | Hourly tappable counter key retention (hours) |
 
 ### `retention_days`
 How long Redis keeps daily counter keys (one key per day per area, aggregated from hourly keys). Set to `0` to keep all data indefinitely.
@@ -364,6 +367,8 @@ How long Redis keeps daily counter keys (one key per day per area, aggregated fr
 | `counter_raid_daily` | `30` | Daily raid counter key retention (days) |
 | `counter_invasion_daily` | `30` | Daily invasion counter key retention (days) |
 | `counter_quest_daily` | `30` | Daily quest counter key retention (days) |
+| `counter_max_battle_daily` | `30` | Daily max battle counter key retention (days) |
+| `counter_tappable_daily` | `30` | Daily tappable counter key retention (days) |
 
 ### `CLEAN_REDIS_TS`
 
