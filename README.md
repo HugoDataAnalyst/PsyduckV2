@@ -177,6 +177,7 @@ Each run reports the app's CPU per 1,000 messages, POST latency (p50/p95/max) an
 | `python check_incremental_backup.py` | Incremental Redis → MySQL backups leave MySQL identical to Redis, across time zones (stops the test app while it runs) |
 | `python check_reencode_hashes.py` | `reencode_hashes` shrinks closed counter hashes without changing a value |
 | `python check_repair_weekly_totals.py` | `repair_weekly_totals` restores exactly what a mid-week Redis wipe took |
+| `python check_s2biomes_endpoints.py` | The S2Biomes endpoints (`/api/s2biomes/spawns`, `/weather`, `/days`) return exactly the stored rows: paging, since/until windows, weather, refusals |
 
 > The `check_*` scripts use Redis databases 2–3 and scratch tables of the test stack only. Run every script from `test/`: it keeps your own `.env` from redirecting them anywhere else.
 
