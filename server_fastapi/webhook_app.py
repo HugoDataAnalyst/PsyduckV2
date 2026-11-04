@@ -4,7 +4,7 @@ import config as AppConfig
 from fastapi import FastAPI, Response, openapi
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from server_fastapi.routes import data_api, webhook_router
+from server_fastapi.routes import data_api, s2biomes_api, webhook_router
 from server_fastapi.routes.webhook_router import cleanup_semaphore
 from server_fastapi import global_state
 from my_redis.connect_redis import RedisManager
@@ -473,3 +473,5 @@ app.mount("/static", StaticFiles(directory="server_fastapi/static"), name="stati
 app.include_router(webhook_router.router)
 # Include the Data retriving router
 app.include_router(data_api.router)
+# Raw spawn / weather rows for S2Biomes
+app.include_router(s2biomes_api.router)
