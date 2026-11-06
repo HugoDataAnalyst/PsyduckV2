@@ -3,6 +3,9 @@
 Rows are read as stored: seen_at and day_date are area-local wall time (see webhook/filter_data.py), so
 `since` / `until` are area-local too. Spawns are paged by the primary key (day_date, spawnpoint, seen_at):
 the next page starts after the last row of the previous one, so every page is an index range scan.
+
+These exports share the event loop with webhook processing, so the per-row work is kept small: tuple rows
+(no dicts), seen_at formatted by MariaDB (no per-row strftime), batches of BATCH rows.
 """
 from datetime import date, datetime
 from typing import AsyncIterator, Optional
@@ -11,9 +14,10 @@ from sql.connect_db import fetch_all, stream_rows
 
 SPAWN_COLUMNS = ("spawnpoint", "pokemon_id", "form", "seen_at", "encounter_id", "weather")
 WEATHER_COLUMNS = ("s2_cell_id", "area_id", "gameplay_condition", "seen_at")
+SEEN_AT = "DATE_FORMAT(seen_at, '%%Y-%%m-%%d %%H:%%i:%%s')"  # %% escapes the driver's parameter marker
 # long pages to slow clients: give the server-side cursor time (the default net_write_timeout is 60 s)
 STREAM_SESSION = ("SET SESSION net_write_timeout = 600",)
-BATCH = 5000
+BATCH = 1000  # rows formatted per step: short slices of event-loop time
 
 
 async def stream_spawns(
@@ -23,8 +27,10 @@ async def stream_spawns(
     after: Optional[tuple[int, datetime]],
     limit: int,
 ) -> AsyncIterator[list[dict]]:
-    """Spawn rows of one day in primary-key order, at most `limit`, after the `after` (spawnpoint, seen_at) row."""
-    sql = [f"SELECT {', '.join(SPAWN_COLUMNS)} FROM pokemon_iv_daily_events WHERE day_date = %s"]
+    """Spawn rows of one day in primary-key order, at most `limit`, after the `after` (spawnpoint, seen_at) row:
+    tuples in SPAWN_COLUMNS order, seen_at as 'YYYY-MM-DD HH:MM:SS'."""
+    columns = ", ".join(SEEN_AT if c == "seen_at" else c for c in SPAWN_COLUMNS)
+    sql = [f"SELECT {columns} FROM pokemon_iv_daily_events WHERE day_date = %s"]
     params: list = [day]
     if since:
         sql.append("AND seen_at >= %s")
@@ -37,14 +43,15 @@ async def stream_spawns(
         params += [after[0], after[0], after[1]]
     sql.append("ORDER BY spawnpoint, seen_at LIMIT %s")
     params.append(limit)
-    async for rows in stream_rows(" ".join(sql), params, batch=BATCH, session_sql=STREAM_SESSION):
+    async for rows in stream_rows(" ".join(sql), params, batch=BATCH, session_sql=STREAM_SESSION, tuples=True):
         yield rows
 
 
 async def stream_weather(day: date) -> AsyncIterator[list[dict]]:
-    """Weather condition changes of one day (one row per S2 L10 cell, area and change)."""
-    sql = f"SELECT {', '.join(WEATHER_COLUMNS)} FROM weather_daily_events WHERE day_date = %s"
-    async for rows in stream_rows(sql, [day], batch=BATCH, session_sql=STREAM_SESSION):
+    """Weather condition changes of one day (one row per S2 L10 cell, area and change), tuples in WEATHER_COLUMNS order."""
+    columns = ", ".join(SEEN_AT if c == "seen_at" else c for c in WEATHER_COLUMNS)
+    sql = f"SELECT {columns} FROM weather_daily_events WHERE day_date = %s"
+    async for rows in stream_rows(sql, [day], batch=BATCH, session_sql=STREAM_SESSION, tuples=True):
         yield rows
 
 

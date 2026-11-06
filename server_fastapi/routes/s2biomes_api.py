@@ -5,6 +5,7 @@ and TSV needs no extra dependency here while S2Biomes parses it directly. Times 
 Spawns are paged: when a page returns `limit` rows, ask for the next one with
 `after=<spawnpoint>,<seen_at>` taken from its last row.
 """
+import asyncio
 import zlib
 from datetime import date, datetime
 from typing import AsyncIterator, Optional
@@ -37,23 +38,25 @@ SPAWN_PAGE_DEFAULT = 500_000
 SPAWN_PAGE_MAX = 2_000_000
 
 
-def _cell(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d %H:%M:%S")
-    return str(value)
+GZIP_LEVEL = 6
 
 
-async def _gzip_tsv(columns: tuple[str, ...], batches: AsyncIterator[list[dict]], label: str) -> AsyncIterator[bytes]:
-    """Header line + one TSV line per row, gzip-compressed as it streams."""
-    gz = zlib.compressobj(6, zlib.DEFLATED, 31)
+def _encode(gz, batch: list[tuple]) -> bytes:
+    """One TSV line per tuple row (NULL -> empty), compressed: runs in a worker thread, off the event loop."""
+    lines = "".join("\t".join("" if v is None else str(v) for v in row) + "\n" for row in batch)
+    return gz.compress(lines.encode())
+
+
+async def _gzip_tsv(columns: tuple[str, ...], batches: AsyncIterator[list[tuple]], label: str) -> AsyncIterator[bytes]:
+    """Header line + one TSV line per row, gzip-compressed as it streams. Formatting and compression run in a
+    worker thread (zlib releases the GIL), so webhook processing on the event loop keeps running during an export;
+    the batches are compressed one after another, so the one compressor is never used from two threads at once."""
+    gz = zlib.compressobj(GZIP_LEVEL, zlib.DEFLATED, 31)
     yield gz.compress(("\t".join(columns) + "\n").encode())
     rows = 0
     async for batch in batches:
         rows += len(batch)
-        lines = "".join("\t".join(_cell(r[c]) for c in columns) + "\n" for r in batch)
-        chunk = gz.compress(lines.encode())
+        chunk = await asyncio.to_thread(_encode, gz, batch)
         if chunk:
             yield chunk
     yield gz.flush()
