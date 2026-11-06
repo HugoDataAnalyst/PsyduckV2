@@ -44,6 +44,9 @@ ALLOWED_PATHS = [
     "/api/sql/get_quest_data",
     "/api/sql/get_weather_data",
     "/api/sql/get_weather_cells",
+    "/api/s2biomes/days",
+    "/api/s2biomes/spawns",
+    "/api/s2biomes/weather",
 ]
 
 async def validate_path(request: Request):

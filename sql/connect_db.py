@@ -163,16 +163,24 @@ async def fetch_all(sql: str, params: Optional[Iterable[Any]] = None) -> list[di
         return list(await cur.fetchall())
 
 
-async def stream_rows(sql: str, params: Optional[Iterable[Any]] = None, batch: int = 1000):
+async def stream_rows(sql: str, params: Optional[Iterable[Any]] = None, batch: int = 1000,
+                      session_sql: Iterable[str] = (), tuples: bool = False):
     """
     Yield lists of dict rows from an unbuffered (server-side) cursor, so a large
     result set is never held in memory at once - unlike fetch_all.
+    session_sql: statements run first on the same connection (e.g. a longer net_write_timeout);
+    that connection is closed afterwards instead of going back to the pool.
+    tuples: plain tuple rows, no per-row dict (bulk exports, where the dicts are pure overhead).
     """
     pool = _require_pool()
     conn = await pool.acquire()
     try:
         await conn.ping(reconnect=True)
-        async with conn.cursor(aiomysql.SSDictCursor) as cur:
+        if session_sql:
+            async with conn.cursor() as setup:
+                for statement in session_sql:
+                    await setup.execute(statement)
+        async with conn.cursor(aiomysql.SSCursor if tuples else aiomysql.SSDictCursor) as cur:
             await cur.execute(sql, params or ())
             while True:
                 rows = await cur.fetchmany(batch)
@@ -180,6 +188,9 @@ async def stream_rows(sql: str, params: Optional[Iterable[Any]] = None, batch: i
                     break
                 yield rows
     finally:
+        if session_sql:
+            # the session settings must not leak into pooled connections; the pool drops a closed one
+            conn.close()
         pool.release(conn)
 
 
