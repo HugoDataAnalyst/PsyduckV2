@@ -1,5 +1,6 @@
 import asyncio
 import random
+import time
 from datetime import datetime, timezone
 import aiomysql
 from sql.connect_db import transaction
@@ -47,6 +48,7 @@ class GeographySQLProcessor:
 
         while attempt < max_retries:
             try:
+                t0 = time.perf_counter()
                 async with transaction(dict_cursor=False, isolation="READ COMMITTED", lock_wait_timeout=10) as cur:
                     await cur.execute(f"""
                         CREATE TEMPORARY TABLE IF NOT EXISTS tmp_geo (
@@ -100,7 +102,7 @@ class GeographySQLProcessor:
 
                     await cur.execute("DROP TEMPORARY TABLE IF EXISTS tmp_geo")
 
-                logger.info(f"🗺️ Spawnpoint geography | spawnpoints={len(rows)} changes={changes} affected={affected}")
+                logger.info(f"🗺️ Spawnpoint geography | spawnpoints={len(rows)} changes={changes} affected={affected} in {time.perf_counter() - t0:.2f}s ⏱️")
                 return len(rows)
 
             except aiomysql.Error as e:
