@@ -1,4 +1,5 @@
-"""Endpoints for S2Biomes (biome and nest analysis): raw spawn and weather rows of one day.
+"""Endpoints for S2Biomes (biome and nest analysis): raw spawn and weather rows of one day, and the game
+geography of every spawnpoint with its change log (UTC).
 
 Rows stream as gzip-compressed TSV with a header line: a day holds ~20M spawn rows, far too many for JSON,
 and TSV needs no extra dependency here while S2Biomes parses it directly. Times are area-local, as stored.
@@ -16,9 +17,13 @@ from starlette.responses import StreamingResponse
 
 from server_fastapi.utils import secure_api
 from sql.queries.s2biomes_gets import (
+    GEOGRAPHY_CHANGE_COLUMNS,
+    GEOGRAPHY_COLUMNS,
     SPAWN_COLUMNS,
     WEATHER_COLUMNS,
     fetch_days,
+    stream_geography,
+    stream_geography_changes,
     stream_spawns,
     stream_weather,
 )
@@ -116,3 +121,21 @@ async def get_s2biomes_weather(
     """Weather condition changes (s2_cell_id, area_id, gameplay_condition, seen_at) of one day."""
     await secure_api.check_secret_header_value(api_secret_header)
     return _tsv_response(WEATHER_COLUMNS, stream_weather(day), f"weather {day}")
+
+
+@router.get("/api/s2biomes/geography", tags=["S2Biomes"], dependencies=dependencies_list)
+async def get_s2biomes_geography(api_secret_header: Optional[str] = secure_api.get_secret_header_param()):
+    """Game geography of every spawnpoint that has one (landform, moisture, landcover, temperature, features
+    bitmask, park_status, settlement, geo_first_seen, geo_changed_at, geo_seen_day; UTC), in spawnpoint order."""
+    await secure_api.check_secret_header_value(api_secret_header)
+    return _tsv_response(GEOGRAPHY_COLUMNS, stream_geography(), "geography")
+
+
+@router.get("/api/s2biomes/geography_changes", tags=["S2Biomes"], dependencies=dependencies_list)
+async def get_s2biomes_geography_changes(
+    since: Optional[datetime] = Query(None, description="UTC changed_at, inclusive (YYYY-MM-DD HH:MM:SS)"),
+    api_secret_header: Optional[str] = secure_api.get_secret_header_param(),
+):
+    """Spawnpoint geography changes (old_* = previous values, new_* = new ones), ordered by changed_at, spawnpoint."""
+    await secure_api.check_secret_header_value(api_secret_header)
+    return _tsv_response(GEOGRAPHY_CHANGE_COLUMNS, stream_geography_changes(since), "geography changes")

@@ -1,6 +1,6 @@
 from server_fastapi import global_state
 from utils.logger import logger
-from utils.safe_values import normalize_encounter_id
+from utils.safe_values import normalize_encounter_id, _safe_int
 from shapely import STRtree
 from shapely.geometry import Point, Polygon
 from zoneinfo import ZoneInfo
@@ -69,6 +69,27 @@ class WebhookFilter:
             return False
         # accept hex only; optionally constrain length
         return bool(WebhookFilter.HEX_RE.fullmatch(s)) and (8 <= len(s) <= 32)
+
+    GEOGRAPHY_FIELDS = ("landform", "moisture", "landcover", "temperature", "park_status", "settlement")
+
+    @staticmethod
+    def _parse_geography(raw) -> dict | None:
+        """Golbat's per-encounter game geography -> small ints (None when absent or out of 0-255), features as a
+        bitmask with bit (1 << v) per VistaFeature v. None when the message carries no geography."""
+        if not isinstance(raw, dict):
+            return None
+        geo = {}
+        for name in WebhookFilter.GEOGRAPHY_FIELDS:
+            v = _safe_int(raw.get(name), None)
+            geo[name] = v if v is not None and 0 <= v <= 255 else None
+        features = raw.get("features")
+        mask = 0
+        for f in features if isinstance(features, list) else ():
+            v = _safe_int(f, None)
+            if v is not None and 0 <= v <= 7:
+                mask |= 1 << v
+        geo["features"] = mask if isinstance(features, list) else None
+        return geo
 
     @staticmethod
     def _valid_coords(lat, lon) -> bool:
@@ -449,6 +470,8 @@ class WebhookFilter:
             # ~half of all encounter_ids sit above 2^63, so a signed
             # interpretation anywhere upstream would flip them negative.
             "encounter_id": normalize_encounter_id(message.get("encounter_id")),
+            # Game geography of the spawnpoint (encounters only; None when Golbat sends none)
+            "geography": self._parse_geography(message.get("geography")),
         }
 
         logger.debug(f"✅ Pokémon {pokemon_data['pokemon_id']} (Form {pokemon_data['form']}) in {geofence_id} - IV: {pokemon_data['iv']}% - Despawns in {despawn_timer} sec with True UTC: {true_utc} and local time: {local_area_utc}")

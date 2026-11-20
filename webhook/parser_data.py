@@ -37,6 +37,7 @@ from my_redis.queries.buffer.quests_bulk_buffer import QuestsRedisBuffer
 from my_redis.queries.buffer.raids_bulk_buffer import RaidsRedisBuffer
 from my_redis.queries.buffer.invasions_bulk_buffer import InvasionsRedisBuffer
 from my_redis.queries.buffer.weather_bulk_buffer import WeatherRedisBuffer
+from my_redis.queries.buffer.geography_bulk_buffer import GeographyRedisBuffer
 from my_redis.queries.updates.max_battles.max_battle_counterseries import stage_max_battle_counters
 from my_redis.queries.updates.tappables.tappable_counterseries import stage_tappable_counters
 from utils.logger import logger
@@ -49,6 +50,7 @@ quests_buffer = QuestsRedisBuffer()
 raids_buffer = RaidsRedisBuffer()
 invasions_buffer = InvasionsRedisBuffer()
 weather_buffer = WeatherRedisBuffer()
+geography_buffer = GeographyRedisBuffer()
 
 # The per-event summary (ten json.dumps per Pokémon) is only ever logged at
 # DEBUG, so it is only built at DEBUG.
@@ -105,6 +107,8 @@ async def process_pokemon_data(filtered_data):
             updates["IV Buffer"] = pokemon_buffer.stage(pipe, filtered_data)
         if AppConfig.store_sql_pokemon_shiny:
             updates["Shiny Buffer"] = shiny_buffer.stage(pipe, filtered_data)
+        if AppConfig.store_sql_spawnpoints and filtered_data.get("geography"):
+            updates["Geography Buffer"] = geography_buffer.stage(pipe, filtered_data)
 
         await _execute(pipe)
 

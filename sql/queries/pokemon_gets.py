@@ -4,7 +4,9 @@ import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import config as AppConfig
 from sql.connect_db import fetch_all
+from utils.s2cell import center
 from sql.utils.time_parser import daterange_inclusive_days, clip_seen_window_for_day
 
 # filters
@@ -74,23 +76,28 @@ async def fetch_pokemon_heatmap_day(
         where.append("e.seen_at BETWEEN %s AND %s")
         params.extend([clipped[0], clipped[1]])
 
+    # Without the spawnpoints table (store_sql_spawnpoints off) the coordinates come from the
+    # spawnpoint id itself: it is the S2 level-20 cell id shifted right by 20 bits (token = 11 hex digits)
+    join = AppConfig.store_sql_spawnpoints
     sql = f"""
         SELECT
           e.spawnpoint,
           e.pokemon_id,
           e.form,
-          s.latitude  AS latitude,
-          s.longitude AS longitude,
+          {"s.latitude  AS latitude, s.longitude AS longitude," if join else ""}
           COUNT(*) AS cnt
         FROM pokemon_iv_daily_events AS e
-        JOIN spawnpoints AS s
-          ON s.spawnpoint = e.spawnpoint
+        {"JOIN spawnpoints AS s ON s.spawnpoint = e.spawnpoint" if join else ""}
         WHERE {' AND '.join(where)}
         GROUP BY e.spawnpoint, e.pokemon_id, e.form
         ORDER BY cnt DESC, e.pokemon_id ASC
         {"LIMIT " + str(int(limit)) if limit and limit > 0 else ""}
     """
-    return await fetch_all(sql, params)
+    rows = await fetch_all(sql, params)
+    if not join:
+        for r in rows:
+            r["latitude"], r["longitude"] = center(int(r["spawnpoint"]) << 20)
+    return rows
 
 # range orchestrator
 async def fetch_pokemon_heatmap_range(

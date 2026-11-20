@@ -71,3 +71,13 @@ def corners(cell_id: int) -> tuple[tuple[float, float], ...]:
     scale = 1 / (1 << _MAX_LEVEL)
     return tuple(_uv_to_latlon(face, _st_to_uv(ci * scale), _st_to_uv(cj * scale))
                  for ci, cj in ((i0, j0), (i0 + size, j0), (i0 + size, j0 + size), (i0, j0 + size)))
+
+
+def center(cell_id: int) -> tuple[float, float]:
+    """The cell's centre as (lat, lon). Accepts signed int64 ids."""
+    cid = cell_id & 0xFFFFFFFFFFFFFFFF
+    level = _MAX_LEVEL - ((cid & -cid).bit_length() - 1) // 2
+    face, i, j = _face_ij(cid)
+    size = 1 << (_MAX_LEVEL - level)
+    scale = 1 / (1 << _MAX_LEVEL)
+    return _uv_to_latlon(face, _st_to_uv(((i & -size) + size / 2) * scale), _st_to_uv(((j & -size) + size / 2) * scale))
