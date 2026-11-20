@@ -107,7 +107,7 @@ async def process_pokemon_data(filtered_data):
             updates["IV Buffer"] = pokemon_buffer.stage(pipe, filtered_data)
         if AppConfig.store_sql_pokemon_shiny:
             updates["Shiny Buffer"] = shiny_buffer.stage(pipe, filtered_data)
-        if AppConfig.store_sql_spawnpoints and filtered_data.get("geography"):
+        if AppConfig.store_sql_geography and filtered_data.get("geography"):
             updates["Geography Buffer"] = geography_buffer.stage(pipe, filtered_data)
 
         await _execute(pipe)

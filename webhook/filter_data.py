@@ -1,3 +1,4 @@
+import config as AppConfig
 from server_fastapi import global_state
 from utils.logger import logger
 from utils.safe_values import normalize_encounter_id, _safe_int
@@ -470,8 +471,9 @@ class WebhookFilter:
             # ~half of all encounter_ids sit above 2^63, so a signed
             # interpretation anywhere upstream would flip them negative.
             "encounter_id": normalize_encounter_id(message.get("encounter_id")),
-            # Game geography of the spawnpoint (encounters only; None when Golbat sends none)
-            "geography": self._parse_geography(message.get("geography")),
+            # Game geography of the spawnpoint's S2 level-16 cell (encounters only; None when Golbat sends
+            # none or store_sql_geography is off)
+            "geography": self._parse_geography(message.get("geography")) if AppConfig.store_sql_geography else None,
         }
 
         logger.debug(f"✅ Pokémon {pokemon_data['pokemon_id']} (Form {pokemon_data['form']}) in {geofence_id} - IV: {pokemon_data['iv']}% - Despawns in {despawn_timer} sec with True UTC: {true_utc} and local time: {local_area_utc}")

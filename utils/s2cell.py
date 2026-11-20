@@ -81,3 +81,10 @@ def center(cell_id: int) -> tuple[float, float]:
     size = 1 << (_MAX_LEVEL - level)
     scale = 1 / (1 << _MAX_LEVEL)
     return _uv_to_latlon(face, _st_to_uv(((i & -size) + size / 2) * scale), _st_to_uv(((j & -size) + size / 2) * scale))
+
+
+def spawnpoint_l16(spawnpoint: int) -> int:
+    """The S2 level-16 cell id holding a spawnpoint. A spawnpoint is its S2 level-20 cell id shifted right by
+    20 bits; the parent keeps the bits above the level-16 lsb (bit 28) and sets it."""
+    lsb = 1 << (2 * (_MAX_LEVEL - 16))
+    return ((spawnpoint << 20) & ~(lsb - 1)) | lsb

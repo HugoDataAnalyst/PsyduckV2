@@ -28,9 +28,9 @@ class GeographyBufferFlusher:
                 added = await GeographyRedisBuffer.flush_if_ready(redis)
                 dt = time.perf_counter() - start
                 if added:
-                    logger.success(f"🗺️ Geography flush: {added} spawnpoints in {dt:.2f}s ⏱️")
+                    logger.success(f"🗺️ Geography flush: {added} cells in {dt:.2f}s ⏱️")
                 else:
-                    logger.debug(f"🗺️ No spawnpoint geography to flush. Took {dt:.2f}s ⏱️")
+                    logger.debug(f"🗺️ No cell geography to flush. Took {dt:.2f}s ⏱️")
 
             except asyncio.CancelledError:
                 logger.info("🛑 Geography buffer flusher loop was cancelled.")
@@ -59,7 +59,7 @@ class GeographyBufferFlusher:
             if redis:
                 start = time.perf_counter()
                 count = await GeographyRedisBuffer.force_flush(redis)
-                logger.success(f"🔚 Final Geography flush ({count} spawnpoints in {time.perf_counter()-start:.2f}s)")
+                logger.success(f"🔚 Final Geography flush ({count} cells in {time.perf_counter()-start:.2f}s)")
         except Exception as e:
             logger.error(f"❌ Final Geography flush failed: {e}")
 

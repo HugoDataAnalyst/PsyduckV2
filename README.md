@@ -177,7 +177,7 @@ Each run reports the app's CPU per 1,000 messages, POST latency (p50/p95/max) an
 | `python check_incremental_backup.py` | Incremental Redis → MySQL backups leave MySQL identical to Redis, across time zones (stops the test app while it runs) |
 | `python check_reencode_hashes.py` | `reencode_hashes` shrinks closed counter hashes without changing a value |
 | `python check_repair_weekly_totals.py` | `repair_weekly_totals` restores exactly what a mid-week Redis wipe took |
-| `python check_s2biomes_endpoints.py` | The S2Biomes endpoints (`/api/s2biomes/spawns`, `/weather`, `/days`) return exactly the stored rows: paging, since/until windows, weather, refusals; spawnpoint geography from the webhook (first sighting, unchanged re-send, change row) and `/geography`, `/geography_changes` |
+| `python check_s2biomes_endpoints.py` | The S2Biomes endpoints (`/api/s2biomes/spawns`, `/weather`, `/days`) return exactly the stored rows: paging, since/until windows, weather, refusals; cell geography from the webhook (several spawnpoints of one S2 level-16 cell in one row, first sighting, unchanged re-send, change row), `/geography`, `/geography_changes`, and the migration carrying per-spawnpoint geography over to cells |
 
 > The `check_*` scripts use Redis databases 2–3 and scratch tables of the test stack only. Run every script from `test/`: it keeps your own `.env` from redirecting them anywhere else.
 
@@ -263,7 +263,8 @@ Controls which event types are persisted to MySQL long-term storage.
 | `store_sql_quest_aggregation` | `true` | Write quest events to SQL |
 | `store_sql_invasion_aggregation` | `true` | Write invasion events to SQL |
 | `store_sql_weather` | `true` | Write Golbat `weather` webhooks (one row per S2 cell weather change) to `weather_daily_events`. Golbat must send the `weather` webhook type |
-| `store_sql_spawnpoints` | `true` | Write the `spawnpoints` table: coordinates from Pokemon IV events and the game geography Golbat sends on encounters (`geography`: landform, moisture, landcover, temperature, features bitmask, park status, settlement; changes logged in `spawnpoint_geography_changes`), exported by `/api/s2biomes/geography` and `/geography_changes`. Off: nothing writes `spawnpoints` and the Pokemon heatmap takes coordinates from the spawnpoint id (S2 level-20 cell centre) |
+| `store_sql_spawnpoints` | `true` | Write the `spawnpoints` table (coordinates from Pokemon IV events). Off: nothing writes `spawnpoints` and the Pokemon heatmap takes coordinates from the spawnpoint id (S2 level-20 cell centre) |
+| `store_sql_geography` | `true` | Write the game geography Golbat sends on encounters (`geography`: landform, moisture, landcover, temperature, features bitmask, park status, settlement) to `cell_geography`, one row per S2 level-16 cell (every spawnpoint of a cell has the same geography); changes logged in `cell_geography_changes`. Exported by `/api/s2biomes/geography` and `/geography_changes` |
 
 ### `CLEAN_SQL`
 Retention for partitioned SQL tables. Old daily/monthly partitions are automatically dropped.

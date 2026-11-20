@@ -30,7 +30,7 @@ ORPHAN_MIN_AGE_S = 900
 # first-seen data such as spawnpoint coordinates (merged keeping existing values).
 COUNTER_HASHES = {"buffer:agg_shiny_rates_hash"}
 # Buffers whose hash values end in "|<epoch>" and hold the latest state (merged keeping the newer value).
-LATEST_WINS_HASHES = {"buffer:spawnpoint_geography"}
+LATEST_WINS_HASHES = {"buffer:cell_geography"}
 
 # buffer:<name>:<tag>[:<epoch>:<pid>:<rand>]
 _TEMP_RE = re.compile(r"^(?P<live>buffer:[^:]+):(?P<tag>force_flushing|flushing)(?::(?P<epoch>\d+):\d+:[0-9a-f]+)?$")

@@ -320,8 +320,8 @@ async def lifespan(app: FastAPI):
                     AppConfig.store_sql_weather and AppConfig.weather_golbat_sync_minutes > 0
                     and bool(AppConfig.golbat_db_name),
                     weather_golbat_sync.start, weather_golbat_sync.stop),
-            # Spawnpoint game geography (spawnpoints table)
-            Service("flusher:spawnpoint_geography", AppConfig.store_sql_spawnpoints,
+            # Game geography per S2 level-16 cell (cell_geography table)
+            Service("flusher:cell_geography", AppConfig.store_sql_geography,
                     geography_buffer_flusher.start, geography_buffer_flusher.stop),
             # Batches stranded by failed flushes
             Service("buffers:orphan_sweeper", True, orphan_sweeper.start, orphan_sweeper.stop),

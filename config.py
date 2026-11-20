@@ -80,8 +80,10 @@ store_sql_raid_aggregation = str(config.get('SQL', {}).get('store_sql_raid_aggre
 store_sql_quest_aggregation = str(config.get('SQL', {}).get('store_sql_quest_aggregation', True)).upper() == "TRUE"
 store_sql_invasion_aggregation = str(config.get('SQL', {}).get('store_sql_invasion_aggregation', True)).upper() == "TRUE"
 store_sql_weather = str(config.get('SQL', {}).get('store_sql_weather', True)).upper() == "TRUE"
-# Gates every write to the spawnpoints table: coords from IV events and the game geography
+# Gates every write to the spawnpoints table (coords from IV events)
 store_sql_spawnpoints = str(config.get('SQL', {}).get('store_sql_spawnpoints', True)).upper() == "TRUE"
+# Game geography per S2 level-16 cell (cell_geography): parse, buffer and flush
+store_sql_geography = str(config.get('SQL', {}).get('store_sql_geography', True)).upper() == "TRUE"
 
 # Clean SQL Settings
 clean_pokemon_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_older_than_x_days", 15))
