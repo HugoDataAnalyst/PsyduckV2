@@ -137,6 +137,7 @@ class Feeder:
                 "move_1": 200, "move_2": 100, "weight": 10.0, "height": 1.0,
                 "size": self.rng.randint(1, 5), "shiny": self.rng.random() < 0.02,
                 "pvp": self._pvp(),
+                "geography": self.geography(),
             })
         else:
             msg.update({
@@ -145,6 +146,13 @@ class Feeder:
                 "weight": None, "height": None, "size": None, "shiny": None, "pvp": None,
             })
         return msg
+
+    def geography(self) -> dict:
+        """Game geography as Golbat sends it on encounters (enum numbers; features = VistaFeature list)."""
+        return {"landform": self.rng.randint(0, 4), "moisture": self.rng.randint(0, 3),
+                "landcover": self.rng.randint(0, 8), "temperature": self.rng.randint(0, 6),
+                "features": sorted(self.rng.sample(range(1, 7), self.rng.randint(0, 3))),
+                "park_status": self.rng.randint(0, 2), "settlement": self.rng.randint(0, 2)}
 
     def _pvp(self):
         if self.rng.random() > 0.3:

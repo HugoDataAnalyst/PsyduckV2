@@ -4,7 +4,8 @@
         "store_sql_pokemon_shiny": true,
         "store_sql_raid_aggregation": true,
         "store_sql_quest_aggregation": true,
-        "store_sql_invasion_aggregation": true
+        "store_sql_invasion_aggregation": true,
+        "store_sql_spawnpoints": true
     },
     "CLEAN_SQL": {
         "clean_pokemon_older_than_x_days": 30,
@@ -43,7 +44,8 @@
         "pokemon_flush_interval": 5,
         "raid_flush_interval": 5,
         "invasion_flush_interval": 5,
-        "quest_flush_interval": 5
+        "quest_flush_interval": 5,
+        "geography_flush_interval": 5
     },
     "geofences": {
         "expire_cache_seconds": 3600,
