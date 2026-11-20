@@ -5,7 +5,8 @@
         "store_sql_raid_aggregation": true,
         "store_sql_quest_aggregation": true,
         "store_sql_invasion_aggregation": true,
-        "store_sql_spawnpoints": true
+        "store_sql_spawnpoints": true,
+        "store_sql_geography": true
     },
     "CLEAN_SQL": {
         "clean_pokemon_older_than_x_days": 30,
