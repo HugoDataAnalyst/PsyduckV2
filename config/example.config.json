@@ -42,6 +42,11 @@
         "abort_on_disconnect": true,
         "health_log_interval_seconds": 60
     },
+    "HEALTH": {
+        "webhook_stale_seconds": 300,
+        "check_timeout_seconds": 2,
+        "flush_stale_multiplier": 3
+    },
     "flusher": {
         "pokemon_max_threshold": 10000,
         "shiny_max_threshold": 10000,

@@ -22,6 +22,7 @@ ALLOWED_PATHS = [
     "/static/psyduck.webp",
     "/static/psyduck-flex.gif",
     "/webhook",
+    "/health",
     "/docs", # Allow default docs FastAPI page
     "/api/redis/get_cached_pokestops",
     "/api/redis/get_cached_geofences",

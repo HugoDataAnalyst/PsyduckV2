@@ -201,6 +201,15 @@ webhook_max_rss_mb = int(config.get("WEBHOOK", {}).get("max_rss_mb", 0))
 webhook_abort_on_disconnect = str(config.get("WEBHOOK", {}).get("abort_on_disconnect", True)).upper() == "TRUE"
 health_log_interval_seconds = int(config.get("WEBHOOK", {}).get("health_log_interval_seconds", 60))
 
+# /health endpoint
+#   webhook_stale_seconds: no webhook for this long -> "degraded" (0 = check off)
+#   check_timeout_seconds: per dependency check (MySQL, Redis)
+#   flush_stale_multiplier: a buffer not flushed for this many flush intervals
+#     (at least 5 minutes) -> "degraded"
+health_webhook_stale_seconds = int(config.get("HEALTH", {}).get("webhook_stale_seconds", 300))
+health_check_timeout_seconds = float(config.get("HEALTH", {}).get("check_timeout_seconds", 2))
+health_flush_stale_multiplier = float(config.get("HEALTH", {}).get("flush_stale_multiplier", 3))
+
 
 # Koji
 koji_bearer_token = get_env_var("KOJI_TOKEN")
