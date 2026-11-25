@@ -5,7 +5,7 @@ import orjson
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from utils.logger import logger
-from utils.runtime_health import ingest, overload_reason, RateLimitedWarning
+from utils.runtime_health import ingest, overload_reason, RateLimitedWarning, mark_webhook
 from utils.koji_geofences import KojiGeofences
 from utils.global_state_manager import GlobalStateManager
 from webhook.filter_data import WebhookFilter
@@ -143,6 +143,7 @@ async def receive_webhook(request: Request):
     the status code, so a shed batch is dropped, never retried.
     """
     reason = overload_reason()
+    mark_webhook(accepted=not reason)
     if reason:
         body = await request.body()
         shed = max(1, body.count(b'"message"'))

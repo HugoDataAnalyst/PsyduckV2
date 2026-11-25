@@ -20,6 +20,9 @@ from utils.logger import logger
 class IngestStats:
     def __init__(self):
         self.inflight_events = 0
+        # Epoch of the last webhook POST this worker received / accepted (not shed)
+        self.last_received: float | None = None
+        self.last_accepted: float | None = None
         self._reset_interval()
 
     def _reset_interval(self):
@@ -62,6 +65,46 @@ class IngestStats:
 
 
 ingest = IngestStats()
+STARTED_AT = time.time()
+
+# Hash with the epoch of the last webhook received / accepted by any worker,
+# read by /health (a request lands on any worker, so per-worker state is not enough)
+LAST_WEBHOOK_KEY = "psyduckv2:health:last_webhook"
+_marked = {"received": 0.0, "accepted": 0.0}
+_mark_task: asyncio.Task | None = None
+
+
+def mark_webhook(accepted: bool) -> None:
+    """
+    Record a webhook POST. Writes to Redis at most once a second per worker, in
+    the background, so a slow Redis never delays the POST (or the shed path).
+    """
+    global _mark_task
+    now = time.time()
+    ingest.last_received = now
+    if accepted:
+        ingest.last_accepted = now
+    fields = {}
+    if now - _marked["received"] >= 1:
+        fields["received"] = int(now)
+    if accepted and now - _marked["accepted"] >= 1:
+        fields["accepted"] = int(now)
+    if not fields or (_mark_task is not None and not _mark_task.done()):
+        return
+    from my_redis.connect_redis import RedisManager
+    client = RedisManager().redis_client
+    if client is None:
+        return
+    _marked.update({k: now for k in fields})
+    _mark_task = asyncio.create_task(_write_mark(client, fields))
+
+
+async def _write_mark(client, fields: dict) -> None:
+    try:
+        await client.hset(LAST_WEBHOOK_KEY, mapping=fields)
+    except Exception as e:
+        # /health falls back to this worker's in-memory times; ingest must not fail over it
+        logger.debug(f"Could not record the last webhook time: {e}")
 
 try:
     _PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")

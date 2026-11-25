@@ -174,6 +174,7 @@ class PokemonIVRedisBuffer:
             )
             if not data_batch:
                 await flush_guard.discard(client, main_temp, coords_temp)
+                await flush_guard.mark_flushed(client, cls.redis_key)
                 return 0
             inserted_count = await PokemonSQLProcessor.bulk_insert_iv_daily_events(data_batch)
         except Exception as e:
@@ -183,6 +184,7 @@ class PokemonIVRedisBuffer:
             return 0
 
         await flush_guard.discard(client, main_temp, coords_temp)
+        await flush_guard.mark_flushed(client, cls.redis_key)
         logger.success(f"📬 {label} inserted +{inserted_count} rows into MySQL.")
         return inserted_count
 
@@ -299,6 +301,7 @@ class ShinyRateRedisBuffer:
             logger.info(f"📤 {label}: keys={len(aggregated_data)}, batch={len(data_batch)}, malformed={malformed}")
             if not data_batch:
                 await flush_guard.discard(client, temp_key)
+                await flush_guard.mark_flushed(client, cls.redis_key)
                 return 0
             inserted_count = await PokemonSQLProcessor.bulk_upsert_shiny_username_rate_batch(data_batch)
         except FlushError as e:
@@ -325,6 +328,7 @@ class ShinyRateRedisBuffer:
             return 0
 
         await flush_guard.discard(client, temp_key)
+        await flush_guard.mark_flushed(client, cls.redis_key)
         logger.success(f"✨ {label} upserted +{inserted_count} rows into MySQL.")
         return inserted_count
 

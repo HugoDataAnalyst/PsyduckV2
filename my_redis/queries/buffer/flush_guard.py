@@ -32,6 +32,9 @@ COUNTER_HASHES = {"buffer:agg_shiny_rates_hash"}
 # Buffers whose hash values end in "|<epoch>" and hold the latest state (merged keeping the newer value).
 LATEST_WINS_HASHES = {"buffer:cell_geography"}
 
+# live buffer key -> epoch of its last successful (or empty) flush, read by /health
+FLUSH_OK_KEY = "psyduckv2:health:flush"
+
 # buffer:<name>:<tag>[:<epoch>:<pid>:<rand>]
 _TEMP_RE = re.compile(r"^(?P<live>buffer:[^:]+):(?P<tag>force_flushing|flushing)(?::(?P<epoch>\d+):\d+:[0-9a-f]+)?$")
 
@@ -109,6 +112,10 @@ return 1
 """
 
 
+async def mark_flushed(client, live_key: str) -> None:
+    await client.hset(FLUSH_OK_KEY, live_key, int(time.time()))
+
+
 def new_temp_key(live_key: str, tag: str = "flushing") -> str:
     return f"{live_key}:{tag}:{int(time.time())}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 
@@ -123,6 +130,7 @@ async def claim(client, live_key: str, tag: str = "flushing") -> str | None:
         await client.rename(live_key, temp_key)
     except Exception as e:
         if "no such key" in str(e).lower():
+            await mark_flushed(client, live_key)   # nothing pending counts as flushed
             return None
         raise
     return temp_key
@@ -199,6 +207,7 @@ async def flush_list_buffer(client, live_key: str, tag: str, parse, write, label
         rows = await parse(client, temp_key)
         if not rows:
             await discard(client, temp_key)   # nothing usable: every line was malformed
+            await mark_flushed(client, live_key)
             return 0
         inserted = await write(rows)
     except Exception as e:
@@ -206,6 +215,7 @@ async def flush_list_buffer(client, live_key: str, tag: str, parse, write, label
         await requeue(client, temp_key, live_key)
         return 0
     await discard(client, temp_key)
+    await mark_flushed(client, live_key)
     return inserted
 
 
