@@ -177,6 +177,7 @@ Each run reports the app's CPU per 1,000 messages, POST latency (p50/p95/max) an
 | `python check_incremental_backup.py` | Incremental Redis → MySQL backups leave MySQL identical to Redis, across time zones (stops the test app while it runs) |
 | `python check_reencode_hashes.py` | `reencode_hashes` shrinks closed counter hashes without changing a value |
 | `python check_repair_weekly_totals.py` | `repair_weekly_totals` restores exactly what a mid-week Redis wipe took |
+| `python check_health.py` | `/health` answers ok / degraded / down (stale webhooks, shedding, a stuck buffer, Redis stopped) with the right HTTP code, and the app container reports healthy |
 | `python check_s2biomes_endpoints.py` | The S2Biomes endpoints (`/api/s2biomes/spawns`, `/weather`, `/days`) return exactly the stored rows: paging, since/until windows, weather, refusals; cell geography from the webhook (several spawnpoints of one S2 level-16 cell in one row, first sighting, unchanged re-send, change row), `/geography`, `/geography_changes`, and the migration carrying per-spawnpoint geography over to cells |
 
 > The `check_*` scripts use Redis databases 2–3 and scratch tables of the test stack only. Run every script from `test/`: it keeps your own `.env` from redirecting them anywhere else.
@@ -321,6 +322,15 @@ Protects the webhook receiver when it falls behind. Limits apply per uvicorn wor
 | `abort_on_disconnect` | `true` | Stop processing a batch whose sender has hung up |
 | `health_log_interval_seconds` | `60` | How often the `🩺 ingest` line is logged (in-flight events, accepted/shed/aborted, event-loop lag, memory). It is a WARNING when anything was shed or the app lagged |
 
+### `HEALTH`
+Thresholds of the `/health` endpoint (see [Health checks](#health-checks)).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `webhook_stale_seconds` | `300` | No webhook received (or every batch shed) for this long -> `degraded`. Lower it for a busy feed, raise it for a quiet one. `0` = off |
+| `check_timeout_seconds` | `2` | Time limit of each MySQL / Redis check, so a hung dependency cannot hang `/health` |
+| `flush_stale_multiplier` | `3` | A buffer not flushed to MySQL for this many of its `*_flush_interval` (at least 5 minutes) -> `degraded` |
+
 ### `weather`
 Weather sync from Golbat's own `weather` table (needs the `GOLBAT_DB_*` connection). Golbat only sends a weather webhook when a cell's weather changes, so without it a cell has no data until its first change, and changes missed while PsyduckV2 was down are lost. Each pass writes a row for every cell overlapping an area that has none yet, or whose stored weather differs from Golbat's, timed at the start of the hour Golbat last read the cell (weather only changes on the hour).
 
@@ -378,6 +388,37 @@ How long Redis keeps daily counter keys (one key per day per area, aggregated fr
 | Key | Default | Description |
 |-----|---------|-------------|
 | `cleanup_interval_seconds` | `1800` | How often the background task scans and removes expired Redis keys |
+
+## Health checks
+
+`GET /health` on the app (same port as the webhook):
+
+| Status | When | HTTP |
+|--------|------|------|
+| `ok` | everything fine | 200 |
+| `degraded` | no webhook for `webhook_stale_seconds` (or every batch shed), no leader, or a buffer not flushing to MySQL | 200, or 503 with `?strict=true` (for uptime monitors that should alert on it) |
+| `down` | MySQL or Redis/Dragonfly unreachable | 503 |
+
+```json
+{
+  "status": "ok",
+  "checked_at": 1764072000,
+  "checks": {
+    "mysql":    {"ok": true, "latency_ms": 1.2},
+    "redis":    {"ok": true, "latency_ms": 0.4, "server": "redis 7.4.1"},
+    "webhook":  {"ok": true, "last_received_s_ago": 0, "last_accepted_s_ago": 0, "stale_after_s": 300, "source": "redis"},
+    "leader":   {"ok": true, "held_by": "psyduckv2:1234"},
+    "flushers": {"ok": true, "buffers": {"pokemon_iv": {"ok": true, "last_flush_s_ago": 12, "stale_after_s": 300}}}
+  },
+  "worker": {"pid": 1234, "uptime_s": 86400, "inflight_events": 120, "rss_mb": 610}
+}
+```
+
+- Protected like the data API: `ALLOWED_IPS`, the secret header and the bearer token, each when set. Loopback always passes the IP check, so the Docker healthcheck inside the container works.
+- With no auth configured at all, only `{"status": ...}` is returned: an open instance does not expose its internals.
+- A stale webhook is `degraded`, not `down`: a Golbat outage should alert you, not make Docker restart PsyduckV2.
+- The dashboard has its own `GET /health`: `{"status": "ok", "api_last_ok_s_ago": 42}`, with the time since a background task last got data from the API.
+- `example.docker-compose.yml` wires both into Docker healthchecks through `python healthcheck.py` (app) and `python healthcheck.py dashboard`, which send the auth from `.env`. The dashboard waits for a healthy app before starting.
 
 ## API Documentation
 
