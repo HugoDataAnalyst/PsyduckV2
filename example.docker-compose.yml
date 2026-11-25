@@ -18,13 +18,21 @@ services:
     #  - "${WEB_PORT}:${WEB_PORT}"
     volumes:
       - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # migrations and the Redis restore from MySQL run before the app listens
+      start_period: 300s
 
   psyduckv2_dashboard:
     container_name: psyduckv2_dashboard
     build: .
     restart: always
     depends_on:
-      - psyduckv2_app
+      psyduckv2_app:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -37,6 +45,13 @@ services:
     volumes:
       - ./data:/app/data
       - ./dashboard/data:/app/dashboard/data
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py", "dashboard"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # first start downloads the icon cache before serving
+      start_period: 600s
 
   psyduckv2_db:
     container_name: psyduckv2_db
