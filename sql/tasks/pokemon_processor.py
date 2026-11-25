@@ -2,6 +2,7 @@ import asyncio
 import random
 import aiomysql
 from datetime import datetime
+import config as AppConfig
 from utils.logger import logger
 from utils.safe_values import _to_int, _form_str, _username_str
 from sql.connect_db import transaction
@@ -60,7 +61,7 @@ class PokemonSQLProcessor:
     @classmethod
     async def bulk_insert_iv_daily_events(cls, data_batch: list[dict], max_retries: int = 8) -> int:
         """
-        INSERT IGNORE rows into pokemon_iv_daily_events and keep spawnpoints fresh.
+        INSERT IGNORE rows into pokemon_iv_daily_events and keep spawnpoints fresh (when store_sql_spawnpoints).
         """
         rows = []
         for d in data_batch:
@@ -107,31 +108,33 @@ class PokemonSQLProcessor:
                         await cur.execute(f"INSERT INTO tmp_ivd VALUES {values}", flat)
 
                     # 3) spawnpoints (insert new + update changed coords)
-                    await cur.execute("""
-                        INSERT IGNORE INTO spawnpoints (spawnpoint, latitude, longitude)
-                        SELECT t.spawnpoint, t.latitude, t.longitude
-                        FROM tmp_ivd t
-                        WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
-                        GROUP BY t.spawnpoint
-                    """)
-                    new_sp = cur.rowcount
+                    new_sp = upd_sp = 0
+                    if AppConfig.store_sql_spawnpoints:
+                        await cur.execute("""
+                            INSERT IGNORE INTO spawnpoints (spawnpoint, latitude, longitude)
+                            SELECT t.spawnpoint, t.latitude, t.longitude
+                            FROM tmp_ivd t
+                            WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
+                            GROUP BY t.spawnpoint
+                        """)
+                        new_sp = cur.rowcount
 
-                    await cur.execute("""
-                        UPDATE spawnpoints sp
-                        JOIN (
-                          SELECT t.spawnpoint,
-                                 t.latitude  AS latitude,
-                                 t.longitude AS longitude
-                          FROM tmp_ivd t
-                          WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
-                          GROUP BY t.spawnpoint
-                        ) x ON x.spawnpoint = sp.spawnpoint
-                        SET sp.latitude  = x.latitude,
-                            sp.longitude = x.longitude
-                        WHERE (sp.latitude IS NULL OR sp.longitude IS NULL)
-                           OR (sp.latitude <> x.latitude OR sp.longitude <> x.longitude)
-                    """)
-                    upd_sp = cur.rowcount
+                        await cur.execute("""
+                            UPDATE spawnpoints sp
+                            JOIN (
+                              SELECT t.spawnpoint,
+                                     t.latitude  AS latitude,
+                                     t.longitude AS longitude
+                              FROM tmp_ivd t
+                              WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
+                              GROUP BY t.spawnpoint
+                            ) x ON x.spawnpoint = sp.spawnpoint
+                            SET sp.latitude  = x.latitude,
+                                sp.longitude = x.longitude
+                            WHERE (sp.latitude IS NULL OR sp.longitude IS NULL)
+                               OR (sp.latitude <> x.latitude OR sp.longitude <> x.longitude)
+                        """)
+                        upd_sp = cur.rowcount
 
                     # 4) final insert (dedupe on PK (day_date, spawnpoint, seen_at))
                     await cur.execute("""

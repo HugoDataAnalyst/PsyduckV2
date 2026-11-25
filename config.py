@@ -80,6 +80,10 @@ store_sql_raid_aggregation = str(config.get('SQL', {}).get('store_sql_raid_aggre
 store_sql_quest_aggregation = str(config.get('SQL', {}).get('store_sql_quest_aggregation', True)).upper() == "TRUE"
 store_sql_invasion_aggregation = str(config.get('SQL', {}).get('store_sql_invasion_aggregation', True)).upper() == "TRUE"
 store_sql_weather = str(config.get('SQL', {}).get('store_sql_weather', True)).upper() == "TRUE"
+# Gates every write to the spawnpoints table (coords from IV events)
+store_sql_spawnpoints = str(config.get('SQL', {}).get('store_sql_spawnpoints', True)).upper() == "TRUE"
+# Game geography per S2 level-16 cell (cell_geography): parse, buffer and flush
+store_sql_geography = str(config.get('SQL', {}).get('store_sql_geography', True)).upper() == "TRUE"
 
 # Clean SQL Settings
 clean_pokemon_older_than_x_days = int(config.get('CLEAN_SQL', {}).get("clean_pokemon_older_than_x_days", 15))
@@ -115,6 +119,7 @@ quest_flush_interval = config.get("flusher", {}).get("quest_flush_interval", 60)
 raid_flush_interval = config.get("flusher", {}).get("raid_flush_interval", 60)
 invasion_flush_interval = config.get("flusher", {}).get("invasion_flush_interval", 60)
 weather_flush_interval = config.get("flusher", {}).get("weather_flush_interval", 60)
+geography_flush_interval = config.get("flusher", {}).get("geography_flush_interval", 300)
 # Weather sync from Golbat's weather table (seeds cells, recovers missed changes). 0 minutes = off
 weather_golbat_sync_minutes = int(config.get("weather", {}).get("golbat_sync_minutes", 15))
 weather_golbat_sync_max_age_hours = float(config.get("weather", {}).get("golbat_sync_max_age_hours", 2))

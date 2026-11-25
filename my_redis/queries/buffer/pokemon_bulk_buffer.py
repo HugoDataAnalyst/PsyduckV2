@@ -94,7 +94,7 @@ class PokemonIVRedisBuffer:
         if entry is None:
             return False
         line, spawnpoint, coords = entry
-        if coords:
+        if coords and AppConfig.store_sql_spawnpoints:
             pipe.hsetnx(cls.redis_coords_key, spawnpoint, coords)
         pipe.rpush(cls.redis_key, line)
         return True

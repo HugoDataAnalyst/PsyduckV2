@@ -5,7 +5,9 @@
         "store_sql_raid_aggregation": true,
         "store_sql_quest_aggregation": true,
         "store_sql_invasion_aggregation": true,
-        "store_sql_weather": true
+        "store_sql_weather": true,
+        "store_sql_spawnpoints": true,
+        "store_sql_geography": true
     },
     "CLEAN_SQL": {
         "clean_pokemon_older_than_x_days": 15,
@@ -51,7 +53,8 @@
         "raid_flush_interval": 15,
         "invasion_flush_interval": 15,
         "quest_flush_interval": 15,
-        "weather_flush_interval": 60
+        "weather_flush_interval": 60,
+        "geography_flush_interval": 300
     },
     "weather": {
         "golbat_sync_minutes": 15,

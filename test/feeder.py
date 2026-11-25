@@ -101,13 +101,19 @@ class Feeder:
         # run id + sequence keeps spawnpoints / forts unique across a run
         return f"{self._run_id}{self._next():0{width - 6}x}"
 
+    def _spawnpoint_id(self) -> str:
+        # Shaped like a real one (an S2 level-20 cell id >> 20: 3 face bits, position, lsb set; 11 hex digits),
+        # unique across a run; 128 consecutive ids share a level-16 cell
+        run = int(self._run_id, 16)
+        return f"{((run % 6) << 41) | ((run & 0x7FFFF) << 22) | ((self._next() & 0x1FFFFF) << 1) | 1:011x}"
+
     def pokemon(self, seen_type: str = "encounter") -> dict:
         now = int(time.time())
         lat, lon, _ = random_point(self.rng)
         first_seen = now - self.rng.randint(0, 300)
         lifetime = self.rng.randint(600, 3400)
         msg = {
-            "spawnpoint_id": self._hex_id(),
+            "spawnpoint_id": self._spawnpoint_id(),
             "pokestop_id": "None",
             "pokestop_name": None,
             "encounter_id": str(self.rng.getrandbits(63) | (1 << 62)),
@@ -130,6 +136,7 @@ class Feeder:
             "capture_1": 0, "capture_2": 0, "capture_3": 0,
         }
         if seen_type in ("encounter", "lure_encounter", "tappable_encounter", "tappable_lure_encounter"):
+            geography = self.geography(msg["spawnpoint_id"])
             atk, dfn, sta = (self.rng.randint(0, 15) for _ in range(3))
             msg.update({
                 "individual_attack": atk, "individual_defense": dfn, "individual_stamina": sta,
@@ -137,6 +144,7 @@ class Feeder:
                 "move_1": 200, "move_2": 100, "weight": 10.0, "height": 1.0,
                 "size": self.rng.randint(1, 5), "shiny": self.rng.random() < 0.02,
                 "pvp": self._pvp(),
+                "geography": geography,
             })
         else:
             msg.update({
@@ -145,6 +153,16 @@ class Feeder:
                 "weight": None, "height": None, "size": None, "shiny": None, "pvp": None,
             })
         return msg
+
+    @staticmethod
+    def geography(spawnpoint_id: str) -> dict:
+        """Game geography as Golbat sends it on encounters (enum numbers; features = VistaFeature list), the
+        same for every spawnpoint of an S2 level-16 cell as in the game: spawnpoint bits 9+ name the cell."""
+        rng = random.Random(int(spawnpoint_id, 16) >> 9)
+        return {"landform": rng.randint(0, 4), "moisture": rng.randint(0, 3),
+                "landcover": rng.randint(0, 8), "temperature": rng.randint(0, 6),
+                "features": sorted(rng.sample(range(1, 7), rng.randint(0, 3))),
+                "park_status": rng.randint(0, 2), "settlement": rng.randint(0, 2)}
 
     def _pvp(self):
         if self.rng.random() > 0.3:

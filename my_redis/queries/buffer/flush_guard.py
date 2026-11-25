@@ -29,6 +29,8 @@ ORPHAN_MIN_AGE_S = 900
 # Buffers whose hash values are counts (merged by adding). Other hashes hold
 # first-seen data such as spawnpoint coordinates (merged keeping existing values).
 COUNTER_HASHES = {"buffer:agg_shiny_rates_hash"}
+# Buffers whose hash values end in "|<epoch>" and hold the latest state (merged keeping the newer value).
+LATEST_WINS_HASHES = {"buffer:cell_geography"}
 
 # buffer:<name>:<tag>[:<epoch>:<pid>:<rand>]
 _TEMP_RE = re.compile(r"^(?P<live>buffer:[^:]+):(?P<tag>force_flushing|flushing)(?::(?P<epoch>\d+):\d+:[0-9a-f]+)?$")
@@ -85,6 +87,27 @@ redis.call('DEL', src)
 return 1
 """
 
+_MERGE_HASH_LATEST = """
+local src, dst = KEYS[1], KEYS[2]
+if redis.call('EXISTS', dst) == 0 then
+  if redis.call('EXISTS', src) == 1 then redis.call('RENAME', src, dst) end
+  return 1
+end
+local function epoch(v) return tonumber(string.match(v, '([^|]*)$')) or 0 end
+local cursor = '0'
+repeat
+  local res = redis.call('HSCAN', src, cursor, 'COUNT', 1000)
+  cursor = res[1]
+  local kv = res[2]
+  for i = 1, #kv, 2 do
+    local cur = redis.call('HGET', dst, kv[i])
+    if not cur or epoch(kv[i + 1]) > epoch(cur) then redis.call('HSET', dst, kv[i], kv[i + 1]) end
+  end
+until cursor == '0'
+redis.call('DEL', src)
+return 1
+"""
+
 
 def new_temp_key(live_key: str, tag: str = "flushing") -> str:
     return f"{live_key}:{tag}:{int(time.time())}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
@@ -110,7 +133,12 @@ async def requeue_list(client, temp_key: str, live_key: str) -> None:
 
 
 async def requeue_hash(client, temp_key: str, live_key: str) -> None:
-    script = _MERGE_HASH_INCR if live_key in COUNTER_HASHES else _MERGE_HASH_SETNX
+    if live_key in COUNTER_HASHES:
+        script = _MERGE_HASH_INCR
+    elif live_key in LATEST_WINS_HASHES:
+        script = _MERGE_HASH_LATEST
+    else:
+        script = _MERGE_HASH_SETNX
     await client.eval(script, 2, temp_key, live_key)
 
 
@@ -157,7 +185,7 @@ async def discard(client, *temp_keys: str | None) -> None:
 
 async def flush_list_buffer(client, live_key: str, tag: str, parse, write, label: str) -> int:
     """
-    Generic claim -> parse -> write -> delete for list buffers whose SQL write is
+    Generic claim -> parse -> write -> delete for list (or hash) buffers whose SQL write is
     idempotent (INSERT IGNORE / overwrite upserts), so retrying a whole batch is safe.
 
     parse(client, temp_key) -> list[dict]   rows to write (malformed lines dropped)
