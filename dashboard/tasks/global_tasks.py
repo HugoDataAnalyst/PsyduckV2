@@ -199,6 +199,7 @@ class BackgroundRunner:
         self._stop_event = threading.Event()
         self._thread = None
         self._last_run_times = {}  # {task_name: timestamp}
+        self.last_ok = None  # epoch of the last task that got data from the API (for /health)
 
     def _get_due_tasks(self, force_all=False):
         """
@@ -283,6 +284,7 @@ class BackgroundRunner:
 
                         # Update last run time on success
                         self._last_run_times[task_name] = time.time()
+                        self.last_ok = time.time()
                     else:
                         logger.info(f"[Task] {task_name} received no data.")
                         # Still update last run time to avoid hammering on failures
@@ -360,3 +362,7 @@ def start_background_tasks():
 
 def stop_background_tasks():
     _runner.stop()
+
+def last_api_ok():
+    """Epoch of the last successful API fetch, or None."""
+    return _runner.last_ok

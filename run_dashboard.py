@@ -1,11 +1,12 @@
 import sys
 import os
 import atexit
+import time
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from waitress import serve
 from utils.logger import setup_logging, logger
 from dashboard.app import app
-from dashboard.tasks.global_tasks import start_background_tasks, stop_background_tasks
+from dashboard.tasks.global_tasks import start_background_tasks, stop_background_tasks, last_api_ok
 from dashboard.utils import precache_pokemon_icons, precache_reward_icons
 import config as AppConfig
 
@@ -21,6 +22,13 @@ setup_logging(
         "show_function": True,
     },
 )
+
+@app.server.route("/health")
+def health():
+    """Up while Waitress serves. api_last_ok_s_ago: how long since a background fetch got data from the API."""
+    last = last_api_ok()
+    return {"status": "ok", "api_last_ok_s_ago": None if last is None else int(time.time() - last)}
+
 
 def start_dashboard():
     """
