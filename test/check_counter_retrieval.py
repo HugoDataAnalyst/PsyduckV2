@@ -9,12 +9,14 @@ with their 0/1 suffix - then, for each family x area x window, compares:
   old: KEYS pattern + filter_keys_by_time
   new: filtering_keys.find_time_keys (generated names + EXISTS, SCAN fallback)
 
-plus the pipelined aggregate_keys against a one-HGETALL-per-key reference, and
+plus the pipelined aggregate_keys (whole hashes and HSCAN MATCH filtered reads)
+against a one-HGETALL-per-key reference, and
 the Redis time each path spends (INFO commandstats).
 
   python test/check_counter_retrieval.py
 """
 import asyncio
+import fnmatch
 import os
 import random
 import sys
@@ -149,6 +151,31 @@ async def main() -> int:
         if await fk.aggregate_keys(keys, mode) != await old_aggregate(client, keys, mode):
             failures += 1
             print(f"MISMATCH aggregate_keys mode={mode}")
+
+    # HSCAN MATCH (filtered reads) returns exactly HGETALL + filter, on small
+    # (listpack) hashes and on hashes large enough for the hashtable encoding,
+    # where HSCAN has to follow its cursor.
+    big = [f"counter:pokemon_daily:{areas[0]}:big{i}" for i in range(2)]
+    async with client.pipeline(transaction=False) as pipe:
+        for k in big:
+            pipe.hset(k, mapping={f"{pid}:{form}:{m}": pid + form
+                                  for pid in range(1, 1001) for form in (0, 163) for m in ("total", "iv100", "shiny")})
+        await pipe.execute()
+    encodings = {await client.object("encoding", k) for k in big}
+    print(f"large test hashes encoded as {encodings}")
+    for parts in (({"7"}, None, None), ({"77"}, {"163"}, None), (None, None, {"iv100"}), ({"7"}, None, {"total"})):
+        match = fk.field_match(*parts)
+        for mode in ("sum", "grouped"):
+            checks += 1
+            ref = await old_aggregate(client, keys + big, mode)
+            if mode == "sum":
+                ref = {f: v for f, v in ref.items() if fnmatch.fnmatchcase(f, match)}
+            else:
+                ref = {k: {f: v for f, v in d.items() if fnmatch.fnmatchcase(f, match)} for k, d in ref.items()}
+            got = await fk.aggregate_keys(keys + big, mode, match)
+            if got != ref:
+                failures += 1
+                print(f"MISMATCH aggregate_keys match={match} mode={mode}")
 
     await client.flushdb()
     await db.execute("DELETE FROM area_names WHERE name = %s", (REMOVED_AREA,))
