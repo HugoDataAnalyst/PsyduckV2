@@ -67,10 +67,6 @@ def _norm_name(v: object) -> str:
     s = str(v).strip()
     # prevent delimiter breakage and overlong strings
     s = s.replace("|", "/")
-    try:
-        s = s.encode("ascii", "ignore").decode("ascii")
-    except Exception:
-        pass
     return s[:255]  # table limit
 
 def _to_int(v, default=0):
