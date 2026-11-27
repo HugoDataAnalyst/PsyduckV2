@@ -224,7 +224,7 @@ class ShinyRateRedisBuffer:
         required = {"username": username, "pokemon_id": pokemon_id, "area_id": area_id, "first_seen": first_seen}
         missing = [name for name, value in required.items() if value is None]
         if missing:
-            logger.warning(
+            logger.debug(
                 f"❌ Shiny event missing required fields {missing} "
                 f"(pokemon_id={pokemon_id}, encounter_id={event_data.get('encounter_id')}). Skipping."
             )
