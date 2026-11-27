@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 from typing import Optional
@@ -7,11 +8,14 @@ import re
 import time
 import pytz
 from server_fastapi import global_state
+import config as AppConfig
 
 redis_manager = RedisManager()
 
 _HGETALL_CHUNK = 500
 _HSCAN_COUNT = 1000
+# Created lazily inside the worker's event loop (see get_redis_semaphore in the webhook router)
+_read_slots: asyncio.Semaphore | None = None
 _GLOB_SPECIAL = re.compile(r"([\\*?\[\]])")
 
 
@@ -52,6 +56,16 @@ async def _hscan_chunk(client, keys: list, match: str) -> list[dict]:
 
 
 async def aggregate_keys(keys: list, mode: str, match: str | None = None) -> dict:
+    global _read_slots
+    if AppConfig.redis_max_concurrent_counter_reads <= 0:
+        return await _aggregate_keys(keys, mode, match)
+    if _read_slots is None:
+        _read_slots = asyncio.Semaphore(AppConfig.redis_max_concurrent_counter_reads)
+    async with _read_slots:
+        return await _aggregate_keys(keys, mode, match)
+
+
+async def _aggregate_keys(keys: list, mode: str, match: str | None = None) -> dict:
     """
     Aggregates hash data from a list of keys.
     For "sum" mode, sums all field values (assuming integer values).

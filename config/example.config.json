@@ -34,7 +34,8 @@
         "full_backup_interval_hours": 24
     },
     "REDIS": {
-        "redis_connections": 600
+        "redis_connections": 600,
+        "max_concurrent_counter_reads": 2
     },
     "WEBHOOK": {
         "max_inflight_events": 20000,

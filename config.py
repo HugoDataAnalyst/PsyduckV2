@@ -108,6 +108,9 @@ redis_db = get_env_int("REDIS_DB", 1)
 redis_url = f"redis://:{redis_encoded_password}@{redis_host}:{redis_server_port}/{redis_db}"
 # Redis max connections per pool
 redis_max_connections = int(config.get("REDIS", {}).get("redis_connections", 30))
+# Counter API reads that may run at once per worker; the rest wait their turn so
+# a burst of heavy (global, long-range) queries cannot starve webhook ingest. 0 = no cap
+redis_max_concurrent_counter_reads = int(config.get("REDIS", {}).get("max_concurrent_counter_reads", 2))
 
 # Flusher settings
 pokemon_max_threshold = config.get("flusher", {}).get("pokemon_max_threshold", 10000)

@@ -303,6 +303,7 @@ Controls Redis timeseries storage and the optional MySQL backup/restore feature.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `redis_connections` | `600` | Max Redis connection pool size. With multiple uvicorn workers set this to at least `UVICORN_WORKERS × (pool / 2) + 50`. |
+| `max_concurrent_counter_reads` | `2` | Counter API reads (`get_*_counterseries`) that may run at once per worker; the rest queue. Redis answers one command at a time, so a burst of heavy global queries would otherwise hold back webhook ingest. `0` = no cap |
 
 ### `flusher`
 Controls how buffered events are batch-inserted into MySQL.
