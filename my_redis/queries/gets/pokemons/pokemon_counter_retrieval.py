@@ -136,7 +136,8 @@ class PokemonCounterRetrieval(CounterTransformer):
         keys = await filtering_keys.find_time_keys(client, pattern, time_format, self.start, self.end)
         if not keys:
             return {"mode": self.mode, "data": {}}
-        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        raw_aggregated = await filtering_keys.aggregate_keys(
+            keys, self.mode, filtering_keys.field_match(self.pokemon_ids, self.forms, self.metrics))
         # Apply filtering by pokemon_id and form
         raw_aggregated = self._filter_aggregated_data(raw_aggregated)
         if self.mode in ["sum", "grouped"]:
@@ -172,7 +173,8 @@ class PokemonCounterRetrieval(CounterTransformer):
         if not keys:
             return {"mode": self.mode, "data": {}}
 
-        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        raw_aggregated = await filtering_keys.aggregate_keys(
+            keys, self.mode, filtering_keys.field_match(self.pokemon_ids, self.forms, self.metrics))
         raw_aggregated = self._filter_aggregated_data(raw_aggregated)
         final_data = self.transform_aggregated_totals(raw_aggregated, self.mode)
         return {"mode": self.mode, "data": final_data}
@@ -264,7 +266,8 @@ class PokemonCounterRetrieval(CounterTransformer):
         if not keys:
             return {"mode": self.mode, "data": {}}
 
-        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        raw_aggregated = await filtering_keys.aggregate_keys(
+            keys, self.mode, filtering_keys.field_match(self.pokemon_ids, self.forms, self.metrics))
         raw_aggregated = self._filter_aggregated_data(raw_aggregated)
         final_data = self.transform_aggregated_totals(raw_aggregated, self.mode)
         return {"mode": self.mode, "data": final_data}

@@ -11,13 +11,54 @@ from server_fastapi import global_state
 redis_manager = RedisManager()
 
 _HGETALL_CHUNK = 500
+_HSCAN_COUNT = 1000
+_GLOB_SPECIAL = re.compile(r"([\\*?\[\]])")
 
 
-async def aggregate_keys(keys: list, mode: str) -> dict:
+def field_match(*parts) -> str | None:
+    """
+    HSCAN MATCH glob for counter fields made of ":"-joined components, given in
+    order as a set of allowed values or None (any). Only single values narrow
+    the glob ("529:*" for pokemon 529, any form and metric); None when nothing
+    does, so the caller's plain HGETALL is used. Callers still filter in Python.
+    """
+    globs = [_GLOB_SPECIAL.sub(r"\\\1", next(iter(p))) if p and len(p) == 1 else "*" for p in parts]
+    if all(g == "*" for g in globs):
+        return None
+    # "529:*:*" -> "529:*" (a glob * also matches ":")
+    while len(globs) > 1 and globs[-1] == "*" and globs[-2] == "*":
+        globs.pop()
+    return ":".join(globs)
+
+
+async def _hscan_chunk(client, keys: list, match: str) -> list[dict]:
+    """
+    Matching fields of each key. Hashes in listpack encoding (all counter
+    hashes once hash-max-listpack-entries covers them) answer in one HSCAN call;
+    larger hashtable-encoded ones continue the cursor.
+    """
+    async with client.pipeline(transaction=False) as pipe:
+        for key in keys:
+            pipe.hscan(key, 0, match=match, count=_HSCAN_COUNT)
+        replies = await pipe.execute()
+    results = []
+    for key, (cursor, data) in zip(keys, replies):
+        data = dict(data)
+        while cursor:
+            cursor, more = await client.hscan(key, cursor, match=match, count=_HSCAN_COUNT)
+            data.update(more)
+        results.append(data)
+    return results
+
+
+async def aggregate_keys(keys: list, mode: str, match: str | None = None) -> dict:
     """
     Aggregates hash data from a list of keys.
     For "sum" mode, sums all field values (assuming integer values).
     For "grouped" mode, returns a dictionary mapping each key to its hash data.
+    match: HSCAN MATCH glob (see field_match) so Redis returns only the fields
+    asked for instead of whole hashes - a global query over thousands of large
+    hashes otherwise holds Redis, and every webhook behind it, for seconds.
     """
     client = await redis_manager.check_redis_connection()
     if not client:
@@ -28,10 +69,13 @@ async def aggregate_keys(keys: list, mode: str) -> dict:
     # Pipelined: one round trip per chunk instead of one per key
     for i in range(0, len(keys), _HGETALL_CHUNK):
         chunk = keys[i:i + _HGETALL_CHUNK]
-        async with client.pipeline(transaction=False) as pipe:
-            for key in chunk:
-                pipe.hgetall(key)
-            results = await pipe.execute()
+        if match:
+            results = await _hscan_chunk(client, chunk, match)
+        else:
+            async with client.pipeline(transaction=False) as pipe:
+                for key in chunk:
+                    pipe.hgetall(key)
+                results = await pipe.execute()
         for key, data in zip(chunk, results):
             if mode == "sum":
                 for field, value in data.items():

@@ -64,7 +64,8 @@ class MaxBattleCounterRetrieval:
         if not keys:
             return {"mode": self.mode, "data": {}}
 
-        grouped = await filtering_keys.aggregate_keys(keys, "grouped")
+        match = filtering_keys.field_match(self.pokemons, self.levels, self.forms, self.costumes, self.bread_modes, None)
+        grouped = await filtering_keys.aggregate_keys(keys, "grouped", match)
         if self.mode == "sum":
             merged = {}
             for fields in grouped.values():

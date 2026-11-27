@@ -49,6 +49,10 @@ class RaidCounterRetrieval(CounterTransformer):
                 flat[field] = flat.get(field, 0) + value
         return flat
 
+    def _field_match(self):
+        return filtering_keys.field_match(self.raid_pokemons, self.raid_levels, self.raid_forms, self.raid_costumes,
+                                          self.raid_is_exclusive, self.raid_ex_eligible, None)
+
     def _filter_aggregated_raids(self, raw_data: dict) -> dict:
         """
         Filters the aggregated raid data based on the raid filtering options.
@@ -94,7 +98,7 @@ class RaidCounterRetrieval(CounterTransformer):
         if not keys:
             return {"mode": self.mode, "data": {}}
 
-        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode, self._field_match())
         if self.mode == "grouped" and isinstance(next(iter(raw_aggregated.values()), None), dict):
             raw_aggregated = self._flatten_grouped(raw_aggregated)
 
@@ -128,7 +132,7 @@ class RaidCounterRetrieval(CounterTransformer):
         if not keys:
             return {"mode": self.mode, "data": {}}
 
-        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode, self._field_match())
         if self.mode == "grouped" and isinstance(next(iter(raw_aggregated.values()), None), dict):
             raw_aggregated = self._flatten_grouped(raw_aggregated)
 
@@ -162,7 +166,7 @@ class RaidCounterRetrieval(CounterTransformer):
         if not keys:
             return {"mode": self.mode, "data": {}}
 
-        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode)
+        raw_aggregated = await filtering_keys.aggregate_keys(keys, self.mode, self._field_match())
         logger.debug(f"Hourly raid 👹 raw aggregated data (mode={self.mode}): {type(raw_aggregated)}")
 
         if self.mode in ["sum", "grouped"]:
