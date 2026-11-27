@@ -107,7 +107,7 @@ class RaidSQLProcessor:
                           g.latitude  = x.latitude,
                           g.longitude = x.longitude
                         WHERE
-                          g.gym_name <> x.gym_name
+                          BINARY g.gym_name <> BINARY x.gym_name
                           OR g.latitude  <> x.latitude
                           OR g.longitude <> x.longitude
                     """)

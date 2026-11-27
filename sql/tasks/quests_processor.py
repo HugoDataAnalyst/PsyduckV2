@@ -163,7 +163,7 @@ class QuestSQLProcessor:
                         p.latitude      = x.latitude,
                         p.longitude     = x.longitude
                         WHERE
-                        p.pokestop_name <> x.pokestop_name
+                        BINARY p.pokestop_name <> BINARY x.pokestop_name
                         OR p.latitude  <> x.latitude
                         OR p.longitude <> x.longitude
                     """)
